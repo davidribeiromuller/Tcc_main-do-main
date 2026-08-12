@@ -1,0 +1,16 @@
+[
+  {
+    "id": 9901,
+    "uid": "fallback-admin-uid",
+    "nome": "Diretoria Helena Wysocki",
+    "email": "diretoria@helenawysocki.com",
+    "foto_perfil": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
+    "provider": "google",
+    "role": "Diretor",
+    "ativo": true,
+    "isAdmin": true,
+    "institution": "Escola estadual Helena Wysocki",
+    "createdAt": "2026-06-23T11:09:58.806Z",
+    "updatedAt": "2026-06-23T11:09:58.806Z"
+  }
+]

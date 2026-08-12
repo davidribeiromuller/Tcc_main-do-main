@@ -1,0 +1,6 @@
+{
+  "name": "School Events Portal",
+  "description": "Portal completo de eventos escolares com feed, agenda interactiva, controle de acesso administrativo e login seguro via Google OAuth.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
