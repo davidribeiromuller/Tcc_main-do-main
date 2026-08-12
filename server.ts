@@ -677,7 +677,7 @@ Estou à disposição para tirar qualquer dúvida geral sobre o Portal de Evento
         });
 
         const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
+          model: "gemini-2.5-flash",
           contents: contentsHistory,
           config: {
             systemInstruction: `Você é a "Assistente Helena", a assistente de Inteligência Artificial amigável e prestativa do Portal de Eventos da Escola Estadual Helena Wysocki.

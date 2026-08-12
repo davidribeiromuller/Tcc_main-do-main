@@ -36,6 +36,11 @@ export default function App() {
   const [feedSearchTerm, setFeedSearchTerm] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
 
+  // Set document title
+  useEffect(() => {
+    document.title = "Página eloEscola";
+  }, []);
+
   // Toast notification system
   const [toast, setToast] = useState<{ message: string; type: "error" | "success" | "warning" | "info" } | null>(null);
 

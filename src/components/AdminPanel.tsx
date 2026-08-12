@@ -119,7 +119,7 @@ export default function AdminPanel({
                   {/* Header info */}
                   <div className="flex justify-between items-start">
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center font-bold text-xs uppercase uppercase select-none">
+                      <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center font-bold text-xs uppercase select-none">
                         {u.foto_perfil ? (
                           <img src={u.foto_perfil} alt={u.nome} referrerPolicy="no-referrer" className="w-full h-full object-cover rounded-full" />
                         ) : (
@@ -128,7 +128,7 @@ export default function AdminPanel({
                       </div>
                       <div>
                         <h4 className="font-display font-semibold text-xs leading-none">
-                          {u.nome || " Hudson W."} {isMe && <span className="text-[9px] text-brand-accent">(Eu)</span>}
+                          {u.nome || "Usuário"} {isMe && <span className="text-[9px] text-brand-accent">(Eu)</span>}
                         </h4>
                         <span className="text-[9px] text-slate-400 font-mono inline-block mt-1">{u.email}</span>
                       </div>
