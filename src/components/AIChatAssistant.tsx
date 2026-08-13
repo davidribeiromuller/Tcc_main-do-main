@@ -64,36 +64,60 @@ export default function AIChatAssistant() {
           content: m.content,
         }));
 
-      const res = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: textToSend,
-          history,
-        }),
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || "Falha na comunicação com o servidor.");
+      let res: Response | null = null;
+      try {
+        res = await fetch("/api/ai/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            message: textToSend,
+            history,
+          }),
+        });
+      } catch (netErr) {
+        res = null;
       }
 
-      const data = await res.json();
+      if (res && res.ok) {
+        const data = await res.json();
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: data.reply || "Desculpe, não consegui gerar uma resposta.",
+            timestamp: new Date(),
+          },
+        ]);
+        return;
+      }
+
+      // Offline / Static fallback response for GitHub Pages
+      let localReply = "Olá! Estou operando no modo estático/local da **Escola Estadual Helena Wysocki**.\n\nVocê pode consultar a agenda de eventos no feed ou calendário, criar uma nova conta ou entrar com suas credenciais. Se precisar de suporte da diretoria, acesse a aba **Ajuda** no menu inferior.";
       
+      const lower = textToSend.toLowerCase();
+      if (lower.includes("evento") || lower.includes("feira") || lower.includes("agenda") || lower.includes("calendario")) {
+        localReply = "📅 **Agenda Escolar**:\nNossa escola conta com eventos incríveis como a **Feira de Ciências e Tecnologia**, o **Campeonato de Game Design** e **Workshops de Programação**. Confira a lista completa na aba **Feed** ou **Calendário**!";
+      } else if (lower.includes("login") || lower.includes("entrar") || lower.includes("senha") || lower.includes("cgm")) {
+        localReply = "🔑 **Acesso ao Portal**:\nPara entrar, informe seu e-mail institucional ou código CGM e sua senha na tela inicial. Caso não possua cadastro, clique em **Criar Conta**.";
+      } else if (lower.includes("contato") || lower.includes("diretor") || lower.includes("ajuda")) {
+        localReply = "✉️ **Suporte Escolar**:\nVocê pode enviar mensagens diretamente para a diretoria na aba **Ajuda / Contato**, ou mandar um e-mail para `diretoria@helenawysocki.com`.";
+      }
+
       setMessages((prev) => [
         ...prev,
         {
           id: (Date.now() + 1).toString(),
           role: "assistant",
-          content: data.reply || "Desculpe, não consegui gerar uma resposta.",
+          content: localReply,
           timestamp: new Date(),
         },
       ]);
     } catch (err: any) {
       console.error("Erro no chat com IA:", err);
-      setError(err.message || "Não foi possível conectar à Helena. Verifique sua conexão ou se a chave GEMINI_API_KEY está configurada.");
+      setError(err.message || "Não foi possível conectar à Helena.");
     } finally {
       setIsLoading(false);
     }

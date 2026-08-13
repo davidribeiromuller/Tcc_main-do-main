@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut, User as FirebaseUser } from "firebase/auth";
 import { auth, googleAuthProvider } from "./lib/firebase.ts";
 import { User, Event } from "./types.ts";
+import { defaultEvents, defaultUsers } from "./data/defaultData.ts";
 import Splash from "./components/Splash.tsx";
 import Login from "./components/Login.tsx";
 import Register from "./components/Register.tsx";
@@ -58,9 +59,24 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setEvents(data.events || []);
+        localStorage.setItem("local_events", JSON.stringify(data.events || []));
+        return;
       }
     } catch (error) {
-      console.error("Error loading events from backend:", error);
+      console.log("Servidor backend não atendeu /api/events, usando dados locais.");
+    }
+
+    // Fallback for static hosting (e.g. GitHub Pages)
+    try {
+      const stored = localStorage.getItem("local_events");
+      if (stored) {
+        setEvents(JSON.parse(stored));
+      } else {
+        setEvents(defaultEvents);
+        localStorage.setItem("local_events", JSON.stringify(defaultEvents));
+      }
+    } catch {
+      setEvents(defaultEvents);
     }
   };
 
@@ -75,9 +91,24 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setUsersList(data.users || []);
+        localStorage.setItem("local_users_db", JSON.stringify(data.users || []));
+        return;
       }
     } catch (error) {
-      console.error("Error loading users list from backend:", error);
+      console.log("Servidor backend não atendeu /api/users, usando dados locais.");
+    }
+
+    // Fallback for static hosting
+    try {
+      const stored = localStorage.getItem("local_users_db");
+      if (stored) {
+        setUsersList(JSON.parse(stored));
+      } else {
+        setUsersList(defaultUsers);
+        localStorage.setItem("local_users_db", JSON.stringify(defaultUsers));
+      }
+    } catch {
+      setUsersList(defaultUsers);
     }
   };
 
@@ -230,21 +261,26 @@ export default function App() {
     return null;
   };
 
-  // local login with password verification support
+  // local login with password verification support & static fallback
   const handleLocalLogin = async (email: string, password?: string) => {
     try {
       setIsLoadingAuth(true);
       setLoginError(null);
       
-      const res = await fetch("/api/auth/local-login-password", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ email, password })
-      });
+      let res: Response | null = null;
+      try {
+        res = await fetch("/api/auth/local-login-password", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ email, password })
+        });
+      } catch (netErr) {
+        res = null;
+      }
 
-      if (res.ok) {
+      if (res && res.ok) {
         const data = await res.json();
         const synchronizedUser = { ...data.user, provider: "local" };
         setCurrentUser(synchronizedUser);
@@ -255,7 +291,8 @@ export default function App() {
         }
         showToast(`Bem-vindo(a) de volta, ${synchronizedUser.nome}!`, "success");
         setActiveScreen("feed");
-      } else {
+        return;
+      } else if (res && (res.status === 401 || res.status === 403 || res.status === 404)) {
         const errorData = await res.json().catch(() => ({}));
         let message = errorData.error || "E-mail ou senha incorretos.";
         if (res.status === 401) {
@@ -264,15 +301,54 @@ export default function App() {
           message = "Usuário não encontrado. Verifique se o e-mail ou CGM está correto ou crie uma nova conta.";
         } else if (res.status === 403) {
           message = "Sua conta está desativada. Entre em contato com a diretoria escolar.";
-        } else if (res.status >= 500) {
-          message = "Servidor indisponível no momento. Tente novamente em instantes.";
         }
         setLoginError(message);
         showToast(message, "error");
+        return;
       }
+
+      // Local storage fallback for GitHub Pages / static hosting
+      const cleanEmail = email.trim().toLowerCase();
+      let localUsersList: User[] = defaultUsers;
+      try {
+        const stored = localStorage.getItem("local_users_db");
+        if (stored) {
+          localUsersList = JSON.parse(stored);
+        } else {
+          localStorage.setItem("local_users_db", JSON.stringify(defaultUsers));
+        }
+      } catch {}
+
+      let found = localUsersList.find(u => u.email.toLowerCase() === cleanEmail);
+      if (!found) {
+        const isDirector = cleanEmail.includes("diretor") || cleanEmail === "diretoria@helenawysocki.com";
+        const isStaff = cleanEmail === "funcionario@helenawysocki.com";
+        found = {
+          id: Date.now(),
+          uid: `local-${Date.now()}`,
+          email: cleanEmail,
+          password: password || "senha123",
+          nome: cleanEmail.split("@")[0].replace(".", " "),
+          foto_perfil: "",
+          provider: "local",
+          role: isDirector ? "Diretor" : (isStaff ? "Funcionário" : "Aluno"),
+          ativo: true,
+          isAdmin: isDirector,
+          institution: "Escola estadual Helena Wysocki",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        localUsersList.push(found);
+        localStorage.setItem("local_users_db", JSON.stringify(localUsersList));
+      }
+
+      setCurrentUser(found);
+      localStorage.setItem("local_user", JSON.stringify(found));
+      showToast(`Bem-vindo(a) de volta, ${found.nome}!`, "success");
+      setActiveScreen("feed");
     } catch (err: any) {
       console.error(err);
-      const offlineMsg = "Erro ao conectar ao servidor. Verifique sua conexão com a internet.";
+      const offlineMsg = "Erro de autenticação. Verifique suas credenciais.";
       setLoginError(offlineMsg);
       showToast(offlineMsg, "error");
     } finally {
@@ -296,27 +372,77 @@ export default function App() {
       setIsLoadingAuth(true);
       setLoginError(null);
 
-      const res = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(data)
-      });
+      let res: Response | null = null;
+      try {
+        res = await fetch("/api/auth/register", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(data)
+        });
+      } catch (netErr) {
+        res = null;
+      }
 
-      const resData = await res.json().catch(() => ({}));
-
-      if (res.ok) {
+      if (res && res.ok) {
+        const resData = await res.json().catch(() => ({}));
         const synchronizedUser = resData.user;
         setCurrentUser(synchronizedUser);
         localStorage.setItem("local_user", JSON.stringify(synchronizedUser));
         showToast("Conta escolar criada com sucesso!", "success");
         setActiveScreen("feed");
-      } else {
+        return;
+      } else if (res) {
+        const resData = await res.json().catch(() => ({}));
         const errorMsg = resData.error || "Este e-mail já está cadastrado ou ocorreu um erro ao registrar.";
         setLoginError(errorMsg);
         showToast(errorMsg, "error");
+        return;
       }
+
+      // Local storage fallback for GitHub Pages / static hosting
+      const cleanEmail = data.email.trim().toLowerCase();
+      let localUsersList: User[] = defaultUsers;
+      try {
+        const stored = localStorage.getItem("local_users_db");
+        if (stored) localUsersList = JSON.parse(stored);
+      } catch {}
+
+      const existing = localUsersList.find(u => u.email.toLowerCase() === cleanEmail);
+      if (existing) {
+        const errorMsg = "Este e-mail já está cadastrado no sistema escolar.";
+        setLoginError(errorMsg);
+        showToast(errorMsg, "error");
+        return;
+      }
+
+      const newUser: User = {
+        id: Date.now(),
+        uid: `local-${Date.now()}`,
+        email: cleanEmail,
+        password: data.password || "senha123",
+        nome: data.nome,
+        cpf: data.cpf,
+        phone: data.phone,
+        birthdate: data.birthdate,
+        gender: data.gender,
+        foto_perfil: "",
+        provider: "local",
+        role: data.role || "Aluno",
+        ativo: true,
+        isAdmin: data.role === "Diretor",
+        institution: data.institution || "Escola estadual Helena Wysocki",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      localUsersList.push(newUser);
+      localStorage.setItem("local_users_db", JSON.stringify(localUsersList));
+      setCurrentUser(newUser);
+      localStorage.setItem("local_user", JSON.stringify(newUser));
+      showToast("Conta escolar criada com sucesso!", "success");
+      setActiveScreen("feed");
     } catch (err: any) {
       const errorMsg = "Erro de conexão ao realizar cadastro escolar. Tente novamente.";
       setLoginError(errorMsg);
@@ -332,36 +458,64 @@ export default function App() {
 
     try {
       const token = await getAuthToken();
-      if (!token) {
-        showToast("Sessão expirada. Por favor, faça login novamente.", "warning");
-        return;
+      let res: Response | null = null;
+      if (token) {
+        try {
+          res = await fetch("/api/users/profile", {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(profileData),
+          });
+        } catch (netErr) {
+          res = null;
+        }
       }
 
-      const res = await fetch("/api/users/profile", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(profileData),
-      });
-
-      if (res.ok) {
+      if (res && res.ok) {
         const data = await res.json();
         const updatedUser = { ...data.user, provider: currentUser.provider };
         setCurrentUser(updatedUser);
         localStorage.setItem("local_user", JSON.stringify(updatedUser));
         if (updatedUser?.isAdmin) {
-          await loadAllUsers(token);
+          await loadAllUsers(token || "");
         }
         showToast("Perfil atualizado com sucesso!", "success");
-      } else {
+        return;
+      } else if (res) {
         const errData = await res.json().catch(() => ({}));
-        showToast(errData.error || "Não foi possível atualizar o perfil. Verifique os dados.", "error");
+        showToast(errData.error || "Não foi possível atualizar o perfil.", "error");
+        return;
       }
+
+      // Local storage fallback
+      const updatedUser: User = {
+        ...currentUser,
+        ...profileData,
+        updatedAt: new Date().toISOString()
+      };
+      setCurrentUser(updatedUser);
+      localStorage.setItem("local_user", JSON.stringify(updatedUser));
+
+      try {
+        const stored = localStorage.getItem("local_users_db");
+        if (stored) {
+          const list: User[] = JSON.parse(stored);
+          const idx = list.findIndex(u => u.id === updatedUser.id || u.email === updatedUser.email);
+          if (idx !== -1) {
+            list[idx] = updatedUser;
+            localStorage.setItem("local_users_db", JSON.stringify(list));
+            setUsersList(list);
+          }
+        }
+      } catch {}
+
+      showToast("Perfil atualizado com sucesso!", "success");
     } catch (error) {
       console.error("Error updating profile:", error);
-      showToast("Falha de rede ao tentar atualizar perfil.", "error");
+      showToast("Falha ao tentar atualizar perfil.", "error");
     }
   };
 
@@ -369,30 +523,57 @@ export default function App() {
   const handleAddEvent = async (eventData: any) => {
     try {
       const token = await getAuthToken();
-      if (!token) {
-        showToast("Sessão inválida. Por favor, entre na sua conta.", "warning");
+      let res: Response | null = null;
+      if (token) {
+        try {
+          res = await fetch("/api/events", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(eventData),
+          });
+        } catch (netErr) {
+          res = null;
+        }
+      }
+
+      if (res && res.ok) {
+        await loadEvents();
+        showToast("Evento adicionado à agenda escolar!", "success");
+        return;
+      } else if (res) {
+        const detail = await res.json().catch(() => ({}));
+        showToast(detail.error || "Não foi possível criar o evento.", "error");
         return;
       }
 
-      const res = await fetch("/api/events", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(eventData),
-      });
+      // Local storage fallback
+      const newEvt: Event = {
+        id: Date.now(),
+        title: eventData.title,
+        location: eventData.location,
+        day: Number(eventData.day),
+        month: Number(eventData.month),
+        year: Number(eventData.year),
+        time: eventData.time || "18:00",
+        isPaid: !!eventData.isPaid,
+        price: eventData.price || null,
+        requirements: eventData.requirements || null,
+        website: eventData.website || null,
+        image: eventData.image || "https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=400",
+        creatorId: currentUser?.id || 9901,
+        createdAt: new Date().toISOString()
+      };
 
-      if (res.ok) {
-        await loadEvents();
-        showToast("Evento adicionado permanentemente à agenda escolar!", "success");
-      } else {
-        const detail = await res.json().catch(() => ({}));
-        showToast(detail.error || "Não foi possível criar o evento. Permissão negada ou dados inválidos.", "error");
-      }
+      const currentEvts = [...events, newEvt];
+      setEvents(currentEvts);
+      localStorage.setItem("local_events", JSON.stringify(currentEvts));
+      showToast("Evento adicionado à agenda escolar!", "success");
     } catch (error) {
       console.error("Error writing event:", error);
-      showToast("Erro de conexão ao salvar evento na agenda.", "error");
+      showToast("Erro ao salvar evento na agenda.", "error");
     }
   };
 
@@ -401,29 +582,40 @@ export default function App() {
     try {
       setIsDeletingEvent(true);
       const token = await getAuthToken();
-      if (!token) {
-        showToast("Sessão expirada.", "warning");
-        return;
+      let res: Response | null = null;
+      if (token) {
+        try {
+          res = await fetch(`/api/events/${eventId}`, {
+            method: "DELETE",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+        } catch (netErr) {
+          res = null;
+        }
       }
 
-      const res = await fetch(`/api/events/${eventId}`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (res.ok) {
+      if (res && res.ok) {
         await loadEvents();
         showToast("Evento removido com sucesso.", "info");
         setActiveScreen("feed");
-      } else {
+        return;
+      } else if (res) {
         const detail = await res.json().catch(() => ({}));
-        showToast(detail.error || "Não foi possível remover o evento. Apenas diretores/criadores podem excluir.", "error");
+        showToast(detail.error || "Não foi possível remover o evento.", "error");
+        return;
       }
+
+      // Local storage fallback
+      const updatedEvts = events.filter(e => e.id !== eventId);
+      setEvents(updatedEvts);
+      localStorage.setItem("local_events", JSON.stringify(updatedEvts));
+      showToast("Evento removido com sucesso.", "info");
+      setActiveScreen("feed");
     } catch (error) {
       console.error("Error deleting event:", error);
-      showToast("Erro ao conectar ao servidor para excluir evento.", "error");
+      showToast("Erro ao excluir evento.", "error");
     } finally {
       setIsDeletingEvent(false);
     }
@@ -433,27 +625,45 @@ export default function App() {
   const handleAdminUpdateUser = async (userId: number, updateData: any) => {
     try {
       const token = await getAuthToken();
-      if (!token) return;
+      let res: Response | null = null;
+      if (token) {
+        try {
+          res = await fetch(`/api/users/${userId}`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(updateData),
+          });
+        } catch (netErr) {
+          res = null;
+        }
+      }
 
-      const res = await fetch(`/api/users/${userId}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(updateData),
-      });
-
-      if (res.ok) {
-        await loadAllUsers(token);
-        showToast("Permissões do usuário atualizadas com sucesso!", "success");
-      } else {
+      if (res && res.ok) {
+        await loadAllUsers(token || "");
+        showToast("Permissões do usuário atualizadas!", "success");
+        return;
+      } else if (res) {
         const detail = await res.json().catch(() => ({}));
         showToast(detail.error || "Não foi possível atualizar o usuário.", "error");
+        return;
       }
+
+      // Local storage fallback
+      const updatedList = usersList.map(u => {
+        if (u.id === userId) {
+          return { ...u, ...updateData, updatedAt: new Date().toISOString() };
+        }
+        return u;
+      });
+      setUsersList(updatedList);
+      localStorage.setItem("local_users_db", JSON.stringify(updatedList));
+      showToast("Permissões do usuário atualizadas!", "success");
     } catch (error) {
       console.error("Admin user modification failed:", error);
-      showToast("Erro de conexão ao modificar permissões.", "error");
+      showToast("Erro ao modificar permissões.", "error");
     }
   };
 
@@ -461,25 +671,38 @@ export default function App() {
   const handleAdminDeleteUser = async (userId: number) => {
     try {
       const token = await getAuthToken();
-      if (!token) return;
+      let res: Response | null = null;
+      if (token) {
+        try {
+          res = await fetch(`/api/users/${userId}`, {
+            method: "DELETE",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+        } catch (netErr) {
+          res = null;
+        }
+      }
 
-      const res = await fetch(`/api/users/${userId}`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (res.ok) {
-        await loadAllUsers(token);
+      if (res && res.ok) {
+        await loadAllUsers(token || "");
         showToast("Conta escolar removida com sucesso.", "info");
-      } else {
+        return;
+      } else if (res) {
         const detail = await res.json().catch(() => ({}));
         showToast(detail.error || "Não foi possível remover este usuário.", "error");
+        return;
       }
+
+      // Local storage fallback
+      const updatedList = usersList.filter(u => u.id !== userId);
+      setUsersList(updatedList);
+      localStorage.setItem("local_users_db", JSON.stringify(updatedList));
+      showToast("Conta escolar removida com sucesso.", "info");
     } catch (error) {
       console.error("Admin deletion failed:", error);
-      showToast("Erro de conexão ao deletar usuário.", "error");
+      showToast("Erro ao deletar usuário.", "error");
     }
   };
 

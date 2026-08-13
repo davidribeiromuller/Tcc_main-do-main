@@ -1,6 +1,11 @@
-# 🎓 Aplicativo Escolar - Guia de Execução
+# 🎓 Aplicativo Escolar (eloEscola) - Guia de Execução
 
-Bem-vindo ao **Aplicativo Escolar**! Este é um sistema completo e moderno para gestão e interação de comunidade escolar (Alunos, Professores e Administradores), com feed de notícias, calendário de eventos, suporte, integração com Firebase e chat de IA.
+Bem-vindo ao **eloEscola**! Este é um sistema completo e moderno para gestão e interação da comunidade escolar (Alunos, Professores e Administradores), com feed de notícias, calendário de eventos, suporte, integração com Firebase e chat de IA.
+
+> **✨ Compatibilidade Total (Full-Stack + GitHub Pages / Estático)**:  
+> O aplicativo possui detecção automática e resiliência:
+> - **Com Servidor Node.js (`server.ts`)**: Executa todas as APIs Express com sincronização em tempo real.
+> - **Modo Estático (GitHub Pages / Vercel / Netlify / Sem Servidor)**: O aplicativo ativa automaticamente o modo de contingência em `localStorage`. Todas as funcionalidades (feed de eventos, agenda, login, cadastro de alunos/diretores e chat com assistente) funcionam 100% no navegador mesmo sem servidor backend ativo!
 
 ---
 
@@ -39,17 +44,17 @@ npm install
 
 ### 4. Configurar Variáveis de Ambiente (Opcional)
 
-Se o projeto utilizar banco de dados PostgreSQL (Cloud SQL/Supabase) ou autenticação Firebase, crie um arquivo `.env` na raiz do projeto com base no arquivo `.env.example`:
+Se o projeto utilizar banco de dados PostgreSQL ou autenticação Firebase, crie um arquivo `.env` na raiz do projeto com base no arquivo `.env.example`:
 
 ```bash
 cp .env.example .env
 ```
 
-*(Obs: O aplicativo possui modo de contingência local automático/fallback caso as variáveis de banco de dados não estejam preenchidas no primeiro momento).*
+*(Obs: O aplicativo possui modo de contingência local automático/fallback caso as variáveis de banco de dados não estejam preenchidas).*
 
 ---
 
-### 5. Iniciar o Servidor de Desenvolvimento
+### 5. Iniciar a Aplicação Localmente
 
 Como o aplicativo é Full-Stack (frontend React em Vite + backend Node.js/Express em `server.ts`), inicie a aplicação com o comando:
 
@@ -57,7 +62,7 @@ Como o aplicativo é Full-Stack (frontend React em Vite + backend Node.js/Expres
 npm run dev
 ```
 
-Você verá uma mensagem no terminal indicando que o servidor está rodando:
+Você verá a mensagem no terminal:
 ```
 Server running on http://localhost:3000
 ```
@@ -66,36 +71,37 @@ Abra o seu navegador e acesse: [http://localhost:3000](http://localhost:3000)
 
 ---
 
-## 📦 Como Gerar a Versão de Produção (Build)
+## 🌐 Publicação no GitHub Pages (Hospedagem Estática)
 
-Se você for realizar a implantação em serviços de hospedagem na nuvem (como Render, Railway, Vercel ou Cloud Run):
+Caso queira disponibilizar a página no **GitHub Pages**:
 
-1. **Construir a aplicação:**
+1. Faça o build estático do projeto:
    ```bash
    npm run build
    ```
+2. A pasta `dist` gerada conterá o site compilado.
+3. Configure o GitHub Pages para servir a partir do branch `main` ou da pasta `dist`.
+4. O **eloEscola** detectará que está no GitHub Pages e ativará o banco de dados e autenticação via `localStorage` e dados padrão da escola de forma 100% transparente.
 
-2. **Iniciar em modo de produção:**
+---
+
+## 📦 Implantação Full-Stack na Nuvem (Render / Railway / Cloud Run)
+
+Para rodar o servidor Node.js com persistência em nuvem:
+
+1. **Build de produção:**
+   ```bash
+   npm run build
+   ```
+2. **Iniciar o servidor:**
    ```bash
    npm start
    ```
 
 ---
 
-## ❓ Solução de Problemas Frequentes
-
-### 1. Tela branca ao rodar no GitHub Pages
-O GitHub Pages apenas serve arquivos estáticos e não executa o servidor backend Node.js (`server.ts`). Para executar a aplicação completa com banco de dados e APIs:
-- Siga os passos acima para rodá-la localmente (`npm run dev`), ou
-- Hospede o projeto em uma plataforma com suporte a Node.js (ex: Render, Railway ou Google Cloud Run).
-
-### 2. Erros de portas ocupadas
-Se a porta `3000` estiver em uso por outro aplicativo em seu computador, feche a aplicação antiga ou altere a porta no arquivo `server.ts`.
-
----
-
 ## 🛠️ Tecnologias Utilizadas
 
-- **Frontend**: React 18, TypeScript, Vite, Tailwind CSS, Motion (Framer Motion), Lucide React.
+- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS, Motion (Framer Motion), Lucide React.
 - **Backend**: Node.js, Express, TSX, ESBuild.
-- **Autenticação e Dados**: Firebase Auth e Firestore / Fallback Local Storage / Drizzle ORM.
+- **Armazenamento e Resiliência**: Firebase Auth / Local Storage Fallback / Drizzle ORM.
