@@ -53,6 +53,7 @@ export default function App() {
     }
   });
   const [usersList, setUsersList] = useState<User[]>([]);
+  const [adminUserBeforeImpersonation, setAdminUserBeforeImpersonation] = useState<User | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState(false);
   const [isDeletingEvent, setIsDeletingEvent] = useState(false);
   const [feedSearchOpen, setFeedSearchOpen] = useState(false);
@@ -944,6 +945,22 @@ export default function App() {
     }
   };
 
+  const handleAdminImpersonateUser = (user: User) => {
+    if (!currentUser || currentUser.id === user.id) return;
+    setAdminUserBeforeImpersonation(currentUser);
+    setCurrentUser(user);
+    setActiveScreen("feed");
+    showToast(`Você entrou como ${user.nome || user.email}.`, "info");
+  };
+
+  const handleExitImpersonation = () => {
+    if (!adminUserBeforeImpersonation) return;
+    setCurrentUser(adminUserBeforeImpersonation);
+    setAdminUserBeforeImpersonation(null);
+    setActiveScreen("admin");
+    showToast("Você voltou para sua conta administrativa.", "info");
+  };
+
   // Sign out
   const handleLogout = async () => {
     const firebaseUser = auth?.currentUser;
@@ -960,6 +977,17 @@ export default function App() {
       id="app-root-container"
       className="app-viewport relative flex flex-col justify-between bg-brand-bg-light text-brand-text-light"
     >
+      {adminUserBeforeImpersonation && (
+        <div className="fixed top-0 left-0 right-0 z-[60] flex items-center justify-center gap-3 bg-slate-900 px-4 py-2 text-xs text-white shadow-md">
+          <span>Visualizando a conta de <strong>{currentUser?.nome || currentUser?.email}</strong></span>
+          <button
+            onClick={handleExitImpersonation}
+            className="rounded-md bg-white/15 px-3 py-1 font-semibold hover:bg-white/25 cursor-pointer"
+          >
+            Voltar para administrador
+          </button>
+        </div>
+      )}
       <AnimatePresence mode="wait">
         
         {activeScreen === "splash" && (
@@ -1149,6 +1177,7 @@ export default function App() {
                       usersList={usersList}
                       onUpdateUser={handleAdminUpdateUser}
                       onDeleteUser={handleAdminDeleteUser}
+                      onImpersonateUser={handleAdminImpersonateUser}
                       currentUser={currentUser}
                     />
                   </motion.div>

@@ -1,12 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { motion } from "motion/react";
-import { ShieldCheck, UserCog, Trash2, Search, AlertTriangle, Users } from "lucide-react";
+import { ShieldCheck, UserCog, Trash2, Search, AlertTriangle, Users, LogIn, X, Save } from "lucide-react";
 import { User } from "../types";
 
 interface AdminPanelProps {
   usersList: User[];
   onUpdateUser: (userId: number, updateData: any) => Promise<void>;
   onDeleteUser: (userId: number) => Promise<void>;
+  onImpersonateUser: (user: User) => void;
   currentUser: User | null;
 }
 
@@ -14,9 +15,12 @@ export default function AdminPanel({
   usersList,
   onUpdateUser,
   onDeleteUser,
+  onImpersonateUser,
   currentUser
 }: AdminPanelProps) {
   const [searchTerm, setSearchTerm] = useState("");
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editForm, setEditForm] = useState<Partial<User>>({});
 
   const filteredUsers = usersList.filter((u) => {
     const term = searchTerm.toLowerCase();
@@ -52,6 +56,27 @@ export default function AdminPanel({
     if (confirm(`Atenção: Tem certeza de que quer deletar permanentemente a conta escolar de "${uName || 'Este Usuário'}"?`)) {
       onDeleteUser(userId);
     }
+  };
+
+  const handleEditClick = (user: User) => {
+    setEditingUser(user);
+    setEditForm({
+      nome: user.nome,
+      email: user.email,
+      cpf: user.cpf || "",
+      phone: user.phone || "",
+      birthdate: user.birthdate || "",
+      gender: user.gender || "",
+      institution: user.institution || "",
+      role: user.role || "Aluno",
+    });
+  };
+
+  const handleEditSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!editingUser) return;
+    await onUpdateUser(editingUser.id, editForm);
+    setEditingUser(null);
   };
 
   return (
@@ -134,14 +159,31 @@ export default function AdminPanel({
                       </div>
                     </div>
 
-                    <button
-                      onClick={() => handleDeleteClick(u.id, u.nome || "Este usuário")}
-                      disabled={isMe}
-                      className="p-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-950/20 dark:text-red-400 disabled:opacity-30 cursor-pointer"
-                      title="Deletar permanentemente"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => onImpersonateUser(u)}
+                        disabled={isMe}
+                        className="p-1.5 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-950/20 dark:text-blue-400 disabled:opacity-30 cursor-pointer"
+                        title="Entrar como este usuário"
+                      >
+                        <LogIn size={14} />
+                      </button>
+                      <button
+                        onClick={() => handleEditClick(u)}
+                        className="p-1.5 rounded-lg bg-slate-50 text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 cursor-pointer"
+                        title="Editar perfil"
+                      >
+                        <UserCog size={14} />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteClick(u.id, u.nome || "Este usuário")}
+                        disabled={isMe}
+                        className="p-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-950/20 dark:text-red-400 disabled:opacity-30 cursor-pointer"
+                        title="Deletar permanentemente"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
 
                   {/* Settings toggles */}
@@ -192,6 +234,71 @@ export default function AdminPanel({
           )}
         </div>
       </div>
+
+      {editingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setEditingUser(null)}>
+          <form
+            onSubmit={handleEditSubmit}
+            onClick={(event) => event.stopPropagation()}
+            className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white dark:bg-brand-card-dark rounded-2xl p-5 shadow-2xl"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="font-display font-semibold text-lg">Editar perfil</h2>
+                <p className="text-[10px] text-slate-400">Atualize os dados de {editingUser.nome || editingUser.email}</p>
+              </div>
+              <button type="button" onClick={() => setEditingUser(null)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer" title="Fechar">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {[
+                ["nome", "Nome completo", "text"],
+                ["email", "E-mail", "email"],
+                ["cpf", "CPF", "text"],
+                ["phone", "Telefone", "text"],
+                ["birthdate", "Data de nascimento", "date"],
+                ["gender", "Gênero", "text"],
+                ["institution", "Instituição", "text"],
+              ].map(([field, label, type]) => (
+                <label key={field} className="flex flex-col gap-1 text-[10px] font-semibold text-slate-500">
+                  {label}
+                  <input
+                    type={type}
+                    value={String(editForm[field as keyof User] || "")}
+                    onChange={(event) => setEditForm((current) => ({ ...current, [field]: event.target.value }))}
+                    className="h-9 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-black/10 text-xs text-brand-text-light dark:text-brand-text-dark focus:outline-none focus:ring-1 focus:ring-brand-accent"
+                  />
+                </label>
+              ))}
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-slate-500">
+                Cargo / função
+                <select
+                  value={String(editForm.role || "Aluno")}
+                  onChange={(event) => setEditForm((current) => ({ ...current, role: event.target.value }))}
+                  className="h-9 px-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-black/10 text-xs text-brand-text-light dark:text-brand-text-dark focus:outline-none focus:ring-1 focus:ring-brand-accent"
+                >
+                  <option value="Aluno">Aluno(a)</option>
+                  <option value="Diretor">Diretor(a)</option>
+                  <option value="Pedagogo(a)">Pedagogo(a)</option>
+                  <option value="Professor">Professor(a)</option>
+                  <option value="Responsáveis">Responsáveis</option>
+                  <option value="Funcionário">Funcionário(a)</option>
+                  <option value="Cliente">Cliente</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-5">
+              <button type="button" onClick={() => setEditingUser(null)} className="h-9 px-4 rounded-lg text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">Cancelar</button>
+              <button type="submit" className="h-9 px-4 rounded-lg bg-brand-accent text-white text-xs font-semibold hover:opacity-90 cursor-pointer flex items-center gap-1.5">
+                <Save size={14} /> Salvar alterações
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </motion.div>
   );
 }
