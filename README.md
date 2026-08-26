@@ -71,17 +71,38 @@ Abra o seu navegador e acesse: [http://localhost:3000](http://localhost:3000)
 
 ---
 
-## 🌐 Publicação no GitHub Pages (Hospedagem Estática)
+## 🌐 Publicação no GitHub Pages (100% Automático via GitHub Actions)
 
-Caso queira disponibilizar a página no **GitHub Pages**:
+O projeto já inclui um fluxo de trabalho automatizado em `.github/workflows/deploy.yml`.
 
-1. Faça o build estático do projeto:
+Para ativar a publicação automática no GitHub:
+1. No seu repositório no GitHub, clique na aba **Settings** (Configurações).
+2. No menu lateral esquerdo, clique em **Pages** (em "Code and automation").
+3. Em **Build and deployment** > **Source**, mude de *"Deploy from a branch"* para **`GitHub Actions`**.
+4. Pronto! O GitHub irá compilar o Vite automaticamente e publicar seu site em poucos segundos com um link ativo (ex: `https://seu-usuario.github.io/seu-repositorio/`).
+
+---
+
+## 💻 Como Rodar o Projeto no Seu Computador (Clone do GitHub)
+
+Se você clonou o repositório para o seu computador:
+
+1. **Instale as dependências:**
+   ```bash
+   npm install
+   ```
+
+2. **Inicie o servidor de desenvolvimento:**
+   ```bash
+   npm run dev
+   ```
+   Acesse no navegador: `http://localhost:3000`
+
+3. **Ou teste o build de produção localmente:**
    ```bash
    npm run build
+   npm run preview
    ```
-2. A pasta `dist` gerada conterá o site compilado.
-3. Configure o GitHub Pages para servir a partir do branch `main` ou da pasta `dist`.
-4. O **eloEscola** detectará que está no GitHub Pages e ativará o banco de dados e autenticação via `localStorage` e dados padrão da escola de forma 100% transparente.
 
 ---
 

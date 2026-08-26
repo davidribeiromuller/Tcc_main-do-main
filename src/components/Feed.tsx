@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Search, MapPin, Calendar, CircleDollarSign, PlusCircle, X } from "lucide-react";
+import { Search, MapPin, Calendar, CircleDollarSign, PlusCircle, X, Map as MapIcon } from "lucide-react";
 import { Event } from "../types";
 import AIChatAssistant from "./AIChatAssistant";
+import EventLocationModal from "./EventLocationModal";
 
 interface FeedProps {
   events: Event[];
@@ -14,6 +15,8 @@ interface FeedProps {
   setSearchOpen?: (open: boolean) => void;
   searchTerm?: string;
   setSearchTerm?: (term: string) => void;
+  onOpenMap?: (eventId?: number) => void;
+  onUserCoordsChange?: (coords: { lat: number; lng: number }) => void;
 }
 
 const normalizeString = (str: string) => {
@@ -32,11 +35,17 @@ export default function Feed({
   searchOpen,
   setSearchOpen,
   searchTerm,
-  setSearchTerm
+  setSearchTerm,
+  onOpenMap,
+  onUserCoordsChange,
 }: FeedProps) {
   const [localSearchOpen, setLocalSearchOpen] = useState(false);
   const [localSearchTerm, setLocalSearchTerm] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // State for location permission modal on entering event from feed
+  const [selectedEventForLocation, setSelectedEventForLocation] = useState<Event | null>(null);
+  const [showLocationModal, setShowLocationModal] = useState(false);
 
   const isSearchOpen = searchOpen !== undefined ? searchOpen : localSearchOpen;
   const currentSearchTerm = searchTerm !== undefined ? searchTerm : localSearchTerm;
@@ -67,6 +76,27 @@ export default function Feed({
       inputRef.current.focus();
     }
   }, [isSearchOpen]);
+
+  const handleCardClick = (event: Event) => {
+    // Check if user already has saved location coordinates
+    setSelectedEventForLocation(event);
+    setShowLocationModal(true);
+  };
+
+  const handleAuthorizeLocation = (event: Event, coords?: { lat: number; lng: number }) => {
+    if (coords && onUserCoordsChange) {
+      onUserCoordsChange(coords);
+    }
+    setShowLocationModal(false);
+    setSelectedEventForLocation(null);
+    onSelectEvent(event);
+  };
+
+  const handleSkipLocation = (event: Event) => {
+    setShowLocationModal(false);
+    setSelectedEventForLocation(null);
+    onSelectEvent(event);
+  };
 
   const filteredEvents = events.filter((event) => {
     const term = normalizeString(currentSearchTerm);
@@ -183,7 +213,7 @@ export default function Feed({
             <motion.div
               key={event.id}
               layoutId={`card-container-${event.id}`}
-              onClick={() => onSelectEvent(event)}
+              onClick={() => handleCardClick(event)}
               className="relative rounded-3xl overflow-hidden bg-white dark:bg-brand-card-dark shadow-sm hover:shadow-md hover:scale-[1.01] active:scale-[0.99] transition-all duration-200 cursor-pointer group border border-brand-primary/15"
             >
               {/* Image banner with Gradient Overlay */}
@@ -212,9 +242,18 @@ export default function Feed({
 
               {/* Feed Meta Info */}
               <div className="p-4 flex flex-col gap-2 bg-white dark:bg-brand-card-dark">
-                <div className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300">
-                  <MapPin size={14} className="text-brand-accent dark:text-brand-primary shrink-0 mt-0.5" />
-                  <span className="line-clamp-1">{event.location}</span>
+                <div 
+                  onClick={(e) => {
+                    if (onOpenMap) {
+                      e.stopPropagation();
+                      onOpenMap(event.id);
+                    }
+                  }}
+                  className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300 hover:text-brand-accent transition-colors"
+                  title="Ver localização no mapa"
+                >
+                  <MapPin size={14} className="text-red-500 shrink-0 mt-0.5" />
+                  <span className="line-clamp-1 underline-offset-2 hover:underline">{event.location}</span>
                 </div>
                 
                 <div className="flex justify-between items-center text-[10px] font-mono uppercase tracking-widest text-slate-400 mt-1 border-t border-slate-100 dark:border-slate-800 pt-2">
@@ -229,6 +268,19 @@ export default function Feed({
           ))
         )}
       </div>
+
+      {/* Location Permission Modal when entering an event from the Feed (Tela Inicial) */}
+      <EventLocationModal
+        isOpen={showLocationModal}
+        event={selectedEventForLocation}
+        onClose={() => {
+          setShowLocationModal(false);
+          setSelectedEventForLocation(null);
+        }}
+        onAuthorize={handleAuthorizeLocation}
+        onSkip={handleSkipLocation}
+      />
+
       <AIChatAssistant />
     </motion.div>
   );

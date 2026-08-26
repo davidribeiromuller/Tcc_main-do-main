@@ -78,7 +78,7 @@ export default function Login({ onGoogleLogin, onLocalLogin, onNavigate, isLoadi
     }
 
     const fauxEmail = `cgm-${cleanCgm}@aluno.pr.gov.br`;
-    onLocalLogin(fauxEmail, "Aluno");
+    onLocalLogin(fauxEmail, cgmPassword);
   };
 
   const handleRecoverySubmit = (e: React.FormEvent) => {

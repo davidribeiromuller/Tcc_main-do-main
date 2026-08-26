@@ -29,8 +29,12 @@ export interface Event {
   isPaid: boolean;
   price?: string | null;
   requirements?: string | null;
+  description?: string | null;
+  creatorRole?: string | null;
   website?: string | null;
   image?: string | null;
+  lat?: number | null;
+  lng?: number | null;
   creatorId?: number | null;
   createdAt?: string;
 }

@@ -14,8 +14,9 @@ export default function BottomNav({ activeTab, onTabChange, isAdmin }: BottomNav
       
       <button
         onClick={() => onTabChange("feed")}
-        className="relative flex flex-col items-center justify-center p-2 focus:outline-none transition-all"
+        className="relative flex flex-col items-center justify-center p-2 focus:outline-none transition-all cursor-pointer"
         id="btn-nav-feed"
+        title="Eventos"
       >
         <Home
           size={24}
@@ -33,8 +34,9 @@ export default function BottomNav({ activeTab, onTabChange, isAdmin }: BottomNav
 
       <button
         onClick={() => onTabChange("calendar")}
-        className="relative flex flex-col items-center justify-center p-2 focus:outline-none transition-all"
+        className="relative flex flex-col items-center justify-center p-2 focus:outline-none transition-all cursor-pointer"
         id="btn-nav-calendar"
+        title="Calendário"
       >
         <Calendar
           size={24}
@@ -53,8 +55,9 @@ export default function BottomNav({ activeTab, onTabChange, isAdmin }: BottomNav
       {isAdmin && (
         <button
           onClick={() => onTabChange("admin")}
-          className="relative flex flex-col items-center justify-center p-2 focus:outline-none transition-all"
+          className="relative flex flex-col items-center justify-center p-2 focus:outline-none transition-all cursor-pointer"
           id="btn-nav-admin"
+          title="Administração"
         >
           <ShieldAlert
             size={24}

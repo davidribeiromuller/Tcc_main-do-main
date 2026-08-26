@@ -8,7 +8,7 @@ export const defaultEvents: Event[] = [
   {
     id: 9901,
     title: "Feira de Ciências e Tecnologia",
-    location: "Auditório Principal • Bloco A",
+    location: "Auditório Principal • Bloco A (Helena Wysocki)",
     day: 15,
     month: currentMonth,
     year: currentYear,
@@ -18,6 +18,8 @@ export const defaultEvents: Event[] = [
     requirements: "Entrada livre para estudantes de todas as séries.",
     website: "https://escola.gamechangers.com.br",
     image: "https://images.unsplash.com/photo-1507537297725-24a1c029d3ca?w=600&auto=format&fit=crop",
+    lat: -25.4385,
+    lng: -49.1925,
     creatorId: 9901,
     createdAt: new Date().toISOString()
   },
@@ -34,6 +36,8 @@ export const defaultEvents: Event[] = [
     requirements: "Traga seu notebook ou utilize as máquinas do laboratório.",
     website: "https://escola.gamechangers.com.br",
     image: "https://images.unsplash.com/photo-1511512578047-dfb367046420?w=600&auto=format&fit=crop",
+    lat: -25.4390,
+    lng: -49.1932,
     creatorId: 9901,
     createdAt: new Date().toISOString()
   },
@@ -50,13 +54,15 @@ export const defaultEvents: Event[] = [
     requirements: "Noções básicas de HTML e CSS.",
     website: "https://escola.gamechangers.com.br",
     image: "https://images.unsplash.com/photo-1531403009284-440f080d1e12?w=600&auto=format&fit=crop",
+    lat: -25.4379,
+    lng: -49.1918,
     creatorId: 9901,
     createdAt: new Date().toISOString()
   },
   {
     id: 9904,
     title: "Palestra: Introdução à IA Generativa",
-    location: "Teatro Municipal",
+    location: "Teatro Municipal de Pinhais",
     day: 18,
     month: (currentMonth + 1) % 12,
     year: currentMonth === 11 ? currentYear + 1 : currentYear,
@@ -66,6 +72,8 @@ export const defaultEvents: Event[] = [
     requirements: "Inscrição online antecipada.",
     website: "https://escola.gamechangers.com.br",
     image: "https://images.unsplash.com/photo-1591453089816-0fbb971b454c?w=600&auto=format&fit=crop",
+    lat: -25.4412,
+    lng: -49.1876,
     creatorId: 9901,
     createdAt: new Date().toISOString()
   }

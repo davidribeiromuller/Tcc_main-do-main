@@ -1,6 +1,6 @@
 {
   "name": "eloEscola",
-  "description": "Portal completo de eventos escolares com feed, agenda interactiva, controle de acesso administrativo e login seguro via Google OAuth.",
-  "requestFramePermissions": [],
+  "description": "Portal de eventos escolares com feed, visualização interativa em mapa (Google Maps / OpenStreetMap), agenda, controle de acesso administrativo e login seguro.",
+  "requestFramePermissions": ["geolocation"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

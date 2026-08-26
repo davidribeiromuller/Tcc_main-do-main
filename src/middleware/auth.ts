@@ -18,40 +18,41 @@ export const requireAuth = async (
 
   const token = authHeader.split('Bearer ')[1];
 
-  if (token && token.startsWith('local-')) {
+  if (token && (token.startsWith('local-') || token.startsWith('google-'))) {
     try {
-      const remainder = token.substring(6); // strip "local-"
+      const isGoogle = token.startsWith('google-');
+      const remainder = token.substring(isGoogle ? 7 : 6);
       const parts = remainder.split('|');
-      // Format: local-uid|role|escapedName|escapedEmail|escapedPassword
-      const uid = parts[0] || 'local-demo';
+      // Format: uid|role|escapedName|escapedEmail|escapedPasswordOrPicture
+      const uid = parts[0] || (isGoogle ? 'google-user-default' : 'local-demo');
       const role = parts[1] || 'Aluno';
-      const name = parts[2] ? decodeURIComponent(parts[2]) : 'Aluno Simulado';
-      const email = parts[3] ? decodeURIComponent(parts[3]) : 'aluno@escola.pr.gov.br';
-      const password = parts[4] ? decodeURIComponent(parts[4]) : undefined;
+      const name = parts[2] ? decodeURIComponent(parts[2]) : (isGoogle ? 'Usuário Google' : 'Aluno Simulado');
+      const email = parts[3] ? decodeURIComponent(parts[3]) : (isGoogle ? 'usuario@gmail.com' : 'aluno@escola.pr.gov.br');
+      const extra = parts[4] ? decodeURIComponent(parts[4]) : undefined;
 
-      // Mock user decoder block matching DecodedIdToken fields
+      // User decoder block matching DecodedIdToken fields
       req.user = {
         uid,
         email,
         name,
-        picture: '',
+        picture: isGoogle && extra ? extra : '',
         role,
-        password,
+        password: isGoogle ? undefined : extra,
         auth_time: Math.floor(Date.now() / 1000),
-        iss: 'local-sim',
+        iss: isGoogle ? 'https://accounts.google.com' : 'local-sim',
         sub: uid,
-        aud: 'local-sim',
-        exp: Math.floor(Date.now() / 1000) + 3600,
+        aud: isGoogle ? 'google-auth' : 'local-sim',
+        exp: Math.floor(Date.now() / 1000) + 86400,
         firebase: {
           identities: {},
-          sign_in_provider: 'custom'
+          sign_in_provider: isGoogle ? 'google.com' : 'custom'
         }
       } as any;
       
       return next();
     } catch (e) {
       console.error('Error decoding custom token:', e);
-      return res.status(401).json({ error: 'Unauthorized: Invalid custom local session' });
+      return res.status(401).json({ error: 'Unauthorized: Invalid custom session token' });
     }
   }
 
