@@ -290,8 +290,8 @@ export default function Login({ onGoogleLogin, onLocalLogin, onNavigate, isLoadi
       animate={{ opacity: 1, scale: 1 }}
       className="flex flex-col h-full overflow-y-auto p-6 text-brand-text-light dark:text-brand-text-dark max-w-md mx-auto w-full justify-center md:py-12"
     >
-      <div className="flex flex-col items-center my-6">
-        <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-brand-primary/20 shadow-lg mb-4 bg-white p-1 flex items-center justify-center">
+      <div className="flex flex-col items-center my-5 text-center">
+        <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border-2 border-brand-primary/20 shadow-lg mb-3 bg-white p-1 flex items-center justify-center">
           <img
             src={logoImg}
             alt="Logo do Projeto"
@@ -299,8 +299,14 @@ export default function Login({ onGoogleLogin, onLocalLogin, onNavigate, isLoadi
             referrerPolicy="no-referrer"
           />
         </div>
-        <p className="text-brand-accent dark:text-brand-primary text-sm font-semibold mt-1.5 text-center">
-          Portal Escola Helena Wysocki
+        <h1 className="text-xl sm:text-2xl font-display font-bold text-slate-800 dark:text-slate-100 tracking-tight">
+          eloEscola
+        </h1>
+        <p className="text-brand-accent dark:text-brand-primary text-xs sm:text-sm font-semibold mt-0.5">
+          Colégio Estadual Helena Wysocki
+        </p>
+        <p className="text-[11px] text-slate-500 dark:text-slate-400 max-w-xs mt-1.5 leading-relaxed">
+          Portal integrado de divulgação de eventos, feiras culturais, atividades esportivas e mapa escolar.
         </p>
       </div>
 

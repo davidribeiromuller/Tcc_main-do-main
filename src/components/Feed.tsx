@@ -4,6 +4,7 @@ import { Search, MapPin, Calendar, CircleDollarSign, PlusCircle, X, Map as MapIc
 import { Event } from "../types";
 import AIChatAssistant from "./AIChatAssistant";
 import EventLocationModal from "./EventLocationModal";
+import IntroBanner from "./IntroBanner";
 
 interface FeedProps {
   events: Event[];
@@ -199,6 +200,14 @@ export default function Feed({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Introduction Banner */}
+      {!isSearchOpen && (
+        <IntroBanner
+          onNavigate={onNavigate}
+          userName={currentUser?.nome}
+        />
+      )}
 
       {/* Events List */}
       <div className="max-w-6xl mx-auto w-full p-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
