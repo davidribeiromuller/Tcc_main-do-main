@@ -137,70 +137,103 @@ export default function App() {
               const token = await firebaseUser.getIdToken();
               
               // Authenticate with server
-              const loginRes = await fetch("/api/auth/login", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({
-                  email: firebaseUser.email || "",
-                  nome: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Usuário Google",
-                  foto_perfil: firebaseUser.photoURL || "",
-                  role: "Aluno"
-                })
-              });
-
-              if (loginRes.ok) {
-                const data = await loginRes.json();
-                let finalUser = data.user;
-
-                // Detect new/existing Google users and automatically register/sync them via /api/users/profile
-                if (finalUser && finalUser.provider === "google") {
-                  try {
-                    const profileRes = await fetch("/api/users/profile", {
-                      method: "PUT",
-                      headers: {
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${token}`,
-                      },
-                      body: JSON.stringify({
-                        nome: finalUser.nome || firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Usuário Google",
-                        foto_perfil: finalUser.foto_perfil || firebaseUser.photoURL || "",
-                        role: finalUser.role || "Aluno",
-                        institution: finalUser.institution || "Escola estadual Helena Wysocki"
-                      }),
-                    });
-
-                    if (profileRes.ok) {
-                      const profileData = await profileRes.json();
-                      if (profileData.user) {
-                        finalUser = profileData.user;
-                      }
-                    }
-                  } catch (profileErr) {
-                    console.error("Auto profile registration failed:", profileErr);
-                  }
-                }
-
-                setCurrentUser(finalUser);
-                if (finalUser) {
-                  localStorage.setItem("local_user", JSON.stringify(finalUser));
-                }
-                
-                // Only redirect to feed if translating from landing/auth screens
-                setActiveScreen((current) => {
-                  if (["splash", "login", "register", "codeSent"].includes(current)) {
-                    return "feed";
-                  }
-                  return current;
+              let loginRes: Response | null = null;
+              try {
+                loginRes = await fetch("/api/auth/login", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                  },
+                  body: JSON.stringify({
+                    email: firebaseUser.email || "",
+                    nome: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Usuário Google",
+                    foto_perfil: firebaseUser.photoURL || "",
+                    role: "Aluno"
+                  })
                 });
-                
-                // If user is admin, fetch user list
-                if (finalUser?.isAdmin) {
-                  await loadAllUsers(token);
+              } catch (e) {
+                loginRes = null;
+              }
+
+              if (loginRes && loginRes.ok) {
+                const contentType = loginRes.headers.get("content-type");
+                if (contentType && contentType.includes("application/json")) {
+                  const data = await loginRes.json();
+                  let finalUser = data.user;
+
+                  // Detect new/existing Google users and automatically register/sync them via /api/users/profile
+                  if (finalUser && finalUser.provider === "google") {
+                    try {
+                      const profileRes = await fetch("/api/users/profile", {
+                        method: "PUT",
+                        headers: {
+                          "Content-Type": "application/json",
+                          Authorization: `Bearer ${token}`,
+                        },
+                        body: JSON.stringify({
+                          nome: finalUser.nome || firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Usuário Google",
+                          foto_perfil: finalUser.foto_perfil || firebaseUser.photoURL || "",
+                          role: finalUser.role || "Aluno",
+                          institution: finalUser.institution || "Escola estadual Helena Wysocki"
+                        }),
+                      });
+
+                      if (profileRes.ok) {
+                        const profType = profileRes.headers.get("content-type");
+                        if (profType && profType.includes("application/json")) {
+                          const profileData = await profileRes.json();
+                          if (profileData.user) {
+                            finalUser = profileData.user;
+                          }
+                        }
+                      }
+                    } catch (profileErr) {
+                      console.error("Auto profile registration failed:", profileErr);
+                    }
+                  }
+
+                  setCurrentUser(finalUser);
+                  if (finalUser) {
+                    localStorage.setItem("local_user", JSON.stringify(finalUser));
+                  }
+                  
+                  setActiveScreen((current) => {
+                    if (["splash", "login", "register", "codeSent"].includes(current)) {
+                      return "feed";
+                    }
+                    return current;
+                  });
+                  
+                  if (finalUser?.isAdmin) {
+                    await loadAllUsers(token);
+                  }
+                  return;
                 }
               }
+
+              // Client-side fallback when running on GitHub Pages / static hosting with real Firebase Auth
+              const isDefaultAdmin = firebaseUser.email === "davidribeiromuller2009@gmail.com" || firebaseUser.email?.includes("diretor");
+              const staticGoogleUser: User = {
+                id: Date.now(),
+                uid: firebaseUser.uid,
+                email: firebaseUser.email || "",
+                nome: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Usuário Google",
+                foto_perfil: firebaseUser.photoURL || "",
+                role: isDefaultAdmin ? "Diretor" : "Aluno",
+                ativo: true,
+                isAdmin: isDefaultAdmin,
+                provider: "google",
+                institution: "Escola estadual Helena Wysocki"
+              };
+              setCurrentUser(staticGoogleUser);
+              localStorage.setItem("local_user", JSON.stringify(staticGoogleUser));
+              setActiveScreen((current) => {
+                if (["splash", "login", "register", "codeSent"].includes(current)) {
+                  return "feed";
+                }
+                return current;
+              });
             } catch (error) {
               console.error("Failed server synchronization:", error);
             } finally {
@@ -274,31 +307,35 @@ export default function App() {
       }
 
       if (res && res.ok) {
-        const data = await res.json();
-        const synchronizedUser = { ...data.user, provider: "google" };
-        setCurrentUser(synchronizedUser);
-        localStorage.setItem("local_user", JSON.stringify(synchronizedUser));
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const data = await res.json();
+          const synchronizedUser = { ...data.user, provider: "google" };
+          setCurrentUser(synchronizedUser);
+          localStorage.setItem("local_user", JSON.stringify(synchronizedUser));
 
-        if (synchronizedUser.isAdmin) {
-          await loadAllUsers(data.token);
+          if (synchronizedUser.isAdmin) {
+            await loadAllUsers(data.token);
+          }
+
+          setShowGoogleAuthModal(false);
+          setActiveScreen("feed");
+          showToast(`Bem-vindo(a), ${synchronizedUser.nome}! Conectado via Google.`, "success");
+          return;
         }
-
-        setShowGoogleAuthModal(false);
-        setActiveScreen("feed");
-        showToast(`Bem-vindo(a), ${synchronizedUser.nome}! Conectado via Google.`, "success");
-        return;
       }
 
       // Static fallback for offline/GitHub Pages preview
       const fallbackUid = "google-uid-" + Math.floor(Math.random() * 88888 + 10000);
+      const isDirector = cleanEmail.includes("diretor") || cleanEmail === "davidribeiromuller2009@gmail.com";
       const fallbackUser: User = {
         id: Date.now(),
         uid: fallbackUid,
         nome: userName,
         email: cleanEmail,
         ativo: true,
-        isAdmin: false,
-        role: "Aluno",
+        isAdmin: isDirector,
+        role: isDirector ? "Diretor" : "Aluno",
         provider: "google",
         institution: "C.E. Helena Wysocki"
       };
@@ -378,30 +415,36 @@ export default function App() {
       }
 
       if (res && res.ok) {
-        const data = await res.json();
-        const synchronizedUser = { ...data.user, provider: "local" };
-        setCurrentUser(synchronizedUser);
-        localStorage.setItem("local_user", JSON.stringify(synchronizedUser));
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const data = await res.json();
+          const synchronizedUser = { ...data.user, provider: "local" };
+          setCurrentUser(synchronizedUser);
+          localStorage.setItem("local_user", JSON.stringify(synchronizedUser));
 
-        if (synchronizedUser.isAdmin) {
-          await loadAllUsers(data.token);
+          if (synchronizedUser.isAdmin) {
+            await loadAllUsers(data.token);
+          }
+          showToast(`Bem-vindo(a) de volta, ${synchronizedUser.nome}!`, "success");
+          setActiveScreen("feed");
+          return;
         }
-        showToast(`Bem-vindo(a) de volta, ${synchronizedUser.nome}!`, "success");
-        setActiveScreen("feed");
-        return;
       } else if (res && (res.status === 401 || res.status === 403 || res.status === 404)) {
-        const errorData = await res.json().catch(() => ({}));
-        let message = errorData.error || "E-mail ou senha incorretos.";
-        if (res.status === 401) {
-          message = "Credenciais inválidas. Verifique seu e-mail/CGM e a senha digitada.";
-        } else if (res.status === 404) {
-          message = "Usuário não encontrado. Verifique se o e-mail ou CGM está correto ou crie uma nova conta.";
-        } else if (res.status === 403) {
-          message = "Sua conta está desativada. Entre em contato com a diretoria escolar.";
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const errorData = await res.json().catch(() => ({}));
+          let message = errorData.error || "E-mail ou senha incorretos.";
+          if (res.status === 401) {
+            message = "Credenciais inválidas. Verifique seu e-mail/CGM e a senha digitada.";
+          } else if (res.status === 404) {
+            message = "Usuário não encontrado. Verifique se o e-mail ou CGM está correto ou crie uma nova conta.";
+          } else if (res.status === 403) {
+            message = "Sua conta está desativada. Entre em contato com a diretoria escolar.";
+          }
+          setLoginError(message);
+          showToast(message, "error");
+          return;
         }
-        setLoginError(message);
-        showToast(message, "error");
-        return;
       }
 
       // Local storage fallback for GitHub Pages / static hosting
