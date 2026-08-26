@@ -139,21 +139,8 @@ export default function Register({ onRegister, onNavigate }: RegisterProps) {
     try {
       setIsCheckingEmail(true);
       const cleanEmail = email.trim().toLowerCase();
-      
-      // Also verify local storage cache if available
-      try {
-        const stored = localStorage.getItem("local_users_db");
-        if (stored) {
-          const localList = JSON.parse(stored);
-          const found = localList.find((u: any) => u.email && u.email.toLowerCase() === cleanEmail);
-          if (found) {
-            setError("Este e-mail já está cadastrado. Por favor, tente fazer login ou use outro e-mail.");
-            setEmailError(true);
-            return;
-          }
-        }
-      } catch {}
 
+      // The server is the source of truth; local storage may contain stale users.
       const checkRes = await fetch(`/api/auth/check-email?email=${encodeURIComponent(cleanEmail)}`);
       if (checkRes.ok) {
         const contentType = checkRes.headers.get("content-type");
