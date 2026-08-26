@@ -21,7 +21,9 @@ import {
   Minimize2,
   X,
   School,
-  ExternalLink
+  ExternalLink,
+  Pencil,
+  CheckCircle
 } from "lucide-react";
 import { Event, User } from "../types";
 
@@ -30,6 +32,7 @@ interface EventDetailProps {
   currentUser: User | null;
   onNavigateBack: () => void;
   onDeleteEvent: (id: number) => Promise<void>;
+  onUpdateEvent?: (id: number, data: any) => Promise<void>;
   isDeleting: boolean;
   onOpenMap?: (eventId: number) => void;
   onUserCoordsChange?: (coords: { lat: number; lng: number }) => void;
@@ -134,6 +137,7 @@ export default function EventDetail({
   currentUser,
   onNavigateBack,
   onDeleteEvent,
+  onUpdateEvent,
   isDeleting,
   onUserCoordsChange,
   userCoords: propUserCoords,
@@ -146,7 +150,37 @@ export default function EventDetail({
   const tileLayerRef = useRef<L.TileLayer | null>(null);
 
   const [showLocationPermissionModal, setShowLocationPermissionModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editError, setEditError] = useState("");
+
+  // Edit fields
+  const [editTitle, setEditTitle] = useState(event.title);
+  const [editLocation, setEditLocation] = useState(event.location);
+  const [editDay, setEditDay] = useState(event.day.toString());
+  const [editMonth, setEditMonth] = useState(event.month);
+  const [editYear, setEditYear] = useState(event.year);
+  const [editTime, setEditTime] = useState(event.time || "14:00");
+  const [editIsPaid, setEditIsPaid] = useState(!!event.isPaid);
+  const [editPrice, setEditPrice] = useState(event.price || "");
+  const [editRequirements, setEditRequirements] = useState(event.requirements || "");
+  const [editWebsite, setEditWebsite] = useState(event.website || "");
+
+  // Update edit form fields whenever event changes
+  useEffect(() => {
+    setEditTitle(event.title);
+    setEditLocation(event.location);
+    setEditDay(event.day.toString());
+    setEditMonth(event.month);
+    setEditYear(event.year);
+    setEditTime(event.time || "14:00");
+    setEditIsPaid(!!event.isPaid);
+    setEditPrice(event.price || "");
+    setEditRequirements(event.requirements || "");
+    setEditWebsite(event.website || "");
+  }, [event]);
+
   const [mapType, setMapType] = useState<"roadmap" | "satellite">("roadmap");
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(() => {
@@ -368,12 +402,55 @@ export default function EventDetail({
     return reqStr.split(",").map((s) => s.trim()).filter(Boolean);
   };
 
-  const canDelete = currentUser?.isAdmin || (currentUser && event.creatorId === currentUser.id);
+  const canEdit = currentUser?.isAdmin || currentUser?.role === "Diretor" || (currentUser && event.creatorId === currentUser.id);
+  const canDelete = currentUser?.isAdmin || currentUser?.role === "Diretor" || (currentUser && event.creatorId === currentUser.id);
 
   const monthsList = [
     "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
     "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
   ];
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEditError("");
+
+    if (!editTitle.trim()) {
+      setEditError("Por favor, informe o título do evento.");
+      return;
+    }
+    if (!editLocation.trim()) {
+      setEditError("Por favor, informe a localização do evento.");
+      return;
+    }
+    const dayNum = parseInt(editDay);
+    if (!dayNum || dayNum < 1 || dayNum > 31) {
+      setEditError("Por favor, informe um dia válido entre 1 e 31.");
+      return;
+    }
+
+    try {
+      setIsSavingEdit(true);
+      if (onUpdateEvent) {
+        await onUpdateEvent(event.id, {
+          title: editTitle.trim(),
+          location: editLocation.trim(),
+          day: dayNum,
+          month: editMonth,
+          year: editYear,
+          time: editTime.trim() || "14:00",
+          isPaid: editIsPaid,
+          price: editIsPaid ? editPrice.trim() : null,
+          requirements: editRequirements.trim(),
+          website: editWebsite.trim() || null,
+        });
+      }
+      setShowEditModal(false);
+    } catch (err: any) {
+      setEditError(err.message || "Erro ao salvar alterações no evento.");
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
 
   const userDistance = userCoords
     ? calculateDistanceKm(userCoords.lat, userCoords.lng, eventLat, eventLng)
@@ -397,10 +474,23 @@ export default function EventDetail({
           <span>Voltar para Eventos</span>
         </button>
 
-        <div className="text-right">
-          <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold block">
-            C.E. Helena Wysocki
-          </span>
+        <div className="flex items-center gap-2">
+          {canEdit && onUpdateEvent && (
+            <button
+              onClick={() => setShowEditModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition-all cursor-pointer shadow-xs active:scale-95"
+              title="Editar este evento"
+            >
+              <Pencil size={13} />
+              <span>Editar Evento</span>
+            </button>
+          )}
+
+          <div className="text-right hidden sm:block">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold block">
+              C.E. Helena Wysocki
+            </span>
+          </div>
         </div>
       </div>
 
@@ -424,20 +514,33 @@ export default function EventDetail({
           <span>Voltar</span>
         </button>
 
-        {canDelete && (
-          <button
-            onClick={() => {
-              if (confirm(`Tem certeza de que deseja deletar permanentemente o evento pedagógico "${event.title}"?`)) {
-                onDeleteEvent(event.id);
-              }
-            }}
-            disabled={isDeleting}
-            className="absolute top-4 right-4 p-2.5 rounded-full bg-red-600/80 text-white hover:bg-red-700 active:scale-95 transition-all shadow-lg backdrop-blur-md cursor-pointer disabled:opacity-50"
-            title="Excluir evento"
-          >
-            <Trash2 size={16} />
-          </button>
-        )}
+        <div className="absolute top-4 right-4 flex items-center gap-2">
+          {canEdit && onUpdateEvent && (
+            <button
+              onClick={() => setShowEditModal(true)}
+              className="p-2 px-3 rounded-full bg-emerald-600/90 hover:bg-emerald-700 text-white flex items-center gap-1.5 shadow-lg backdrop-blur-md active:scale-95 transition-all cursor-pointer text-xs font-semibold"
+              title="Editar evento"
+            >
+              <Pencil size={14} />
+              <span className="hidden sm:inline">Editar</span>
+            </button>
+          )}
+
+          {canDelete && (
+            <button
+              onClick={() => {
+                if (confirm(`Tem certeza de que deseja deletar permanentemente o evento pedagógico "${event.title}"?`)) {
+                  onDeleteEvent(event.id);
+                }
+              }}
+              disabled={isDeleting}
+              className="p-2.5 rounded-full bg-red-600/80 text-white hover:bg-red-700 active:scale-95 transition-all shadow-lg backdrop-blur-md cursor-pointer disabled:opacity-50"
+              title="Excluir evento"
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
+        </div>
 
         <div className="absolute bottom-4 left-6 right-6 flex flex-col gap-1 text-white">
           <span className="text-[10px] uppercase font-mono tracking-widest font-bold text-white/80">
@@ -708,6 +811,185 @@ export default function EventDetail({
                   Cancelar
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Modal de Edição de Evento por Administradores */}
+        {showEditModal && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 30 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 30 }}
+              className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
+                    <Pencil size={16} />
+                  </div>
+                  <h3 className="font-display font-bold text-base text-slate-800 dark:text-white">
+                    Editar Evento
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {editError && (
+                <div className="mb-4 p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 text-xs font-medium flex items-center justify-between">
+                  <span>{editError}</span>
+                  <button type="button" onClick={() => setEditError("")} className="font-bold text-sm ml-2">✕</button>
+                </div>
+              )}
+
+              <form onSubmit={handleSaveEdit} className="flex flex-col gap-3.5 text-xs">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    Título do Evento*
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    className="w-full h-11 px-3.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500/50 focus:outline-none text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    Local / Endereço Completo*
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editLocation}
+                    onChange={(e) => setEditLocation(e.target.value)}
+                    className="w-full h-11 px-3.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500/50 focus:outline-none text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Dia*</label>
+                    <input
+                      type="number"
+                      required
+                      min={1}
+                      max={31}
+                      value={editDay}
+                      onChange={(e) => setEditDay(e.target.value)}
+                      className="w-full h-11 px-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-center font-bold text-slate-900 dark:text-slate-100"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Mês*</label>
+                    <select
+                      value={editMonth}
+                      onChange={(e) => setEditMonth(parseInt(e.target.value))}
+                      className="w-full h-11 px-2 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100"
+                    >
+                      {monthsList.map((m, i) => (
+                        <option key={m} value={i} className="bg-white dark:bg-slate-900">
+                          {m.slice(0, 3)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Horário*</label>
+                    <input
+                      type="time"
+                      required
+                      value={editTime}
+                      onChange={(e) => setEditTime(e.target.value)}
+                      className="w-full h-11 px-2 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-center font-semibold text-slate-900 dark:text-slate-100"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <input
+                    type="checkbox"
+                    id="chk-edit-evt-paid"
+                    checked={editIsPaid}
+                    onChange={(e) => setEditIsPaid(e.target.checked)}
+                    className="w-4 h-4 text-emerald-600 rounded cursor-pointer"
+                  />
+                  <label htmlFor="chk-edit-evt-paid" className="text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer">
+                    Evento com taxa de inscrição (Pago)
+                  </label>
+                </div>
+
+                {editIsPaid && (
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      Valor / Taxa (Ex: R$ 15,00)
+                    </label>
+                    <input
+                      type="text"
+                      value={editPrice}
+                      onChange={(e) => setEditPrice(e.target.value)}
+                      placeholder="R$ 0,00"
+                      className="w-full h-11 px-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100"
+                    />
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    Requisitos / Orientações (Separados por vírgula)
+                  </label>
+                  <input
+                    type="text"
+                    value={editRequirements}
+                    onChange={(e) => setEditRequirements(e.target.value)}
+                    placeholder="Ex: Levar documento com foto, Uniforme escolar"
+                    className="w-full h-11 px-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    Link / Site Oficial (Opcional)
+                  </label>
+                  <input
+                    type="url"
+                    value={editWebsite}
+                    onChange={(e) => setEditWebsite(e.target.value)}
+                    placeholder="https://..."
+                    className="w-full h-11 px-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="submit"
+                    disabled={isSavingEdit}
+                    className="flex-1 h-11 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl flex items-center justify-center gap-1.5 shadow-md active:scale-98 transition-all cursor-pointer"
+                  >
+                    <CheckCircle size={16} />
+                    <span>{isSavingEdit ? "Salvando..." : "Salvar Alterações"}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowEditModal(false)}
+                    className="px-4 h-11 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 dark:text-slate-300 font-semibold rounded-xl active:scale-98 transition-all cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </div>
         )}

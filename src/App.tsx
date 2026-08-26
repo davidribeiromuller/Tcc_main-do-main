@@ -26,7 +26,17 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
       const stored = localStorage.getItem("local_user");
-      return stored ? JSON.parse(stored) : null;
+      if (stored) {
+        const parsed: User = JSON.parse(stored);
+        const cleanEmail = (parsed.email || "").toLowerCase().trim();
+        const isDirectorAccount = cleanEmail === "diretoria@helenawysocki.com";
+        return {
+          ...parsed,
+          isAdmin: isDirectorAccount,
+          role: isDirectorAccount ? "Diretor" : (parsed.role === "Diretor" ? "Aluno" : parsed.role)
+        };
+      }
+      return null;
     } catch {
       return null;
     }
@@ -214,7 +224,7 @@ export default function App() {
               }
 
               // Client-side fallback when running on GitHub Pages / static hosting with real Firebase Auth
-              const isDefaultAdmin = firebaseUser.email === "davidribeiromuller2009@gmail.com" || firebaseUser.email?.includes("diretor");
+              const isDefaultAdmin = (firebaseUser.email || "").toLowerCase().trim() === "diretoria@helenawysocki.com";
               const staticGoogleUser: User = {
                 id: Date.now(),
                 uid: firebaseUser.uid,
@@ -477,7 +487,7 @@ export default function App() {
 
       let found = localUsersList.find(u => u.email.toLowerCase() === cleanEmail);
       if (!found) {
-        const isDirector = cleanEmail.includes("diretor") || cleanEmail === "diretoria@helenawysocki.com";
+        const isDirector = cleanEmail === "diretoria@helenawysocki.com";
         const isStaff = cleanEmail === "funcionario@helenawysocki.com";
         found = {
           id: Date.now(),
@@ -496,6 +506,12 @@ export default function App() {
         };
         localUsersList.push(found);
         localStorage.setItem("local_users_db", JSON.stringify(localUsersList));
+      } else {
+        const isDirector = cleanEmail === "diretoria@helenawysocki.com";
+        if (!isDirector && (found.isAdmin || found.role === "Diretor")) {
+          found.isAdmin = false;
+          found.role = "Aluno";
+        }
       }
 
       setCurrentUser(found);
@@ -774,6 +790,72 @@ export default function App() {
       showToast("Erro ao excluir evento.", "error");
     } finally {
       setIsDeletingEvent(false);
+    }
+  };
+
+  // Update event (Admin / Director / Creator)
+  const handleUpdateEvent = async (eventId: number, eventData: Partial<Event>) => {
+    try {
+      const token = await getAuthToken();
+      let res: Response | null = null;
+      if (token) {
+        try {
+          res = await fetch(`/api/events/${eventId}`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(eventData),
+          });
+        } catch (netErr) {
+          res = null;
+        }
+      }
+
+      if (res && res.ok) {
+        const updatedResponse = await res.json();
+        const updated = updatedResponse.event;
+        if (updated) {
+          setEvents(prev => prev.map(e => e.id === eventId ? { ...e, ...updated } : e));
+          if (selectedEvent && selectedEvent.id === eventId) {
+            setSelectedEvent(prev => prev ? { ...prev, ...updated } : null);
+          }
+        } else {
+          await loadEvents();
+        }
+        showToast("Evento atualizado com sucesso no banco de dados!", "success");
+        return;
+      } else if (res) {
+        const detail = await res.json().catch(() => ({}));
+        showToast(detail.error || "Não foi possível atualizar o evento.", "error");
+        return;
+      }
+
+      // Local storage fallback
+      const updatedEvts = events.map(e => {
+        if (e.id === eventId) {
+          return {
+            ...e,
+            ...eventData,
+            day: eventData.day !== undefined ? Number(eventData.day) : e.day,
+            month: eventData.month !== undefined ? Number(eventData.month) : e.month,
+            year: eventData.year !== undefined ? Number(eventData.year) : e.year,
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return e;
+      });
+      setEvents(updatedEvts);
+      localStorage.setItem("local_events", JSON.stringify(updatedEvts));
+      const updatedItem = updatedEvts.find(e => e.id === eventId);
+      if (updatedItem) {
+        setSelectedEvent(updatedItem);
+      }
+      showToast("Evento atualizado com sucesso!", "success");
+    } catch (error) {
+      console.error("Error updating event:", error);
+      showToast("Erro ao salvar alterações do evento.", "error");
     }
   };
 
@@ -1114,6 +1196,7 @@ export default function App() {
                       currentUser={currentUser}
                       onNavigateBack={() => setActiveScreen("feed")}
                       onDeleteEvent={handleDeleteEvent}
+                      onUpdateEvent={handleUpdateEvent}
                       isDeleting={isDeletingEvent}
                       onOpenMap={(eventId: number) => {
                         setFocusedMapEventId(eventId);

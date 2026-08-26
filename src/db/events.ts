@@ -4,7 +4,8 @@ import { eq, sql } from 'drizzle-orm';
 import { 
   listAllEventsFallback, 
   createNewEventFallback, 
-  deleteEventByIdFallback 
+  deleteEventByIdFallback,
+  updateEventByIdFallback
 } from './fallbackStore.ts';
 
 const handleQueryError = (opsName: string, error: any) => {
@@ -63,6 +64,36 @@ export async function createNewEvent(data: {
     handleQueryError('createNewEvent', error);
     markDbOffline();
     return createNewEventFallback(data);
+  }
+}
+
+export async function updateEventById(id: number, data: Partial<{
+  title: string;
+  location: string;
+  day: number;
+  month: number;
+  year: number;
+  time?: string;
+  isPaid?: boolean;
+  price?: string | null;
+  requirements?: string | null;
+  website?: string | null;
+  image?: string | null;
+}>) {
+  if (isDbCachedOffline()) {
+    return updateEventByIdFallback(id, data as any);
+  }
+  try {
+    const result = await db.update(events)
+      .set(data as any)
+      .where(eq(events.id, id))
+      .returning();
+    markDbOnline();
+    return result[0];
+  } catch (error) {
+    handleQueryError('updateEventById', error);
+    markDbOffline();
+    return updateEventByIdFallback(id, data as any);
   }
 }
 

@@ -184,7 +184,7 @@ try {
     const raw = fs.readFileSync(USERS_FILE, 'utf-8');
     fallbackUsers = JSON.parse(raw);
     
-    // Ensure all default users are present with passwords
+    // Ensure all default users are present with passwords and sanitize roles
     let updated = false;
     for (const defU of defaultUsers) {
       const existingIndex = fallbackUsers.findIndex(u => u.email === defU.email);
@@ -201,8 +201,28 @@ try {
           existing.role = defU.role;
           updated = true;
         }
+        if (existing.isAdmin !== defU.isAdmin) {
+          existing.isAdmin = defU.isAdmin;
+          updated = true;
+        }
       }
     }
+
+    // Safety: ensure any non-director user has isAdmin set to false and role not Diretor
+    for (const u of fallbackUsers) {
+      const cleanEmail = (u.email || '').toLowerCase().trim();
+      if (cleanEmail !== 'diretoria@helenawysocki.com') {
+        if (u.isAdmin) {
+          u.isAdmin = false;
+          updated = true;
+        }
+        if (u.role === 'Diretor') {
+          u.role = 'Aluno';
+          updated = true;
+        }
+      }
+    }
+
     if (updated) {
       fs.writeFileSync(USERS_FILE, JSON.stringify(fallbackUsers, null, 2), 'utf-8');
     }
@@ -265,24 +285,34 @@ export function getOrCreateUserFallback(
     }
     existingUser.updatedAt = new Date().toISOString();
     
-    // Safety check for existing user roles in fallback
-    if (existingUser.role === 'Funcionário' && existingUser.email !== 'funcionario@helenawysocki.com') {
-      existingUser.role = 'Aluno';
+    // Strict restriction: Only diretoria@helenawysocki.com can be Administrator / Diretor
+    const isHelenaDirector = cleanEmail === 'diretoria@helenawysocki.com';
+    const isFuncionario = cleanEmail === 'funcionario@helenawysocki.com';
+
+    if (isHelenaDirector) {
+      existingUser.role = 'Diretor';
+      existingUser.isAdmin = true;
+    } else if (isFuncionario) {
+      existingUser.role = 'Funcionário';
       existingUser.isAdmin = false;
+    } else {
+      if (existingUser.role === 'Diretor' || existingUser.isAdmin) {
+        existingUser.role = 'Aluno';
+        existingUser.isAdmin = false;
+      }
     }
     
     saveUsers();
     return existingUser;
   }
 
-  const isFirstUser = fallbackUsers.length === 0;
-  let targetRole = role || (isFirstUser ? 'Diretor' : 'Aluno');
-  
-  // Strict restriction: Only funcionario@helenawysocki.com can have the "Funcionário" role
-  if (targetRole === 'Funcionário' && cleanEmail !== 'funcionario@helenawysocki.com') {
-    targetRole = isFirstUser ? 'Diretor' : 'Aluno';
-  }
-  const isAdmin = targetRole === 'Diretor' || isFirstUser;
+  const isHelenaDirector = cleanEmail === 'diretoria@helenawysocki.com';
+  const isFuncionario = cleanEmail === 'funcionario@helenawysocki.com';
+
+  const targetRole = isHelenaDirector
+    ? 'Diretor'
+    : (isFuncionario ? 'Funcionário' : (role === 'Diretor' ? 'Aluno' : (role || 'Aluno')));
+  const isAdmin = isHelenaDirector;
 
   const newUser: User = {
     id: Math.floor(Math.random() * 10000) + 1000,
@@ -436,6 +466,19 @@ export function createNewEventFallback(data: {
   fallbackEvents.push(newEvent);
   saveEvents();
   return newEvent;
+}
+
+export function updateEventByIdFallback(id: number, data: Partial<Event>): Event {
+  const index = fallbackEvents.findIndex(e => e.id === id);
+  if (index === -1) {
+    throw new Error('Evento não encontrado para atualizar na memória');
+  }
+  fallbackEvents[index] = {
+    ...fallbackEvents[index],
+    ...data,
+  };
+  saveEvents();
+  return fallbackEvents[index];
 }
 
 export function deleteEventByIdFallback(id: number): Event {

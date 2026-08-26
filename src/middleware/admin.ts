@@ -13,22 +13,20 @@ export const requireAdmin = async (
 
   try {
     const userEmail = (req.user.email || '').toLowerCase().trim();
-    if (
-      userEmail === 'davidribeiromuller2009@gmail.com' ||
-      userEmail === 'diretoria@helenawysocki.com' ||
-      (req.user as any).isAdmin === true ||
-      (req.user as any).role === 'Diretor'
-    ) {
+    if (userEmail === 'diretoria@helenawysocki.com') {
       return next();
     }
 
     const dbUser = await getUserByUid(req.user.uid);
-    if (!dbUser || (!dbUser.isAdmin && dbUser.role !== 'Diretor' && dbUser.email?.toLowerCase() !== 'davidribeiromuller2009@gmail.com')) {
-      return res.status(403).json({ error: 'Acesso negado: Requer privilégios de Administrador' });
+    if (dbUser && dbUser.email?.toLowerCase().trim() === 'diretoria@helenawysocki.com') {
+      return next();
     }
-    next();
+
+    return res.status(403).json({
+      error: 'Acesso negado: Apenas a conta oficial da Diretoria do Colégio Estadual Helena Wysocki possui privilégios de Administrador.'
+    });
   } catch (error) {
     console.error('Erro no middleware requireAdmin:', error);
-    res.status(500).json({ error: 'Erro interno do servidor ao verificar privilégios' });
+    res.status(500).json({ error: 'Erro interno do servidor ao verificar privilégios de administrador' });
   }
 };

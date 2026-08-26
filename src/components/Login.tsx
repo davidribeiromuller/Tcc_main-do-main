@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { motion } from "motion/react";
-import { Mail, Lock, LogIn, ChevronRight, GraduationCap, Users, User2, ArrowLeft } from "lucide-react";
+import { Mail, Lock, LogIn, ChevronRight, GraduationCap, Users, User2, ArrowLeft, ShieldCheck } from "lucide-react";
 import { User } from "../types";
 import logoImg from "../assets/images/logo.jpg";
 
@@ -447,9 +447,23 @@ export default function Login({ onGoogleLogin, onLocalLogin, onNavigate, isLoadi
         >
           Criar nova conta escolar
         </button>
+
+        {/* Acesso exclusivo da Diretoria */}
+        <button
+          type="button"
+          onClick={() => {
+            setEmail("diretoria@helenawysocki.com");
+            setPassword("senha123");
+            handleClearError();
+          }}
+          className="w-full py-2 px-3 text-[11px] font-medium text-slate-500 hover:text-brand-accent dark:hover:text-brand-primary rounded-xl hover:bg-slate-100 dark:hover:bg-brand-card-dark transition-colors flex items-center justify-center gap-1.5 cursor-pointer mt-1"
+        >
+          <ShieldCheck size={14} className="text-brand-accent dark:text-brand-primary" />
+          <span>Acesso Exclusivo da Diretoria (Admin)</span>
+        </button>
       </div>
 
-      <p className="text-[10px] text-center text-slate-400 mt-8 mb-4">
+      <p className="text-[10px] text-center text-slate-400 mt-6 mb-4">
         © 2026 Escola estadual Helena Wysocki. Todos os direitos reservados.
       </p>
     </div>

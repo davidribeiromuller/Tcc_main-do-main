@@ -21,6 +21,7 @@ import {
 import {
   listAllEvents,
   createNewEvent,
+  updateEventById,
   deleteEventById
 } from "./src/db/events.ts";
 import {
@@ -415,7 +416,7 @@ async function startServer() {
     }
   });
 
-  // Criar Novo Evento (Qualquer usuário com sessão ativa)
+  // Criar Novo Evento (Administradores e usuários autenticados)
   app.post("/api/events", requireAuth, async (req: AuthRequest, res) => {
     try {
       const { title, location, day, month, year, time, isPaid, price, requirements, website, image } = req.body;
@@ -424,7 +425,20 @@ async function startServer() {
         return res.status(400).json({ error: "Parâmetros obrigatórios incompletos" });
       }
 
-      const dbUser = await getUserByUid(req.user!.uid);
+      let dbUser = await getUserByUid(req.user!.uid);
+      if (!dbUser && req.user?.email) {
+        dbUser = await getUserByEmail(req.user.email);
+      }
+      if (!dbUser && req.user) {
+        dbUser = await getOrCreateUser(
+          req.user.uid,
+          req.user.email || '',
+          (req.user as any).name || 'Usuário',
+          (req.user as any).picture || '',
+          req.user.firebase?.sign_in_provider === 'google.com' ? 'google' : 'local',
+          (req.user as any).role || 'Aluno'
+        );
+      }
       const creatorId = dbUser ? dbUser.id : null;
 
       const newEvent = await createNewEvent({
@@ -449,6 +463,55 @@ async function startServer() {
     }
   });
 
+  // Atualizar / Editar Evento por ID (Qualquer Administrador ou Criador)
+  app.put("/api/events/:id", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const eventId = parseInt(req.params.id);
+      if (isNaN(eventId)) {
+        return res.status(400).json({ error: "ID de evento inválido" });
+      }
+
+      let dbUser = await getUserByUid(req.user!.uid);
+      if (!dbUser && req.user?.email) {
+        dbUser = await getUserByEmail(req.user.email);
+      }
+
+      const isDirectorOrAdmin =
+        req.user?.email?.toLowerCase().trim() === "diretoria@helenawysocki.com" ||
+        dbUser?.email?.toLowerCase().trim() === "diretoria@helenawysocki.com";
+
+      const allEvents = await listAllEvents();
+      const targetEvent = allEvents.find(e => e.id === eventId);
+      if (!targetEvent) {
+        return res.status(404).json({ error: "Evento não encontrado" });
+      }
+
+      if (!isDirectorOrAdmin && (!dbUser || targetEvent.creatorId !== dbUser.id)) {
+        return res.status(403).json({ error: "Acesso negado: Requer privilégios de Administrador para editar este evento" });
+      }
+
+      const { title, location, day, month, year, time, isPaid, price, requirements, website, image } = req.body;
+      const updatePayload: any = {};
+      if (title !== undefined) updatePayload.title = String(title).trim();
+      if (location !== undefined) updatePayload.location = String(location).trim();
+      if (day !== undefined) updatePayload.day = Number(day);
+      if (month !== undefined) updatePayload.month = Number(month);
+      if (year !== undefined) updatePayload.year = Number(year);
+      if (time !== undefined) updatePayload.time = String(time).trim();
+      if (isPaid !== undefined) updatePayload.isPaid = Boolean(isPaid);
+      if (price !== undefined) updatePayload.price = price ? String(price).trim() : null;
+      if (requirements !== undefined) updatePayload.requirements = requirements ? String(requirements).trim() : "";
+      if (website !== undefined) updatePayload.website = website ? String(website).trim() : null;
+      if (image !== undefined) updatePayload.image = image ? String(image).trim() : targetEvent.image;
+
+      const updated = await updateEventById(eventId, updatePayload);
+      res.json({ success: true, event: updated });
+    } catch (error: any) {
+      console.error("Erro ao atualizar evento:", error);
+      res.status(500).json({ error: error.message || "Erro na atualização do evento" });
+    }
+  });
+
   // Excluir Evento por ID
   app.delete("/api/events/:id", requireAuth, async (req: AuthRequest, res) => {
     try {
@@ -458,13 +521,17 @@ async function startServer() {
       }
 
       // Obter usuário do banco
-      const dbUser = await getUserByUid(req.user!.uid);
-      if (!dbUser) {
-        return res.status(401).json({ error: "Usuário com sessão ativa inválida no banco" });
+      let dbUser = await getUserByUid(req.user!.uid);
+      if (!dbUser && req.user?.email) {
+        dbUser = await getUserByEmail(req.user.email);
       }
 
+      const isDirectorOrAdmin =
+        req.user?.email?.toLowerCase().trim() === "diretoria@helenawysocki.com" ||
+        dbUser?.email?.toLowerCase().trim() === "diretoria@helenawysocki.com";
+
       // Se for administrador, tem permissão total
-      if (dbUser.isAdmin) {
+      if (isDirectorOrAdmin) {
         const deleted = await deleteEventById(eventId);
         return res.json({ success: true, event: deleted });
       }
@@ -476,7 +543,7 @@ async function startServer() {
         return res.status(404).json({ error: "Evento não encontrado" });
       }
 
-      if (targetEvent.creatorId !== dbUser.id) {
+      if (!dbUser || targetEvent.creatorId !== dbUser.id) {
         return res.status(403).json({ error: "Acesso negado: Você não é o criador deste evento" });
       }
 

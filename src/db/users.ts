@@ -39,12 +39,15 @@ export async function getOrCreateUser(
     // 1. Check if user already exists by UID
     const existingByUid = await getUserByUid(uid);
     if (existingByUid) {
+      const isDirector = cleanEmail === 'diretoria@helenawysocki.com';
       const updated = await updateUserByUid(uid, {
         email: cleanEmail || existingByUid.email,
         provider: provider || existingByUid.provider,
         ...(password ? { password } : {}),
         ...(fotoPerfil ? { foto_perfil: fotoPerfil } : {}),
         ...(nome ? { nome } : {}),
+        role: isDirector ? 'Diretor' : (existingByUid.role === 'Diretor' ? 'Aluno' : existingByUid.role),
+        isAdmin: isDirector,
       });
       markDbOnline();
       return updated || existingByUid;
@@ -54,6 +57,7 @@ export async function getOrCreateUser(
     if (cleanEmail) {
       const existingByEmail = await getUserByEmail(cleanEmail);
       if (existingByEmail) {
+        const isDirector = cleanEmail === 'diretoria@helenawysocki.com';
         // Update user's UID and provider to match new login credentials
         const updated = await updateUserById(existingByEmail.id, {
           uid,
@@ -61,6 +65,8 @@ export async function getOrCreateUser(
           ...(password ? { password } : {}),
           ...(fotoPerfil ? { foto_perfil: fotoPerfil } : {}),
           ...(nome ? { nome } : {}),
+          role: isDirector ? 'Diretor' : (existingByEmail.role === 'Diretor' ? 'Aluno' : existingByEmail.role),
+          isAdmin: isDirector,
         });
         markDbOnline();
         return updated || existingByEmail;
@@ -68,14 +74,11 @@ export async function getOrCreateUser(
     }
 
     // 3. Otherwise, create a new user record
-    const countResult = await db.select({ count: sql<number>`count(*)` }).from(users);
-    const isFirstUser = Number(countResult[0]?.count || 0) === 0;
+    const isDirector = cleanEmail === 'diretoria@helenawysocki.com';
+    const isFuncionario = cleanEmail === 'funcionario@helenawysocki.com';
 
-    let defaultRole = role || (isFirstUser ? 'Diretor' : 'Aluno');
-    if (defaultRole === 'Funcionário' && cleanEmail !== 'funcionario@helenawysocki.com') {
-      defaultRole = isFirstUser ? 'Diretor' : 'Aluno';
-    }
-    const isAdmin = defaultRole === 'Diretor' || isFirstUser;
+    const defaultRole = isDirector ? 'Diretor' : (isFuncionario ? 'Funcionário' : (role === 'Diretor' ? 'Aluno' : (role || 'Aluno')));
+    const isAdmin = isDirector;
 
     const result = await db.insert(users)
       .values({
@@ -96,6 +99,8 @@ export async function getOrCreateUser(
           password: password !== undefined ? password : sql`password`,
           nome: sql`COALESCE(${users.nome}, ${nome || cleanEmail.split('@')[0]})`,
           foto_perfil: sql`COALESCE(${users.foto_perfil}, ${fotoPerfil || ''})`,
+          role: isDirector ? 'Diretor' : (role === 'Diretor' ? 'Aluno' : sql`${users.role}`),
+          isAdmin: isDirector,
           updatedAt: new Date(),
         },
       })
