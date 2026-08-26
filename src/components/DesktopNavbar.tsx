@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Search, ChevronDown, LogOut, User as UserIcon, Settings as SettingsIcon } from "lucide-react";
-import logoImg from "../assets/images/logo.jpg";
 
 interface DesktopNavbarProps {
   activeScreen: string;
@@ -27,12 +26,6 @@ export default function DesktopNavbar({
         onClick={() => onNavigate("feed")}
         className="flex items-center gap-3 cursor-pointer group"
       >
-        <img 
-          src={logoImg} 
-          className="h-9 w-9 rounded-full object-cover border border-slate-200 group-hover:scale-105 transition-transform" 
-          alt="Helena Wysocki Logo" 
-          referrerPolicy="no-referrer"
-        />
         <div className="flex flex-col">
           <span className="font-display font-bold text-slate-800 tracking-tight text-base leading-tight group-hover:text-brand-accent transition-colors">
             Helena Wysocki
