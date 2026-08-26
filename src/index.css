@@ -109,6 +109,19 @@
   scrollbar-color: rgba(163, 198, 157, 0.35) transparent;
 }
 
+/* Hide the scrollbar on desktop while keeping scrolling available. */
+@media (min-width: 768px) {
+  * {
+    scrollbar-width: none;
+  }
+
+  *::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+}
+
 /* Base custom styles */
 html {
   scroll-behavior: smooth;
