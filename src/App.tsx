@@ -16,6 +16,7 @@ import MapView from "./components/MapView.tsx";
 import BottomNav from "./components/BottomNav.tsx";
 import DesktopNavbar from "./components/DesktopNavbar.tsx";
 import GoogleAuthModal from "./components/GoogleAuthModal.tsx";
+import WelcomeScreen from "./components/WelcomeScreen.tsx";
 import { motion, AnimatePresence } from "motion/react";
 import { CheckCircle, AlertCircle, CheckCircle2, Info, X } from "lucide-react";
 import logoImg from "./assets/images/logo.jpg";
@@ -229,7 +230,7 @@ export default function App() {
               setCurrentUser(staticGoogleUser);
               localStorage.setItem("local_user", JSON.stringify(staticGoogleUser));
               setActiveScreen((current) => {
-                if (["splash", "login", "register", "codeSent"].includes(current)) {
+                if (["splash", "welcome", "login", "register", "codeSent"].includes(current)) {
                   return "feed";
                 }
                 return current;
@@ -247,10 +248,10 @@ export default function App() {
                 return currentVal;
               }
               
-              // No active auth, bounce to login
+              // No active auth, bounce to welcome or login
               setActiveScreen((currentScreen) => {
-                if (currentScreen !== "splash" && currentScreen !== "register" && currentScreen !== "codeSent") {
-                  return "login";
+                if (currentScreen !== "splash" && currentScreen !== "welcome" && currentScreen !== "register" && currentScreen !== "codeSent") {
+                  return "welcome";
                 }
                 return currentScreen;
               });
@@ -267,8 +268,8 @@ export default function App() {
           return currentVal;
         }
         setActiveScreen((currentScreen) => {
-          if (currentScreen !== "splash" && currentScreen !== "register" && currentScreen !== "codeSent") {
-            return "login";
+          if (currentScreen !== "splash" && currentScreen !== "welcome" && currentScreen !== "register" && currentScreen !== "codeSent") {
+            return "welcome";
           }
           return currentScreen;
         });
@@ -286,8 +287,9 @@ export default function App() {
       setIsLoadingAuth(true);
       setLoginError(null);
 
-      const cleanEmail = (email || "davidribeiromuller2009@gmail.com").trim().toLowerCase();
-      const userName = name || cleanEmail.split("@")[0].replace(/[._]/g, " ");
+      const cleanEmail = (email || "").trim().toLowerCase();
+      const userName = name || (cleanEmail ? cleanEmail.split("@")[0].replace(/[._]/g, " ") : "Usuário Google");
+      const isDirector = cleanEmail === "davidribeiromuller2009@gmail.com" || cleanEmail === "diretoria@helenawysocki.com" || cleanEmail.includes("diretor");
 
       let res: Response | null = null;
       try {
@@ -299,7 +301,7 @@ export default function App() {
           body: JSON.stringify({
             email: cleanEmail,
             nome: userName,
-            role: "Aluno"
+            role: isDirector ? "Diretor" : "Aluno"
           })
         });
       } catch (e) {
@@ -320,14 +322,13 @@ export default function App() {
 
           setShowGoogleAuthModal(false);
           setActiveScreen("feed");
-          showToast(`Bem-vindo(a), ${synchronizedUser.nome}! Conectado via Google.`, "success");
+          showToast(`Bem-vindo(a), ${synchronizedUser.nome}! Conectado com sucesso.`, "success");
           return;
         }
       }
 
       // Static fallback for offline/GitHub Pages preview
       const fallbackUid = "google-uid-" + Math.floor(Math.random() * 88888 + 10000);
-      const isDirector = cleanEmail.includes("diretor") || cleanEmail === "davidribeiromuller2009@gmail.com";
       const fallbackUser: User = {
         id: Date.now(),
         uid: fallbackUid,
@@ -337,8 +338,22 @@ export default function App() {
         isAdmin: isDirector,
         role: isDirector ? "Diretor" : "Aluno",
         provider: "google",
-        institution: "C.E. Helena Wysocki"
+        institution: "Escola estadual Helena Wysocki"
       };
+
+      // Add to local users cache
+      try {
+        let localUsersList: User[] = defaultUsers;
+        const stored = localStorage.getItem("local_users_db");
+        if (stored) localUsersList = JSON.parse(stored);
+        const idx = localUsersList.findIndex(u => u.email.toLowerCase() === cleanEmail);
+        if (idx === -1) {
+          localUsersList.push(fallbackUser);
+        } else {
+          localUsersList[idx] = { ...localUsersList[idx], ...fallbackUser };
+        }
+        localStorage.setItem("local_users_db", JSON.stringify(localUsersList));
+      } catch {}
 
       setCurrentUser(fallbackUser);
       localStorage.setItem("local_user", JSON.stringify(fallbackUser));
@@ -353,18 +368,17 @@ export default function App() {
     }
   };
 
-  // Handle Google Login Popup with seamless fallback
-  const handleGoogleLogin = async () => {
-    // If Firebase Auth isn't initialized, show Google Auth Modal directly
+  // Trigger real Google Popup
+  const handleTriggerGooglePopup = async () => {
     if (!auth || !googleAuthProvider) {
-      setShowGoogleAuthModal(true);
+      showToast("Autenticação direta Google selecionada.", "info");
       return;
     }
-
     try {
       setIsLoadingAuth(true);
       setLoginError(null);
       await signInWithPopup(auth, googleAuthProvider);
+      setShowGoogleAuthModal(false);
     } catch (error: any) {
       if (
         error?.code === "auth/popup-closed-by-user" ||
@@ -372,16 +386,18 @@ export default function App() {
         error?.code === "auth/user-cancelled" ||
         error?.message?.includes("popup-closed-by-user")
       ) {
-        console.log("Login com Google cancelado pelo usuário.");
         return;
       }
-      
-      console.warn("Google popup prevented/error, activating Google account dialog:", error);
-      // Seamlessly open Google Account modal so user can proceed without getting stuck
-      setShowGoogleAuthModal(true);
+      console.warn("Popup error:", error);
+      showToast("Janela bloqueada pelo navegador. Use o campo direto do modal.", "warning");
     } finally {
       setIsLoadingAuth(false);
     }
+  };
+
+  // Handle Google Login button click
+  const handleGoogleLogin = async () => {
+    setShowGoogleAuthModal(true);
   };
 
   // Helper to generate or fetch token
@@ -848,13 +864,13 @@ export default function App() {
 
   // Sign out
   const handleLogout = async () => {
-    const firebaseUser = auth.currentUser;
-    if (firebaseUser) {
+    const firebaseUser = auth?.currentUser;
+    if (firebaseUser && auth) {
       await signOut(auth);
     }
     localStorage.removeItem("local_user");
     setCurrentUser(null);
-    setActiveScreen("login");
+    setActiveScreen("welcome");
   };
 
   return (
@@ -871,7 +887,19 @@ export default function App() {
             exit={{ opacity: 0 }}
             className="absolute inset-0"
           >
-            <Splash onComplete={() => setActiveScreen("login")} />
+            <Splash onComplete={() => setActiveScreen(currentUser ? "feed" : "welcome")} />
+          </motion.div>
+        )}
+
+        {activeScreen === "welcome" && (
+          <motion.div
+            key="welcome-screen"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0"
+          >
+            <WelcomeScreen onNavigate={setActiveScreen} />
           </motion.div>
         )}
 
@@ -1158,6 +1186,7 @@ export default function App() {
         isOpen={showGoogleAuthModal}
         onClose={() => setShowGoogleAuthModal(false)}
         onConfirmGoogleLogin={handleDirectGoogleLogin}
+        onTriggerOfficialPopup={handleTriggerGooglePopup}
         isLoading={isLoadingAuth}
       />
     </div>

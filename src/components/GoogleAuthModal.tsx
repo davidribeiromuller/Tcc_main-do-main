@@ -1,11 +1,12 @@
 import React, { useState } from "react";
 import { motion } from "motion/react";
-import { X, CheckCircle, ShieldCheck, Mail, ArrowRight, User as UserIcon } from "lucide-react";
+import { X, CheckCircle, ShieldCheck, Mail, ArrowRight, User as UserIcon, ExternalLink } from "lucide-react";
 
 interface GoogleAuthModalProps {
   isOpen: boolean;
   onClose: () => void;
   onConfirmGoogleLogin: (email: string, name?: string) => Promise<void>;
+  onTriggerOfficialPopup?: () => Promise<void>;
   isLoading: boolean;
 }
 
@@ -13,6 +14,7 @@ export default function GoogleAuthModal({
   isOpen,
   onClose,
   onConfirmGoogleLogin,
+  onTriggerOfficialPopup,
   isLoading,
 }: GoogleAuthModalProps) {
   const [customEmail, setCustomEmail] = useState("");
@@ -22,15 +24,23 @@ export default function GoogleAuthModal({
 
   if (!isOpen) return null;
 
-  const defaultAccount = {
-    name: "David Ribeiro Müller",
-    email: "davidribeiromuller2009@gmail.com",
-    avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120",
-  };
+  // Suggested accounts to make quick login easy while allowing any custom email
+  const suggestedAccounts = [
+    {
+      name: "David Ribeiro Müller (Diretor)",
+      email: "davidribeiromuller2009@gmail.com",
+      role: "Diretor"
+    },
+    {
+      name: "DAVID RIBEIRO MULLER (Estudante)",
+      email: "muller.david@escola.pr.gov.br",
+      role: "Aluno"
+    }
+  ];
 
-  const handleSelectDefault = () => {
+  const handleSelectAccount = (email: string, name: string) => {
     setError("");
-    onConfirmGoogleLogin(defaultAccount.email, defaultAccount.name);
+    onConfirmGoogleLogin(email, name);
   };
 
   const handleManualSubmit = (e: React.FormEvent) => {
@@ -87,7 +97,7 @@ export default function GoogleAuthModal({
 
           <h3 className="text-lg font-bold">Fazer login com o Google</h3>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Escolha uma conta para continuar no <strong>Portal Helena Wysocki</strong>
+            Escolha uma conta cadastrada ou insira qualquer conta Google
           </p>
         </div>
 
@@ -98,50 +108,64 @@ export default function GoogleAuthModal({
         )}
 
         {!useManual ? (
-          <div className="flex flex-col gap-3">
-            {/* Detected / Default Google Account */}
-            <button
-              onClick={handleSelectDefault}
-              disabled={isLoading}
-              className="flex items-center gap-3.5 p-3.5 rounded-2xl border-2 border-[#1A73E8]/30 bg-blue-50/50 dark:bg-blue-950/20 hover:bg-blue-50 dark:hover:bg-blue-950/40 active:scale-98 transition-all text-start cursor-pointer group"
-            >
-              <div className="w-10 h-10 rounded-full bg-[#1A73E8] text-white font-bold flex items-center justify-center shadow-xs">
-                D
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-slate-800 dark:text-slate-100 group-hover:text-[#1A73E8] transition-colors truncate">
-                  {defaultAccount.name}
-                </p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                  {defaultAccount.email}
-                </p>
-              </div>
-              <CheckCircle size={18} className="text-[#1A73E8] shrink-0" />
-            </button>
+          <div className="flex flex-col gap-2.5">
+            {/* Suggested / Available Accounts */}
+            {suggestedAccounts.map((acc) => (
+              <button
+                key={acc.email}
+                onClick={() => handleSelectAccount(acc.email, acc.name)}
+                disabled={isLoading}
+                className="flex items-center gap-3.5 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 hover:border-[#1A73E8]/50 hover:bg-blue-50/40 dark:hover:bg-blue-950/30 active:scale-98 transition-all text-start cursor-pointer group"
+              >
+                <div className="w-9 h-9 rounded-full bg-[#1A73E8] text-white font-bold flex items-center justify-center shadow-xs text-xs">
+                  {acc.name.charAt(0)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold text-slate-800 dark:text-slate-100 group-hover:text-[#1A73E8] transition-colors truncate">
+                    {acc.name}
+                  </p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                    {acc.email}
+                  </p>
+                </div>
+                <CheckCircle size={16} className="text-[#1A73E8] shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+            ))}
 
-            {/* Use another Google account */}
+            {/* Input any other Google account */}
             <button
               onClick={() => setUseManual(true)}
               type="button"
-              className="flex items-center gap-3 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-start text-xs font-medium transition-colors cursor-pointer"
+              className="flex items-center gap-3 p-3 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-[#1A73E8] hover:bg-slate-50 dark:hover:bg-slate-800/50 text-start text-xs font-semibold text-[#1A73E8] dark:text-blue-400 transition-colors cursor-pointer mt-1"
             >
-              <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500">
+              <div className="w-8 h-8 rounded-full bg-blue-50 dark:bg-blue-950/50 flex items-center justify-center text-[#1A73E8]">
                 <UserIcon size={16} />
               </div>
-              <span className="flex-1">Usar outra conta Google</span>
-              <ArrowRight size={15} className="text-slate-400" />
+              <span className="flex-1">Digitar outra conta Google / Institucional</span>
+              <ArrowRight size={15} />
             </button>
+
+            {onTriggerOfficialPopup && (
+              <button
+                onClick={onTriggerOfficialPopup}
+                type="button"
+                className="text-center text-[11px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 mt-2 flex items-center justify-center gap-1.5 cursor-pointer underline"
+              >
+                <ExternalLink size={12} />
+                <span>Tentar abrir popup do navegador</span>
+              </button>
+            )}
 
             <div className="mt-3 flex items-center justify-center gap-1.5 text-[10px] text-slate-400">
               <ShieldCheck size={13} className="text-emerald-500" />
-              <span>Conexão direta e segura com o serviço escolar</span>
+              <span>Conexão direta e segura com o portal escolar</span>
             </div>
           </div>
         ) : (
           <form onSubmit={handleManualSubmit} className="flex flex-col gap-3">
             <div className="flex flex-col gap-1">
               <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                E-mail da Conta Google
+                E-mail da Conta Google ou Escola PR
               </label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
@@ -151,7 +175,7 @@ export default function GoogleAuthModal({
                   autoFocus
                   value={customEmail}
                   onChange={(e) => setCustomEmail(e.target.value)}
-                  placeholder="seu.nome@gmail.com"
+                  placeholder="exemplo@gmail.com ou @escola.pr.gov.br"
                   className="w-full h-11 pl-9 pr-3 text-xs bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-[#1A73E8]/50 focus:outline-none"
                 />
               </div>
@@ -159,13 +183,13 @@ export default function GoogleAuthModal({
 
             <div className="flex flex-col gap-1">
               <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                Nome de Exibição (Opcional)
+                Nome do Usuário (Opcional)
               </label>
               <input
                 type="text"
                 value={customName}
                 onChange={(e) => setCustomName(e.target.value)}
-                placeholder="Ex: David Müller"
+                placeholder="Ex: Seu Nome Completo"
                 className="w-full h-11 px-3 text-xs bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-[#1A73E8]/50 focus:outline-none"
               />
             </div>
@@ -184,7 +208,7 @@ export default function GoogleAuthModal({
                 onClick={() => setUseManual(false)}
                 className="w-full h-9 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-medium cursor-pointer"
               >
-                Voltar
+                Voltar para contas sugeridas
               </button>
             </div>
           </form>

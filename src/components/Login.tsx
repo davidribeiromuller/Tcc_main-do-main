@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { motion } from "motion/react";
-import { Mail, Lock, LogIn, ChevronRight, GraduationCap, Users, User2 } from "lucide-react";
+import { Mail, Lock, LogIn, ChevronRight, GraduationCap, Users, User2, ArrowLeft } from "lucide-react";
 import { User } from "../types";
 import logoImg from "../assets/images/logo.jpg";
 
@@ -288,9 +288,21 @@ export default function Login({ onGoogleLogin, onLocalLogin, onNavigate, isLoadi
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="flex flex-col h-full overflow-y-auto p-6 text-brand-text-light dark:text-brand-text-dark max-w-md mx-auto w-full justify-center md:py-12"
+      className="flex flex-col h-full overflow-y-auto p-6 text-brand-text-light dark:text-brand-text-dark max-w-md mx-auto w-full md:py-8"
     >
-      <div className="flex flex-col items-center my-5 text-center">
+      <div className="my-auto py-4">
+        <div className="flex items-center justify-between w-full mb-1">
+          <button
+            type="button"
+            onClick={() => onNavigate("welcome")}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-brand-accent transition-colors p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-brand-card-dark"
+          >
+            <ArrowLeft size={16} />
+            <span>Início</span>
+          </button>
+        </div>
+
+      <div className="flex flex-col items-center my-4 text-center">
         <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border-2 border-brand-primary/20 shadow-lg mb-3 bg-white p-1 flex items-center justify-center">
           <img
             src={logoImg}
@@ -440,6 +452,7 @@ export default function Login({ onGoogleLogin, onLocalLogin, onNavigate, isLoadi
       <p className="text-[10px] text-center text-slate-400 mt-8 mb-4">
         © 2026 Escola estadual Helena Wysocki. Todos os direitos reservados.
       </p>
-    </motion.div>
+    </div>
+  </motion.div>
   );
 }

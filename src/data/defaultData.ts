@@ -124,5 +124,33 @@ export const defaultUsers: User[] = [
     institution: "Escola estadual Helena Wysocki",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
+  },
+  {
+    id: 5256,
+    uid: "8JwejrxI50Xrk5MPrdUjh34cZT03",
+    email: "muller.david@escola.pr.gov.br",
+    nome: "DAVID RIBEIRO MULLER",
+    foto_perfil: "https://lh3.googleusercontent.com/a/ACg8ocJ-HH2qfcPJF-MXYvyCcI1miq5d9iNYAq2TKqvL8ZE1KiphwiGM=s96-c",
+    provider: "google",
+    role: "Aluno",
+    ativo: true,
+    isAdmin: false,
+    institution: "Escola estadual Helena Wysocki",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 10000,
+    uid: "tldTqxnmlHMAa9oYNUPHO72AlgB3",
+    email: "davidribeiromuller2009@gmail.com",
+    nome: "David Ribeiro Müller",
+    foto_perfil: "https://lh3.googleusercontent.com/a/ACg8ocLBADHr-NaZCSwyxCQNN1iBqMwvhKmnsXZxNWp8wrtPqdyAyLP1=s96-c",
+    provider: "google",
+    role: "Diretor",
+    ativo: true,
+    isAdmin: true,
+    institution: "Escola estadual Helena Wysocki",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   }
 ];

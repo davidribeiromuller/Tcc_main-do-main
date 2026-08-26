@@ -22,6 +22,9 @@ try {
   app = getApps().length === 0 ? initializeApp(config) : getApps()[0];
   auth = getAuth(app);
   googleAuthProvider = new GoogleAuthProvider();
+  googleAuthProvider.setCustomParameters({
+    prompt: 'select_account'
+  });
 } catch (err) {
   console.warn("Firebase initialize warning:", err);
 }

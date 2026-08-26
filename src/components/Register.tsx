@@ -138,17 +138,36 @@ export default function Register({ onRegister, onNavigate }: RegisterProps) {
 
     try {
       setIsCheckingEmail(true);
-      const checkRes = await fetch(`/api/auth/check-email?email=${encodeURIComponent(email.trim().toLowerCase())}`);
+      const cleanEmail = email.trim().toLowerCase();
+      
+      // Also verify local storage cache if available
+      try {
+        const stored = localStorage.getItem("local_users_db");
+        if (stored) {
+          const localList = JSON.parse(stored);
+          const found = localList.find((u: any) => u.email && u.email.toLowerCase() === cleanEmail);
+          if (found) {
+            setError("Este e-mail já está cadastrado. Por favor, tente fazer login ou use outro e-mail.");
+            setEmailError(true);
+            return;
+          }
+        }
+      } catch {}
+
+      const checkRes = await fetch(`/api/auth/check-email?email=${encodeURIComponent(cleanEmail)}`);
       if (checkRes.ok) {
-        const checkData = await checkRes.json();
-        if (checkData.exists) {
-          setError("Este e-mail já está cadastrado. Por favor, tente fazer login ou use outro e-mail.");
-          setEmailError(true);
-          return;
+        const contentType = checkRes.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const checkData = await checkRes.json();
+          if (checkData && checkData.exists === true) {
+            setError("Este e-mail já está cadastrado. Por favor, tente fazer login ou use outro e-mail.");
+            setEmailError(true);
+            return;
+          }
         }
       }
     } catch (err) {
-      console.error("Erro ao verificar e-mail:", err);
+      console.log("Validação online do e-mail prosseguindo em modo offline:", err);
     } finally {
       setIsCheckingEmail(false);
     }
@@ -186,9 +205,10 @@ export default function Register({ onRegister, onNavigate }: RegisterProps) {
     <motion.div
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="flex flex-col h-full overflow-y-auto p-6 text-brand-text-light dark:text-brand-text-dark max-w-md mx-auto w-full justify-center md:py-12"
+      className="flex flex-col h-full overflow-y-auto p-6 text-brand-text-light dark:text-brand-text-dark max-w-md mx-auto w-full md:py-8"
     >
-      <div className="flex items-center gap-3 my-4">
+      <div className="my-auto py-4">
+        <div className="flex items-center gap-3 my-4">
         <button
           onClick={() => currentStep === 2 ? setCurrentStep(1) : onNavigate("login")}
           className="p-2 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-brand-card-dark text-slate-600 dark:text-brand-text-dark"
@@ -380,6 +400,7 @@ export default function Register({ onRegister, onNavigate }: RegisterProps) {
           </button>
         </form>
       )}
+      </div>
     </motion.div>
   );
 }
