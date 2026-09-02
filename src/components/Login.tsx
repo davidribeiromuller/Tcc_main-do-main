@@ -9,13 +9,14 @@ import {
   ArrowLeft,
   ShieldCheck,
   UserPlus,
-  History,
-  X,
-  UserCheck,
+  Globe,
+  KeyRound,
+  Check,
   Sparkles,
-  Zap,
+  Smartphone,
   ChevronDown,
-  Check
+  X,
+  Trash2
 } from "lucide-react";
 import logoImg from "../assets/images/logo.jpg";
 import { User } from "../types";
@@ -39,6 +40,7 @@ interface RecognizedAccount {
   password?: string;
   provider?: string;
   lastLogin?: string;
+  appLabel?: string;
 }
 
 export default function Login({
@@ -60,10 +62,11 @@ export default function Login({
   const [localError, setLocalError] = useState("");
   const [autoFilledMsg, setAutoFilledMsg] = useState<string | null>(null);
   
-  // Quick Logins recognition state
-  const [showQuickLogins, setShowQuickLogins] = useState(false);
+  // Floating Autofill / Credential Selector state
+  const [showAutofillMenu, setShowAutofillMenu] = useState(false);
   const [savedAccounts, setSavedAccounts] = useState<RecognizedAccount[]>([]);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [showManageModal, setShowManageModal] = useState(false);
+  const autofillRef = useRef<HTMLDivElement>(null);
   const emailInputRef = useRef<HTMLInputElement>(null);
 
   const activeError = localError || loginError || "";
@@ -73,12 +76,12 @@ export default function Login({
     if (clearLoginError) clearLoginError();
   };
 
-  // Load recognized & previously logged accounts strictly from the user's computer (localStorage)
+  // Load recognized credentials and saved history from localStorage
   useEffect(() => {
     const loadRecognizedAccounts = () => {
       const accountsMap = new Map<string, RecognizedAccount>();
 
-      // 0. Default recognized quick-access accounts available immediately
+      // 0. Default credential accounts
       const defaultRecognized: RecognizedAccount[] = [
         {
           email: "davidribeiromuller2009@gmail.com",
@@ -87,7 +90,7 @@ export default function Login({
           isAdmin: true,
           password: "admin",
           provider: "google",
-          lastLogin: "Acesso Principal"
+          appLabel: "eloEscola • Diretoria"
         },
         {
           email: "diretoria@helenawysocki.com",
@@ -96,7 +99,7 @@ export default function Login({
           isAdmin: true,
           password: "admin",
           provider: "local",
-          lastLogin: "Gestão Escolar"
+          appLabel: "eloEscola • Gestão"
         },
         {
           email: "aluno@escola.pr.gov.br",
@@ -105,15 +108,15 @@ export default function Login({
           isAdmin: false,
           password: "aluno",
           provider: "local",
-          lastLogin: "Estudante"
+          appLabel: "eloEscola • Estudante"
         }
       ];
 
-      defaultRecognized.forEach(acc => {
+      defaultRecognized.forEach((acc) => {
         accountsMap.set(acc.email.toLowerCase().trim(), acc);
       });
 
-      // 1. Check previously active session stored on this computer
+      // 1. Check current logged-in user on this browser
       try {
         const storedUser = localStorage.getItem("local_user");
         if (storedUser) {
@@ -126,13 +129,13 @@ export default function Login({
               isAdmin: !!u.isAdmin,
               password: u.password || "senha123",
               provider: u.provider || "local",
-              lastLogin: "Sessão salva no computador"
+              appLabel: "eloEscola"
             });
           }
         }
       } catch {}
 
-      // 2. Check accounts previously logged in / saved on this computer
+      // 2. Check saved account history on this browser
       try {
         const savedHistory = localStorage.getItem("saved_accounts_history");
         if (savedHistory) {
@@ -145,6 +148,7 @@ export default function Login({
                   ...acc,
                   name: acc.name || acc.email.split("@")[0].replace(/[._]/g, " "),
                   role: acc.role || (acc.isAdmin ? "Diretor" : "Aluno"),
+                  appLabel: acc.appLabel || "eloEscola"
                 });
               }
             });
@@ -152,22 +156,42 @@ export default function Login({
         }
       } catch {}
 
+      // 3. Registered users passed from App
+      if (Array.isArray(registeredUsers)) {
+        registeredUsers.forEach((u) => {
+          if (u && u.email) {
+            const key = u.email.toLowerCase().trim();
+            if (!accountsMap.has(key)) {
+              accountsMap.set(key, {
+                email: u.email,
+                name: u.nome || u.email.split("@")[0],
+                role: u.role || (u.isAdmin ? "Diretor" : "Aluno"),
+                isAdmin: !!u.isAdmin,
+                password: u.password || "senha123",
+                provider: u.provider || "local",
+                appLabel: "eloEscola"
+              });
+            }
+          }
+        });
+      }
+
       setSavedAccounts(Array.from(accountsMap.values()));
     };
 
     loadRecognizedAccounts();
-  }, []);
+  }, [registeredUsers]);
 
-  // Click outside listener for quick logins dropdown
+  // Click outside listener for the autofill popup
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target as Node) &&
+        autofillRef.current &&
+        !autofillRef.current.contains(event.target as Node) &&
         emailInputRef.current &&
         !emailInputRef.current.contains(event.target as Node)
       ) {
-        setShowQuickLogins(false);
+        setShowAutofillMenu(false);
       }
     };
 
@@ -188,6 +212,7 @@ export default function Login({
         role: role || (isDirector ? "Diretor" : "Aluno"),
         isAdmin: isDirector,
         password: pass || "senha123",
+        appLabel: "eloEscola",
         lastLogin: new Date().toLocaleDateString("pt-BR")
       };
       const filtered = list.filter((a) => a.email.toLowerCase() !== cleanEmail.toLowerCase());
@@ -196,15 +221,15 @@ export default function Login({
     } catch {}
   };
 
-  const handleSelectQuickAccount = (acc: RecognizedAccount, autoLogin: boolean = false) => {
+  const handleSelectAutofillAccount = (acc: RecognizedAccount, autoSubmit: boolean = false) => {
     setEmail(acc.email);
     setPassword(acc.password || "senha123");
-    setShowQuickLogins(false);
+    setShowAutofillMenu(false);
     handleClearError();
-    setAutoFilledMsg(`E-mail inserido: ${acc.email}`);
+    setAutoFilledMsg(`Credenciais preenchidas para ${acc.email}`);
     setTimeout(() => setAutoFilledMsg(null), 3000);
 
-    if (autoLogin) {
+    if (autoSubmit) {
       persistAccountToHistory(acc.email, acc.name, acc.role, acc.password);
       onLocalLogin(acc.email, acc.password || "senha123");
     }
@@ -226,7 +251,7 @@ export default function Login({
   const handleStandardSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     handleClearError();
-    setShowQuickLogins(false);
+    setShowAutofillMenu(false);
 
     const cleanEmail = email.trim();
     if (!cleanEmail) {
@@ -292,8 +317,8 @@ export default function Login({
     onNavigate("codeSent");
   };
 
-  // Filter recognized accounts by input
-  const filteredQuickAccounts = savedAccounts.filter((acc) => {
+  // Filter accounts when user types
+  const filteredAccounts = savedAccounts.filter((acc) => {
     if (!email) return true;
     const q = email.toLowerCase().trim();
     return (
@@ -561,225 +586,212 @@ export default function Login({
             </motion.div>
           )}
 
-          <form onSubmit={handleStandardSubmit} className="flex flex-col gap-3.5">
-            {/* Quick Access / Inserir Email Rápido Chips */}
-            {savedAccounts.length > 0 && (
-              <div className="flex flex-col gap-1.5 pb-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-1">
-                    <Zap size={13} className="text-amber-500 fill-amber-500" />
-                    Acesso Rápido (Preencher E-mail):
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowQuickLogins(!showQuickLogins)}
-                    className="text-[10px] font-medium text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-0.5"
-                  >
-                    <span>{showQuickLogins ? "Fechar lista" : "Ver todas"}</span>
-                    <ChevronDown size={11} className={`transition-transform duration-200 ${showQuickLogins ? "rotate-180" : ""}`} />
-                  </button>
-                </div>
-
-                <div className="flex flex-wrap gap-1.5">
-                  {savedAccounts.slice(0, 3).map((acc) => {
-                    const isSelected = email.toLowerCase().trim() === acc.email.toLowerCase().trim();
-                    const isDirector = acc.isAdmin || acc.role?.toLowerCase().includes("diretor");
-                    return (
-                      <button
-                        key={acc.email}
-                        type="button"
-                        onClick={() => handleSelectQuickAccount(acc, false)}
-                        className={`group px-2.5 py-1.5 rounded-xl text-xs font-medium border transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs ${
-                          isSelected
-                            ? "bg-blue-50 border-blue-400 text-blue-800 dark:bg-blue-950/60 dark:border-blue-700 dark:text-blue-200 font-semibold ring-1 ring-blue-400"
-                            : "bg-slate-100/80 hover:bg-slate-200/80 border-slate-200 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200 hover:border-slate-300"
-                        }`}
-                        title={`Clique para preencher o e-mail: ${acc.email}`}
-                      >
-                        <span className={`w-2 h-2 rounded-full ${isDirector ? "bg-blue-500" : "bg-emerald-500"}`} />
-                        <span className="truncate max-w-[140px] text-[11px]">{acc.email.split("@")[0]}</span>
-                        <span className="text-[9px] text-slate-400 group-hover:text-blue-600 transition-colors font-bold">
-                          {isSelected ? "✓" : "+ Inserir"}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+          {/* Auto filled feedback toast */}
+          <AnimatePresence>
+            {autoFilledMsg && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                className="mb-3 p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300 text-xs font-medium flex items-center gap-2 shadow-2xs"
+              >
+                <Check size={14} className="text-emerald-600 shrink-0" />
+                <span className="truncate">{autoFilledMsg}</span>
+              </motion.div>
             )}
+          </AnimatePresence>
 
-            {/* Auto filled feedback toast */}
-            <AnimatePresence>
-              {autoFilledMsg && (
-                <motion.div
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300 text-[11px] font-medium flex items-center gap-1.5"
-                >
-                  <Check size={13} className="text-emerald-600 shrink-0" />
-                  <span className="truncate">{autoFilledMsg} (Preenchido automaticamente)</span>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Email ou Registro Input with Recognized Quick Logins Dropdown */}
+          <form onSubmit={handleStandardSubmit} autoComplete="on" className="flex flex-col gap-3.5">
+            {/* Input with Attached Floating Credential Autofill Popover */}
             <div className="flex flex-col gap-1 relative">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Email ou Registro
+              <label htmlFor="username" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Número de celular, nome de usuário ou email
               </label>
 
               <div className="relative">
                 <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
                 <input
                   ref={emailInputRef}
-                  type="email"
+                  id="username"
+                  name="username"
+                  type="text"
+                  autoComplete="username webauthn"
                   required
                   value={email}
-                  onFocus={() => setShowQuickLogins(true)}
-                  onClick={() => setShowQuickLogins(true)}
+                  onFocus={() => setShowAutofillMenu(true)}
+                  onClick={() => setShowAutofillMenu(true)}
                   onChange={(e) => {
                     setEmail(e.target.value);
-                    if (!showQuickLogins) setShowQuickLogins(true);
+                    if (!showAutofillMenu) setShowAutofillMenu(true);
                   }}
-                  placeholder="exemplo@gmail.com ou institucional"
-                  className="w-full h-11 pl-10 pr-10 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs"
+                  placeholder="Número de celular, nome de usuário ou email"
+                  className="w-full h-11 pl-10 pr-10 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs transition-shadow"
                 />
                 <button
                   type="button"
-                  onClick={() => setShowQuickLogins(!showQuickLogins)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-blue-600 rounded-lg transition-colors cursor-pointer"
-                  title="Abrir contas para acesso rápido"
+                  onClick={() => setShowAutofillMenu(!showAutofillMenu)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg transition-colors cursor-pointer"
+                  title="Acesso rápido a contas guardadas"
                 >
-                  <ChevronDown size={15} className={`transition-transform duration-200 ${showQuickLogins ? "rotate-180 text-blue-600" : ""}`} />
+                  <ChevronDown size={15} className={`transition-transform duration-200 ${showAutofillMenu ? "rotate-180 text-blue-600" : ""}`} />
                 </button>
               </div>
 
-              {/* QUICK LOGINS DROPDOWN OVERLAY */}
+              {/* NATIVE-STYLE FLOATING AUTOFILL POPOVER (Matched to user's screenshot) */}
               <AnimatePresence>
-                {showQuickLogins && filteredQuickAccounts.length > 0 && (
+                {showAutofillMenu && (
                   <motion.div
-                    ref={dropdownRef}
-                    initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                    ref={autofillRef}
+                    initial={{ opacity: 0, y: -4, scale: 0.98 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -6, scale: 0.98 }}
-                    transition={{ duration: 0.15 }}
-                    className="absolute top-full left-0 right-0 mt-1 z-40 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden divide-y divide-slate-100 dark:divide-slate-800 max-h-64 overflow-y-auto"
+                    exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute top-[calc(100%+6px)] left-0 right-0 z-50 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-750 rounded-2xl shadow-2xl overflow-hidden text-left"
+                    style={{ filter: "drop-shadow(0 15px 25px rgba(0,0,0,0.15))" }}
                   >
-                    <div className="p-2.5 bg-slate-50/80 dark:bg-slate-800/60 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                      <div className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 font-semibold">
-                        <Zap size={13} className="text-amber-500 fill-amber-500" />
-                        <span>Acesso Rápido (Selecione para Preencher)</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setShowQuickLogins(false)}
-                        className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-0.5 rounded-md cursor-pointer"
-                      >
-                        <X size={13} />
-                      </button>
+                    {/* Subtle top indicator arrow pointing right to the input field */}
+                    <div className="absolute -top-1.5 left-7 w-3 h-3 bg-white dark:bg-slate-900 border-t border-l border-slate-200 dark:border-slate-700 rotate-45" />
+
+                    {/* Section 1: Saved account items */}
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-56 overflow-y-auto">
+                      {filteredAccounts.map((acc) => {
+                        const isSelected = email.toLowerCase().trim() === acc.email.toLowerCase().trim();
+                        const isDirector = acc.isAdmin || acc.role?.toLowerCase().includes("diretor");
+                        const displayName = acc.email.split("@")[0];
+
+                        return (
+                          <div
+                            key={acc.email}
+                            onClick={() => handleSelectAutofillAccount(acc, false)}
+                            className={`p-3 transition-colors flex items-center justify-between gap-3 cursor-pointer group ${
+                              isSelected
+                                ? "bg-blue-50/80 dark:bg-blue-950/50"
+                                : "hover:bg-slate-50 dark:hover:bg-slate-800/80"
+                            }`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                              {/* Globe / Credential Icon */}
+                              <div className="w-7 h-7 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 shrink-0 group-hover:text-blue-600 group-hover:bg-blue-100/60 transition-colors">
+                                <Globe size={15} />
+                              </div>
+
+                              {/* Credential username and masked password bullets */}
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
+                                    {displayName}
+                                  </span>
+                                  <span className="text-[11px] text-slate-400 dark:text-slate-400 font-normal truncate">
+                                    {acc.appLabel || "eloEscola"}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-slate-500 dark:text-slate-400 tracking-widest font-mono select-none">
+                                  ••••••••
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Actions on hover */}
+                            <div className="flex items-center gap-1.5 shrink-0 opacity-80 group-hover:opacity-100">
+                              <span className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 border border-blue-100 dark:border-blue-900 group-hover:bg-blue-600 group-hover:text-white transition-all">
+                                Preencher
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
 
-                    {filteredQuickAccounts.map((acc) => {
-                      const isDirector = acc.isAdmin || acc.role?.toLowerCase().includes("diretor");
-                      const letter = (acc.name || acc.email || "U").charAt(0).toUpperCase();
+                    {/* Section 2: Google Account credentials prompt */}
+                    <div
+                      onClick={async () => {
+                        setShowAutofillMenu(false);
+                        await onGoogleLogin();
+                      }}
+                      className="p-3 bg-slate-50/60 dark:bg-slate-800/40 hover:bg-slate-100/80 dark:hover:bg-slate-800 transition-colors flex items-start gap-3 cursor-pointer border-t border-slate-100 dark:divide-slate-800"
+                    >
+                      <div className="w-7 h-7 rounded-full bg-white dark:bg-slate-800 shadow-2xs border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0 mt-0.5">
+                        <svg className="w-4 h-4" viewBox="0 0 24 24">
+                          <path
+                            fill="#ea4335"
+                            d="M12 5.04c1.7 0 3.2.6 4.4 1.7l3.3-3.3C17.7 1.4 15 0 12 0 7.3 0 3.3 2.7 1.4 6.7l3.9 3C6.2 6.9 8.9 5.04 12 5.04z"
+                          />
+                          <path
+                            fill="#4285f4"
+                            d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.1-2 3.7-4.9 3.7-8.7z"
+                          />
+                          <path
+                            fill="#fbbc05"
+                            d="M5.3 14.3c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.4 6.7C.5 8.4 0 10.1 0 12s.5 3.6 1.4 5.3l3.9-3z"
+                          />
+                          <path
+                            fill="#34a853"
+                            d="M12 24c3.2 0 6-1.1 8-2.9l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3.1 0-5.8-1.9-6.7-4.7l-3.9 3c1.9 4 5.9 6.7 10 6.7z"
+                          />
+                        </svg>
+                      </div>
+                      <p className="text-[11px] text-slate-700 dark:text-slate-200 leading-snug font-medium">
+                        Para usar as palavras-passe e outros itens guardados na sua Conta Google, valide a sua identidade
+                      </p>
+                    </div>
 
-                      return (
-                        <div
-                          key={acc.email}
-                          onClick={() => handleSelectQuickAccount(acc, false)}
-                          className="p-3 hover:bg-slate-50 dark:hover:bg-slate-800/90 transition-colors flex items-center justify-between gap-3 cursor-pointer group"
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                            <div
-                              className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-xs ${
-                                isDirector
-                                  ? "bg-blue-600"
-                                  : acc.role?.toLowerCase().includes("aluno")
-                                  ? "bg-emerald-600"
-                                  : "bg-indigo-600"
-                              }`}
-                            >
-                              {letter}
-                            </div>
-                            <div className="min-w-0 flex-1 text-start">
-                              <div className="flex items-center gap-1.5">
-                                <p className="text-xs font-semibold text-slate-900 dark:text-white truncate">
-                                  {acc.name}
-                                </p>
-                                <span
-                                  className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
-                                    isDirector
-                                      ? "bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300"
-                                      : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
-                                  }`}
-                                >
-                                  {acc.role}
-                                </span>
-                              </div>
-                              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5 font-mono">
-                                {acc.email}
-                              </p>
-                            </div>
-                          </div>
+                    {/* Section 3: Access key / Other device */}
+                    <div
+                      onClick={() => {
+                        setShowAutofillMenu(false);
+                        setActiveSubView("aluno_cgm");
+                      }}
+                      className="p-3 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-3 cursor-pointer border-t border-slate-100 dark:border-slate-800"
+                    >
+                      <div className="w-7 h-7 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 shrink-0">
+                        <Smartphone size={14} />
+                      </div>
+                      <span className="text-xs text-slate-700 dark:text-slate-300 font-medium">
+                        Usar chave de acesso de outro dispositivo (ou CGM)
+                      </span>
+                    </div>
 
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {/* Insert Email Button */}
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleSelectQuickAccount(acc, false);
-                              }}
-                              className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:hover:bg-blue-900/80 dark:text-blue-300 rounded-lg text-[10px] font-bold transition-colors cursor-pointer flex items-center gap-1 border border-blue-200 dark:border-blue-800"
-                              title="Inserir este e-mail no formulário"
-                            >
-                              <Mail size={11} />
-                              <span>Inserir</span>
-                            </button>
-
-                            {/* 1-Click Fast Login Action */}
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleSelectQuickAccount(acc, true);
-                              }}
-                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
-                              title="Entrar imediatamente com esta conta"
-                            >
-                              <UserCheck size={11} />
-                              <span>Entrar</span>
-                            </button>
-
-                            {/* Remove button */}
-                            <button
-                              type="button"
-                              onClick={(e) => handleRemoveSavedAccount(e, acc.email)}
-                              className="p-1 text-slate-300 hover:text-red-500 dark:hover:text-red-400 rounded-md transition-colors cursor-pointer"
-                              title="Remover do histórico"
-                            >
-                              <X size={13} />
-                            </button>
-                          </div>
+                    {/* Section 4: Manage Passwords */}
+                    <div
+                      onClick={() => {
+                        setShowAutofillMenu(false);
+                        setShowManageModal(true);
+                      }}
+                      className="p-2.5 bg-slate-50/90 dark:bg-slate-850 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex items-center justify-between cursor-pointer border-t border-slate-100 dark:border-slate-800 text-slate-600 dark:text-slate-300"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-600 dark:text-slate-300">
+                          <KeyRound size={13} />
                         </div>
-                      );
-                    })}
+                        <span className="text-xs font-medium">Gerir palavras-passe...</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+                      </div>
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
             </div>
 
+            {/* Password input */}
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Senha</label>
+              <label htmlFor="password" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Senha
+              </label>
               <div className="relative">
                 <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
                 <input
+                  id="password"
+                  name="password"
                   type="password"
+                  autoComplete="current-password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Digite sua senha de acesso"
+                  placeholder="Senha"
                   className="w-full h-11 pl-10 pr-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs"
                 />
               </div>
@@ -859,7 +871,7 @@ export default function Login({
                 setEmail("davidribeiromuller2009@gmail.com");
                 setPassword("senha123");
                 handleClearError();
-                setShowQuickLogins(false);
+                setShowAutofillMenu(false);
               }}
               className="w-full py-2 px-3 text-[11px] font-semibold text-slate-500 hover:text-brand-accent dark:hover:text-brand-primary rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex items-center justify-center gap-1.5 cursor-pointer mt-1"
             >
@@ -872,6 +884,76 @@ export default function Login({
         <p className="text-[10px] text-center text-slate-400 mt-6">
           © 2026 Colégio Estadual Helena Wysocki • Araucária - PR
         </p>
+
+        {/* Gerir Palavras-Passe Modal */}
+        <AnimatePresence>
+          {showManageModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
+              onClick={() => setShowManageModal(false)}
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 max-w-sm w-full shadow-2xl"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <KeyRound className="text-blue-600 dark:text-blue-400" size={20} />
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                      Palavras-passe Guardadas
+                    </h3>
+                  </div>
+                  <button
+                    onClick={() => setShowManageModal(false)}
+                    className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-lg cursor-pointer"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-3 leading-relaxed">
+                  Contas e credenciais salvas neste dispositivo para preenchimento automático.
+                </p>
+
+                <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-60 overflow-y-auto mb-4 border border-slate-100 dark:border-slate-800 rounded-xl">
+                  {savedAccounts.map((acc) => (
+                    <div
+                      key={acc.email}
+                      className="p-2.5 flex items-center justify-between gap-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-slate-800 dark:text-slate-200 truncate">{acc.email}</p>
+                        <p className="text-[10px] text-slate-400 font-mono">•••••••• ({acc.role})</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => handleRemoveSavedAccount(e, acc.email)}
+                        className="p-1 text-slate-400 hover:text-red-500 rounded transition-colors cursor-pointer"
+                        title="Remover credencial salva"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowManageModal(false)}
+                  className="w-full py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+                >
+                  Concluído
+                </button>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
     </div>
   );
