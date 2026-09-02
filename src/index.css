@@ -62,51 +62,26 @@
   line-height: 1.4 !important;
 }
 
-/* Custom Scrollbar - Smooth, visible and theme-integrated */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.04);
-  border-radius: 9999px;
-}
-
-::-webkit-scrollbar-thumb {
-  background-color: rgba(76, 107, 76, 0.35);
-  border-radius: 9999px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(76, 107, 76, 0.65);
-}
-
-.dark ::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.dark ::-webkit-scrollbar-thumb {
-  background-color: rgba(163, 198, 157, 0.35);
-  border-radius: 9999px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
-}
-
-.dark ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(163, 198, 157, 0.65);
-}
-
-/* Firefox scrollbar support */
+/* Hide all scrollbars completely on desktop and mobile as requested */
 * {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(76, 107, 76, 0.35) transparent;
+  scrollbar-width: none !important; /* Firefox */
+  -ms-overflow-style: none !important; /* IE and Edge */
 }
 
-.dark * {
-  scrollbar-color: rgba(163, 198, 157, 0.35) transparent;
+*::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+html, body, #root {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+/* Disable any visible scrollbar globally */
+* {
+  scrollbar-width: none !important;
 }
 
 /* Hide the scrollbar on desktop while keeping scrolling available. */
@@ -132,12 +107,18 @@ body {
   margin: 0;
   padding: 0;
   background-color: var(--color-brand-bg-light);
+  color: var(--color-brand-text-light);
   min-height: 100vh;
   min-height: 100dvh;
   height: 100dvh;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+html.dark body {
+  background-color: var(--color-brand-bg-dark);
+  color: var(--color-brand-text-dark);
 }
 
 #root {
@@ -160,4 +141,8 @@ body {
   position: relative;
   overflow: hidden;
   background-color: var(--color-brand-bg-light);
+}
+
+html.dark .app-viewport {
+  background-color: var(--color-brand-bg-dark);
 }

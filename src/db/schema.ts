@@ -18,6 +18,8 @@ export const users = pgTable('users', {
   birthdate: text('birthdate'),
   gender: text('gender'),
   institution: text('institution').default('Escola estadual Helena Wysocki'),
+  lastActiveAt: timestamp('last_active_at').defaultNow(),
+  lastLogin: timestamp('last_login').defaultNow(),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });

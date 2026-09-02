@@ -1,6 +1,6 @@
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from './auth.ts';
-import { getUserByUid } from '../db/users.ts';
+import { getUserByUid, getUserByEmail } from '../db/users.ts';
 
 export const requireAdmin = async (
   req: AuthRequest,
@@ -13,17 +13,35 @@ export const requireAdmin = async (
 
   try {
     const userEmail = (req.user.email || '').toLowerCase().trim();
-    if (userEmail === 'diretoria@helenawysocki.com') {
+    const tokenRole = (req.user as any).role;
+    const tokenIsAdmin = (req.user as any).isAdmin;
+
+    if (
+      userEmail === 'diretoria@helenawysocki.com' ||
+      userEmail === 'davidribeiromuller2009@gmail.com' ||
+      tokenIsAdmin === true ||
+      tokenRole === 'Diretor'
+    ) {
       return next();
     }
 
-    const dbUser = await getUserByUid(req.user.uid);
-    if (dbUser && dbUser.email?.toLowerCase().trim() === 'diretoria@helenawysocki.com') {
+    let dbUser = await getUserByUid(req.user.uid);
+    if (!dbUser && userEmail) {
+      dbUser = await getUserByEmail(userEmail);
+    }
+
+    if (
+      dbUser &&
+      (dbUser.isAdmin ||
+        dbUser.role === 'Diretor' ||
+        dbUser.email?.toLowerCase().trim() === 'diretoria@helenawysocki.com' ||
+        dbUser.email?.toLowerCase().trim() === 'davidribeiromuller2009@gmail.com')
+    ) {
       return next();
     }
 
     return res.status(403).json({
-      error: 'Acesso negado: Apenas a conta oficial da Diretoria do Colégio Estadual Helena Wysocki possui privilégios de Administrador.'
+      error: 'Acesso negado: Requer privilégios de Administrador ou Diretor da Escola Estadual Helena Wysocki.'
     });
   } catch (error) {
     console.error('Erro no middleware requireAdmin:', error);

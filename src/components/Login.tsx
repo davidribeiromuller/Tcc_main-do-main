@@ -1,8 +1,21 @@
-import React, { useState } from "react";
-import { motion } from "motion/react";
-import { Mail, Lock, LogIn, ChevronRight, GraduationCap, Users, User2, ArrowLeft, ShieldCheck } from "lucide-react";
-import { User } from "../types";
+import React, { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import {
+  Mail,
+  Lock,
+  LogIn,
+  ChevronRight,
+  GraduationCap,
+  ArrowLeft,
+  ShieldCheck,
+  UserPlus,
+  History,
+  X,
+  UserCheck,
+  Sparkles
+} from "lucide-react";
 import logoImg from "../assets/images/logo.jpg";
+import { User } from "../types";
 
 interface LoginProps {
   onGoogleLogin: () => Promise<void>;
@@ -11,9 +24,29 @@ interface LoginProps {
   isLoading: boolean;
   loginError?: string | null;
   clearLoginError?: () => void;
+  registeredUsers?: User[];
 }
 
-export default function Login({ onGoogleLogin, onLocalLogin, onNavigate, isLoading, loginError, clearLoginError }: LoginProps) {
+interface RecognizedAccount {
+  id?: string | number;
+  email: string;
+  name: string;
+  role: string;
+  isAdmin?: boolean;
+  password?: string;
+  provider?: string;
+  lastLogin?: string;
+}
+
+export default function Login({
+  onGoogleLogin,
+  onLocalLogin,
+  onNavigate,
+  isLoading,
+  loginError,
+  clearLoginError,
+  registeredUsers = []
+}: LoginProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [activeSubView, setActiveSubView] = useState<"options" | "forgot" | "aluno_cgm">("options");
@@ -22,6 +55,12 @@ export default function Login({ onGoogleLogin, onLocalLogin, onNavigate, isLoadi
   const [cgm, setCgm] = useState("");
   const [cgmPassword, setCgmPassword] = useState("");
   const [localError, setLocalError] = useState("");
+  
+  // Quick Logins recognition state
+  const [showQuickLogins, setShowQuickLogins] = useState(false);
+  const [savedAccounts, setSavedAccounts] = useState<RecognizedAccount[]>([]);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const emailInputRef = useRef<HTMLInputElement>(null);
 
   const activeError = localError || loginError || "";
 
@@ -30,9 +69,123 @@ export default function Login({ onGoogleLogin, onLocalLogin, onNavigate, isLoadi
     if (clearLoginError) clearLoginError();
   };
 
+  // Load recognized & previously logged accounts strictly from the user's computer (localStorage)
+  useEffect(() => {
+    const loadRecognizedAccounts = () => {
+      const accountsMap = new Map<string, RecognizedAccount>();
+
+      // 1. Check previously active session stored on this computer
+      try {
+        const storedUser = localStorage.getItem("local_user");
+        if (storedUser) {
+          const u = JSON.parse(storedUser);
+          if (u && u.email) {
+            accountsMap.set(u.email.toLowerCase().trim(), {
+              email: u.email,
+              name: u.nome || u.name || u.email.split("@")[0].replace(/[._]/g, " "),
+              role: u.role || (u.isAdmin ? "Diretor" : "Aluno"),
+              isAdmin: !!u.isAdmin,
+              password: u.password || "senha123",
+              provider: u.provider || "local",
+              lastLogin: "Sessão salva no computador"
+            });
+          }
+        }
+      } catch {}
+
+      // 2. Check accounts previously logged in / saved on this computer
+      try {
+        const savedHistory = localStorage.getItem("saved_accounts_history");
+        if (savedHistory) {
+          const list: RecognizedAccount[] = JSON.parse(savedHistory);
+          if (Array.isArray(list)) {
+            list.forEach((acc) => {
+              if (acc && acc.email) {
+                const key = acc.email.toLowerCase().trim();
+                accountsMap.set(key, {
+                  ...acc,
+                  name: acc.name || acc.email.split("@")[0].replace(/[._]/g, " "),
+                  role: acc.role || (acc.isAdmin ? "Diretor" : "Aluno"),
+                });
+              }
+            });
+          }
+        }
+      } catch {}
+
+      setSavedAccounts(Array.from(accountsMap.values()));
+    };
+
+    loadRecognizedAccounts();
+  }, []);
+
+  // Click outside listener for quick logins dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node) &&
+        emailInputRef.current &&
+        !emailInputRef.current.contains(event.target as Node)
+      ) {
+        setShowQuickLogins(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Save account to history upon login
+  const persistAccountToHistory = (cleanEmail: string, accName?: string, role?: string, pass?: string) => {
+    try {
+      const existingHistory = localStorage.getItem("saved_accounts_history");
+      let list: RecognizedAccount[] = [];
+      if (existingHistory) list = JSON.parse(existingHistory);
+      const isDirector = cleanEmail === "davidribeiromuller2009@gmail.com" || cleanEmail === "diretoria@helenawysocki.com";
+      const newEntry: RecognizedAccount = {
+        email: cleanEmail,
+        name: accName || cleanEmail.split("@")[0].replace(/[._]/g, " "),
+        role: role || (isDirector ? "Diretor" : "Aluno"),
+        isAdmin: isDirector,
+        password: pass || "senha123",
+        lastLogin: new Date().toLocaleDateString("pt-BR")
+      };
+      const filtered = list.filter((a) => a.email.toLowerCase() !== cleanEmail.toLowerCase());
+      filtered.unshift(newEntry);
+      localStorage.setItem("saved_accounts_history", JSON.stringify(filtered.slice(0, 10)));
+    } catch {}
+  };
+
+  const handleSelectQuickAccount = (acc: RecognizedAccount, autoLogin: boolean = false) => {
+    setEmail(acc.email);
+    setPassword(acc.password || "senha123");
+    setShowQuickLogins(false);
+    handleClearError();
+
+    if (autoLogin) {
+      persistAccountToHistory(acc.email, acc.name, acc.role, acc.password);
+      onLocalLogin(acc.email, acc.password || "senha123");
+    }
+  };
+
+  const handleRemoveSavedAccount = (e: React.MouseEvent, emailToRemove: string) => {
+    e.stopPropagation();
+    try {
+      const existingHistory = localStorage.getItem("saved_accounts_history");
+      if (existingHistory) {
+        const list: RecognizedAccount[] = JSON.parse(existingHistory);
+        const updated = list.filter((a) => a.email.toLowerCase() !== emailToRemove.toLowerCase());
+        localStorage.setItem("saved_accounts_history", JSON.stringify(updated));
+      }
+      setSavedAccounts((prev) => prev.filter((a) => a.email.toLowerCase() !== emailToRemove.toLowerCase()));
+    } catch {}
+  };
+
   const handleStandardSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     handleClearError();
+    setShowQuickLogins(false);
 
     const cleanEmail = email.trim();
     if (!cleanEmail) {
@@ -56,6 +209,7 @@ export default function Login({ onGoogleLogin, onLocalLogin, onNavigate, isLoadi
       return;
     }
 
+    persistAccountToHistory(cleanEmail, undefined, undefined, password);
     onLocalLogin(cleanEmail, password);
   };
 
@@ -78,6 +232,7 @@ export default function Login({ onGoogleLogin, onLocalLogin, onNavigate, isLoadi
     }
 
     const fauxEmail = `cgm-${cleanCgm}@aluno.pr.gov.br`;
+    persistAccountToHistory(fauxEmail, `Aluno CGM ${cleanCgm}`, "Aluno", cgmPassword);
     onLocalLogin(fauxEmail, cgmPassword);
   };
 
@@ -96,141 +251,154 @@ export default function Login({ onGoogleLogin, onLocalLogin, onNavigate, isLoadi
     onNavigate("codeSent");
   };
 
+  // Filter recognized accounts by input
+  const filteredQuickAccounts = savedAccounts.filter((acc) => {
+    if (!email) return true;
+    const q = email.toLowerCase().trim();
+    return (
+      acc.email.toLowerCase().includes(q) ||
+      acc.name.toLowerCase().includes(q) ||
+      acc.role.toLowerCase().includes(q)
+    );
+  });
+
   if (activeSubView === "forgot") {
     return (
-      <motion.div
-        initial={{ opacity: 0, x: 50 }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: -50 }}
-        className="flex flex-col h-full overflow-y-auto p-6 text-brand-text-light dark:text-brand-text-dark max-w-md mx-auto w-full justify-center md:py-12"
-      >
-        <div className="flex flex-col items-center my-6">
-          <h2 className="text-2xl font-display font-semibold text-center leading-tight">
-            Recuperar Senha
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 text-center leading-relaxed">
-            Insira seu email e CPF cadastrados para receber um código de verificação seguro
-          </p>
-        </div>
+      <div className="min-h-full w-full flex items-center justify-center p-4 md:p-8 bg-slate-50 dark:bg-slate-950 overflow-y-auto">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.97 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.97 }}
+          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl max-w-md w-full text-slate-800 dark:text-slate-100 flex flex-col justify-center my-auto"
+        >
+          <div className="flex flex-col items-center mb-6">
+            <h2 className="text-xl sm:text-2xl font-display font-semibold text-center leading-tight">
+              Recuperar Senha
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 text-center leading-relaxed">
+              Insira seu email e CPF cadastrados para receber um código de verificação seguro.
+            </p>
+          </div>
 
-        {activeError && (
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-4 p-3.5 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 text-xs font-medium flex items-start justify-between gap-2.5"
-          >
-            <div className="flex items-start gap-2">
-              <span className="shrink-0 w-4 h-4 rounded-full bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300 flex items-center justify-center font-bold text-[10px] mt-0.5">!</span>
-              <p className="leading-snug text-slate-800 dark:text-slate-200">{activeError}</p>
+          {activeError && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-4 p-3.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 text-xs font-medium flex items-start justify-between gap-2.5"
+            >
+              <div className="flex items-start gap-2">
+                <span className="shrink-0 w-4 h-4 rounded-full bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300 flex items-center justify-center font-bold text-[10px] mt-0.5">!</span>
+                <p className="leading-snug text-slate-800 dark:text-slate-200">{activeError}</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleClearError}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold text-sm shrink-0 cursor-pointer"
+              >
+                ✕
+              </button>
+            </motion.div>
+          )}
+
+          <form onSubmit={handleRecoverySubmit} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">Email Escolar</label>
+              <div className="relative">
+                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
+                <input
+                  type="email"
+                  required
+                  value={recoveryEmail}
+                  onChange={(e) => setRecoveryEmail(e.target.value)}
+                  placeholder="exemplo@escola.pr.gov.br"
+                  className="w-full h-11 pl-10 pr-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs"
+                />
+              </div>
             </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">CPF Cadastrado</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  required
+                  value={recoveryCpf}
+                  onChange={(e) => setRecoveryCpf(e.target.value)}
+                  placeholder="000.000.000-00"
+                  className="w-full h-11 px-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              className="w-full h-11 mt-2 bg-brand-accent text-white font-semibold rounded-xl flex items-center justify-center gap-2 hover:opacity-90 active:scale-98 transition-all shadow-md cursor-pointer text-xs"
+            >
+              Enviar Código de Recuperação
+            </button>
+
             <button
               type="button"
-              onClick={handleClearError}
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold text-sm shrink-0"
+              onClick={() => setActiveSubView("options")}
+              className="w-full h-11 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold rounded-xl flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-98 transition-all cursor-pointer text-xs"
             >
-              ✕
+              Voltar ao Login
             </button>
-          </motion.div>
-        )}
-
-        <form onSubmit={handleRecoverySubmit} className="flex flex-col gap-4 mt-2">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Email Escolar</label>
-            <div className="relative">
-              <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input
-                type="email"
-                required
-                value={recoveryEmail}
-                onChange={(e) => setRecoveryEmail(e.target.value)}
-                placeholder="exemplo@escola.pr.gov.br"
-                className="w-full h-12 pl-11 pr-4 bg-white dark:bg-brand-card-dark border border-brand-primary rounded-xl focus:ring-2 focus:ring-brand-accent/50 focus:outline-none focus:border-brand-accent text-sm"
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">CPF Cadastrado</label>
-            <div className="relative">
-              <input
-                type="text"
-                required
-                value={recoveryCpf}
-                onChange={(e) => setRecoveryCpf(e.target.value)}
-                placeholder="000.000.000-00"
-                className="w-full h-12 px-4 bg-white dark:bg-brand-card-dark border border-brand-primary rounded-xl focus:ring-2 focus:ring-brand-accent/50 focus:outline-none focus:border-brand-accent text-sm"
-              />
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            className="w-full h-12 mt-4 bg-brand-accent text-white font-semibold rounded-2xl flex items-center justify-center gap-2 hover:opacity-90 active:scale-98 transition-all shadow-md cursor-pointer"
-          >
-            Enviar Código de Recuperação
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveSubView("options")}
-            className="w-full h-12 border-2 border-brand-primary/50 text-brand-accent dark:text-brand-primary font-semibold rounded-2xl flex items-center justify-center hover:bg-black/5 active:scale-98 transition-all mt-1 cursor-pointer"
-          >
-            Voltar
-          </button>
-        </form>
-      </motion.div>
+          </form>
+        </motion.div>
+      </div>
     );
   }
 
   if (activeSubView === "aluno_cgm") {
     return (
-      <motion.div
-        initial={{ opacity: 0, x: 50 }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: -50 }}
-        className="flex flex-col h-full overflow-y-auto p-6 text-brand-text-light dark:text-brand-text-dark max-w-md mx-auto w-full justify-center md:py-12"
-      >
-        <div className="flex flex-col items-center my-6">
-          <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-brand-primary/20 shadow-lg mb-4 bg-white p-1 flex items-center justify-center">
-            <img
-              src={logoImg}
-              alt="Logo do Projeto"
-              className="w-full h-full object-cover rounded-full"
-              referrerPolicy="no-referrer"
-            />
-          </div>
-          <h2 className="text-xl font-display font-semibold text-center leading-tight">
-            Área do Aluno • CGM
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 text-center leading-relaxed max-w-xs">
-            Informe o número de matrícula CGM e a senha fornecida pela secretaria escolar para acessar seu portal.
-          </p>
-        </div>
-
-        {activeError && (
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-4 p-3.5 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 text-xs font-medium flex items-start justify-between gap-2.5"
-          >
-            <div className="flex items-start gap-2">
-              <span className="shrink-0 w-4 h-4 rounded-full bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300 flex items-center justify-center font-bold text-[10px] mt-0.5">!</span>
-              <p className="leading-snug text-slate-800 dark:text-slate-200">{activeError}</p>
+      <div className="min-h-full w-full flex items-center justify-center p-4 md:p-8 bg-slate-50 dark:bg-slate-950 overflow-y-auto">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.97 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.97 }}
+          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl max-w-md w-full text-slate-800 dark:text-slate-100 flex flex-col justify-center my-auto"
+        >
+          <div className="flex flex-col items-center mb-6">
+            <div className="w-16 h-16 rounded-full overflow-hidden border border-brand-primary/20 shadow-md mb-3 bg-white p-1 flex items-center justify-center">
+              <img
+                src={logoImg}
+                alt="Logo Helena Wysocki"
+                className="w-full h-full object-cover rounded-full"
+                referrerPolicy="no-referrer"
+              />
             </div>
-            <button
-              type="button"
-              onClick={handleClearError}
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold text-sm shrink-0"
-            >
-              ✕
-            </button>
-          </motion.div>
-        )}
+            <h2 className="text-xl font-display font-semibold text-center leading-tight">
+              Área do Aluno • CGM
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 text-center leading-relaxed">
+              Informe sua matrícula CGM e senha cadastrada na secretaria escolar.
+            </p>
+          </div>
 
-        <form onSubmit={handleCgmSubmit} className="flex flex-col gap-4 mt-2">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">MÁTRICULA / CGM</label>
-            <div className="relative">
+          {activeError && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-4 p-3.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 text-xs font-medium flex items-start justify-between gap-2.5"
+            >
+              <div className="flex items-start gap-2">
+                <span className="shrink-0 w-4 h-4 rounded-full bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300 flex items-center justify-center font-bold text-[10px] mt-0.5">!</span>
+                <p className="leading-snug text-slate-800 dark:text-slate-200">{activeError}</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleClearError}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold text-sm shrink-0 cursor-pointer"
+              >
+                ✕
+              </button>
+            </motion.div>
+          )}
+
+          <form onSubmit={handleCgmSubmit} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">MATRÍCULA / CGM</label>
               <input
                 type="text"
                 required
@@ -241,232 +409,346 @@ export default function Login({ onGoogleLogin, onLocalLogin, onNavigate, isLoadi
                 }}
                 maxLength={10}
                 placeholder="Exemplo: 4893021"
-                className="w-full h-12 px-4 bg-white dark:bg-brand-card-dark border border-brand-primary rounded-xl focus:ring-2 focus:ring-brand-accent/50 focus:outline-none focus:border-brand-accent text-sm font-mono tracking-wider"
+                className="w-full h-11 px-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs font-mono tracking-wider"
               />
             </div>
-          </div>
 
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Senha do Aluno</label>
-            <div className="relative">
-              <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input
-                type="password"
-                required
-                value={cgmPassword}
-                onChange={(e) => setCgmPassword(e.target.value)}
-                placeholder="Digite sua senha de acesso"
-                className="w-full h-12 pl-11 pr-4 bg-white dark:bg-brand-card-dark border border-brand-primary rounded-xl focus:ring-2 focus:ring-brand-accent/50 focus:outline-none focus:border-brand-accent text-sm"
-              />
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">Senha do Aluno</label>
+              <div className="relative">
+                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
+                <input
+                  type="password"
+                  required
+                  value={cgmPassword}
+                  onChange={(e) => setCgmPassword(e.target.value)}
+                  placeholder="Digite sua senha de acesso"
+                  className="w-full h-11 pl-10 pr-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs"
+                />
+              </div>
             </div>
-          </div>
 
-          <button
-            type="submit"
-            className="w-full h-12 mt-4 bg-brand-primary dark:bg-brand-accent text-white font-semibold rounded-2xl flex items-center justify-center gap-2 hover:opacity-95 active:scale-98 transition-all shadow-md cursor-pointer"
-          >
-            <LogIn size={18} />
-            Conectar na Área do Aluno
-          </button>
+            <button
+              type="submit"
+              className="w-full h-11 mt-2 bg-brand-primary text-white font-semibold rounded-xl flex items-center justify-center gap-2 hover:opacity-95 active:scale-98 transition-all shadow-md cursor-pointer text-xs"
+            >
+              <LogIn size={15} />
+              Conectar na Área do Aluno
+            </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveSubView("options");
-              handleClearError();
-            }}
-            className="w-full h-12 border-2 border-brand-primary/50 text-brand-accent dark:text-brand-primary font-semibold rounded-2xl flex items-center justify-center hover:bg-black/5 active:scale-98 transition-all mt-1 cursor-pointer"
-          >
-            Voltar
-          </button>
-        </form>
-      </motion.div>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveSubView("options");
+                handleClearError();
+              }}
+              className="w-full h-11 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold rounded-xl flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-98 transition-all cursor-pointer text-xs"
+            >
+              Voltar
+            </button>
+          </form>
+        </motion.div>
+      </div>
     );
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className="flex flex-col h-full overflow-y-auto p-6 text-brand-text-light dark:text-brand-text-dark max-w-md mx-auto w-full md:py-8"
-    >
-      <div className="my-auto py-4">
-        <div className="flex items-center justify-between w-full mb-1">
-          <button
-            type="button"
-            onClick={() => onNavigate("welcome")}
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-brand-accent transition-colors p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-brand-card-dark"
-          >
-            <ArrowLeft size={16} />
-            <span>Início</span>
-          </button>
+    <div className="min-h-full w-full flex items-center justify-center p-4 md:p-8 bg-slate-50 dark:bg-slate-950 overflow-y-auto">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.98 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl max-w-md w-full text-slate-800 dark:text-slate-100 flex flex-col justify-between my-auto"
+      >
+        <div>
+          <div className="flex items-center justify-between w-full mb-3">
+            <button
+              type="button"
+              onClick={() => onNavigate("welcome")}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-brand-accent transition-colors p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+            >
+              <ArrowLeft size={16} />
+              <span>Início</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onNavigate("register")}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-brand-accent dark:text-brand-primary hover:underline p-1 cursor-pointer"
+            >
+              <UserPlus size={14} />
+              <span>Cadastrar</span>
+            </button>
+          </div>
+
+          <div className="flex flex-col items-center mb-5 text-center">
+            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full overflow-hidden border border-brand-primary/20 shadow-md mb-2.5 bg-white p-1 flex items-center justify-center">
+              <img
+                src={logoImg}
+                alt="Logo Helena Wysocki"
+                className="w-full h-full object-cover rounded-full"
+                referrerPolicy="no-referrer"
+              />
+            </div>
+            <h1 className="text-xl sm:text-2xl font-display font-bold text-slate-900 dark:text-white tracking-tight">
+              eloEscola
+            </h1>
+            <p className="text-brand-accent dark:text-brand-primary text-xs font-semibold mt-0.5">
+              C.E. Helena Wysocki • Araucária
+            </p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed max-w-xs">
+              Acesse sua conta para ver a agenda de eventos, avisos e atividades escolares.
+            </p>
+          </div>
+
+          {activeError && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-4 p-3.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 text-xs font-medium flex items-start justify-between gap-2.5"
+            >
+              <div className="flex items-start gap-2">
+                <span className="shrink-0 w-4 h-4 rounded-full bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300 flex items-center justify-center font-bold text-[10px] mt-0.5">!</span>
+                <p className="leading-snug text-slate-800 dark:text-slate-200">{activeError}</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleClearError}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold text-sm shrink-0 cursor-pointer"
+              >
+                ✕
+              </button>
+            </motion.div>
+          )}
+
+          <form onSubmit={handleStandardSubmit} className="flex flex-col gap-3.5">
+            {/* Email ou Registro Input with Recognized Quick Logins Dropdown */}
+            <div className="flex flex-col gap-1 relative">
+              <label className="text-xs font-semibold text-slate-700">
+                Email ou Registro
+              </label>
+
+              <div className="relative">
+                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
+                <input
+                  ref={emailInputRef}
+                  type="email"
+                  required
+                  value={email}
+                  onFocus={() => setShowQuickLogins(true)}
+                  onClick={() => setShowQuickLogins(true)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (!showQuickLogins) setShowQuickLogins(true);
+                  }}
+                  placeholder="exemplo@gmail.com ou institucional"
+                  className="w-full h-11 pl-10 pr-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs"
+                />
+              </div>
+
+              {/* QUICK LOGINS DROPDOWN OVERLAY */}
+              <AnimatePresence>
+                {showQuickLogins && filteredQuickAccounts.length > 0 && (
+                  <motion.div
+                    ref={dropdownRef}
+                    initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute top-full left-0 right-0 mt-1 z-40 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden divide-y divide-slate-100 dark:divide-slate-800 max-h-60 overflow-y-auto"
+                  >
+                    <div className="p-2.5 bg-slate-50/80 dark:bg-slate-800/60 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      <div className="flex items-center gap-1.5 text-brand-accent dark:text-brand-primary font-semibold">
+                        <Sparkles size={13} />
+                        <span>Logins Reconhecidos Neste Dispositivo</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowQuickLogins(false)}
+                        className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-0.5 rounded-md cursor-pointer"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+
+                    {filteredQuickAccounts.map((acc) => {
+                      const isDirector = acc.isAdmin || acc.role?.toLowerCase().includes("diretor");
+                      const letter = (acc.name || acc.email || "U").charAt(0).toUpperCase();
+
+                      return (
+                        <div
+                          key={acc.email}
+                          onClick={() => handleSelectQuickAccount(acc, false)}
+                          className="p-3 hover:bg-slate-50 dark:hover:bg-slate-800/90 transition-colors flex items-center justify-between gap-3 cursor-pointer group"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <div
+                              className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-xs ${
+                                isDirector
+                                  ? "bg-blue-600"
+                                  : acc.role?.toLowerCase().includes("aluno")
+                                  ? "bg-emerald-600"
+                                  : "bg-indigo-600"
+                              }`}
+                            >
+                              {letter}
+                            </div>
+                            <div className="min-w-0 flex-1 text-start">
+                              <div className="flex items-center gap-1.5">
+                                <p className="text-xs font-semibold text-slate-900 dark:text-white truncate">
+                                  {acc.name}
+                                </p>
+                                <span
+                                  className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                                    isDirector
+                                      ? "bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300"
+                                      : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                                  }`}
+                                >
+                                  {acc.role}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                                {acc.email}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {/* 1-Click Fast Login Action */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSelectQuickAccount(acc, true);
+                              }}
+                              className="px-2.5 py-1 bg-brand-primary/10 hover:bg-brand-primary text-brand-primary hover:text-white dark:bg-brand-primary/20 dark:hover:bg-brand-primary dark:text-brand-primary dark:hover:text-white rounded-lg text-[10px] font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                              title="Entrar imediatamente com esta conta"
+                            >
+                              <UserCheck size={12} />
+                              <span>Entrar</span>
+                            </button>
+
+                            {/* Remove button */}
+                            <button
+                              type="button"
+                              onClick={(e) => handleRemoveSavedAccount(e, acc.email)}
+                              className="p-1 text-slate-300 hover:text-red-500 dark:hover:text-red-400 rounded-md transition-colors cursor-pointer"
+                              title="Remover do histórico"
+                            >
+                              <X size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Senha</label>
+              <div className="relative">
+                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
+                <input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Digite sua senha de acesso"
+                  className="w-full h-11 pl-10 pr-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => setActiveSubView("forgot")}
+                className="text-xs font-medium text-brand-accent dark:text-brand-primary hover:underline cursor-pointer"
+              >
+                Esqueci minha senha
+              </button>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full h-11 mt-1 bg-brand-primary text-white font-semibold rounded-xl flex items-center justify-center gap-2 hover:opacity-95 active:scale-98 transition-all shadow-sm cursor-pointer text-xs disabled:opacity-50"
+            >
+              <LogIn size={16} />
+              {isLoading ? "Entrando..." : "Entrar"}
+            </button>
+          </form>
+
+          <div className="flex items-center gap-2 my-5">
+            <hr className="flex-1 border-slate-200 dark:border-slate-800" />
+            <span className="text-[10px] text-slate-400 font-medium tracking-wider uppercase">Ou conecte com</span>
+            <hr className="flex-1 border-slate-200 dark:border-slate-800" />
+          </div>
+
+          <div className="flex flex-col gap-2.5">
+            {/* Google OAuth Login Button */}
+            <button
+              onClick={onGoogleLogin}
+              disabled={isLoading}
+              type="button"
+              className="w-full h-11 bg-white dark:bg-slate-800 text-slate-800 dark:text-white font-semibold border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-750 active:scale-98 transition-all shadow-xs cursor-pointer disabled:opacity-50 text-xs"
+              id="btn-login-google"
+            >
+              <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24">
+                <path
+                  fill="#ea4335"
+                  d="M12 5.04c1.7 0 3.2.6 4.4 1.7l3.3-3.3C17.7 1.4 15 0 12 0 7.3 0 3.3 2.7 1.4 6.7l3.9 3C6.2 6.9 8.9 5.04 12 5.04z"
+                />
+                <path
+                  fill="#4285f4"
+                  d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.1-2 3.7-4.9 3.7-8.7z"
+                />
+                <path
+                  fill="#fbbc05"
+                  d="M5.3 14.3c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.4 6.7C.5 8.4 0 10.1 0 12s.5 3.6 1.4 5.3l3.9-3z"
+                />
+                <path
+                  fill="#34a853"
+                  d="M12 24c3.2 0 6-1.1 8-2.9l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3.1 0-5.8-1.9-6.7-4.7l-3.9 3c1.9 4 5.9 6.7 10 6.7z"
+                />
+              </svg>
+              <span>{isLoading ? "Conectando..." : "Entrar com o Google"}</span>
+            </button>
+
+            {/* Conectar área do aluno button */}
+            <button
+              onClick={() => setActiveSubView("aluno_cgm")}
+              type="button"
+              className="w-full h-11 bg-emerald-50/80 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 font-semibold border border-emerald-200 dark:border-emerald-800/40 rounded-xl flex items-center justify-center gap-2 hover:bg-emerald-100/60 dark:hover:bg-emerald-950/50 active:scale-98 transition-all cursor-pointer text-xs"
+            >
+              <GraduationCap size={16} className="text-emerald-600 dark:text-emerald-400" />
+              <span>Conectar com Área do Aluno (CGM)</span>
+              <ChevronRight size={14} className="text-emerald-500 opacity-80" />
+            </button>
+
+            {/* Acesso exclusivo da Diretoria */}
+            <button
+              type="button"
+              onClick={() => {
+                setEmail("davidribeiromuller2009@gmail.com");
+                setPassword("senha123");
+                handleClearError();
+                setShowQuickLogins(false);
+              }}
+              className="w-full py-2 px-3 text-[11px] font-semibold text-slate-500 hover:text-brand-accent dark:hover:text-brand-primary rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex items-center justify-center gap-1.5 cursor-pointer mt-1"
+            >
+              <ShieldCheck size={14} className="text-brand-accent dark:text-brand-primary" />
+              <span>Acesso Exclusivo da Diretoria (Admin)</span>
+            </button>
+          </div>
         </div>
 
-      <div className="flex flex-col items-center my-4 text-center">
-        <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border-2 border-brand-primary/20 shadow-lg mb-3 bg-white p-1 flex items-center justify-center">
-          <img
-            src={logoImg}
-            alt="Logo do Projeto"
-            className="w-full h-full object-cover rounded-full"
-            referrerPolicy="no-referrer"
-          />
-        </div>
-        <h1 className="text-xl sm:text-2xl font-display font-bold text-slate-800 dark:text-slate-100 tracking-tight">
-          eloEscola
-        </h1>
-        <p className="text-brand-accent dark:text-brand-primary text-xs sm:text-sm font-semibold mt-0.5">
-          Colégio Estadual Helena Wysocki
+        <p className="text-[10px] text-center text-slate-400 mt-6">
+          © 2026 Colégio Estadual Helena Wysocki • Araucária - PR
         </p>
-        <p className="text-[11px] text-slate-500 dark:text-slate-400 max-w-xs mt-1.5 leading-relaxed">
-          Portal integrado de divulgação de eventos, feiras culturais, atividades esportivas e mapa escolar.
-        </p>
-      </div>
-
-      {activeError && (
-        <motion.div
-          initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-4 p-3.5 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 text-xs font-medium flex items-start justify-between gap-2.5"
-        >
-          <div className="flex items-start gap-2">
-            <span className="shrink-0 w-4 h-4 rounded-full bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300 flex items-center justify-center font-bold text-[10px] mt-0.5">!</span>
-            <p className="leading-snug text-slate-800 dark:text-slate-200">{activeError}</p>
-          </div>
-          <button
-            type="button"
-            onClick={handleClearError}
-            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold text-sm shrink-0"
-          >
-            ✕
-          </button>
-        </motion.div>
-      )}
-
-      <form onSubmit={handleStandardSubmit} className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-            Email ou Registro
-          </label>
-          <div className="relative">
-            <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="exemplo@gmail.com"
-              className="w-full h-12 pl-11 pr-4 bg-white dark:bg-brand-card-dark border border-brand-primary rounded-xl focus:ring-2 focus:ring-brand-accent/50 focus:outline-none focus:border-brand-accent text-sm"
-            />
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Senha</label>
-          <div className="relative">
-            <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Digite sua senha"
-              className="w-full h-12 pl-11 pr-4 bg-white dark:bg-brand-card-dark border border-brand-primary rounded-xl focus:ring-2 focus:ring-brand-accent/50 focus:outline-none focus:border-brand-accent text-sm"
-            />
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setActiveSubView("forgot")}
-          className="text-start text-xs font-medium text-brand-accent dark:text-brand-primary hover:underline mt-1 self-start cursor-pointer"
-        >
-          Esqueci minha senha
-        </button>
-
-        <button
-          type="submit"
-          className="w-full h-12 mt-4 bg-brand-primary text-white font-semibold rounded-2xl flex items-center justify-center gap-2 hover:opacity-95 active:scale-98 transition-all shadow-md cursor-pointer"
-        >
-          <LogIn size={18} />
-          Entrar
-        </button>
-      </form>
-
-      <div className="flex items-center gap-2 my-6">
-        <hr className="flex-1 opacity-20 border-brand-primary" />
-        <span className="text-xs text-slate-400 font-mono tracking-wider uppercase">Ou conecte com</span>
-        <hr className="flex-1 opacity-20 border-brand-primary" />
-      </div>
-
-      <div className="flex flex-col gap-3">
-        {/* Conectar área do aluno button */}
-        <button
-          onClick={() => setActiveSubView("aluno_cgm")}
-          type="button"
-          className="w-full h-12 bg-emerald-50 text-emerald-700 font-semibold border-2 border-emerald-300 rounded-2xl flex items-center justify-center gap-2 hover:bg-emerald-100/50 active:scale-98 transition-all cursor-pointer"
-        >
-          <GraduationCap size={18} className="text-emerald-600" />
-          Conectar com Área do Aluno
-          <ChevronRight size={16} className="text-emerald-500 ml-1" />
-        </button>
-
-        {/* Google OAuth Login Button */}
-        <button
-          onClick={onGoogleLogin}
-          disabled={isLoading}
-          type="button"
-          className="w-full h-12 bg-white text-slate-700 font-semibold border-2 border-slate-200 rounded-2xl flex items-center justify-center gap-3 hover:bg-slate-50 active:scale-98 transition-all shadow-sm cursor-pointer disabled:opacity-50"
-          id="btn-login-google"
-        >
-          <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">
-            <path
-              fill="#ea4335"
-              d="M12 5.04c1.7 0 3.2.6 4.4 1.7l3.3-3.3C17.7 1.4 15 0 12 0 7.3 0 3.3 2.7 1.4 6.7l3.9 3C6.2 6.9 8.9 5.04 12 5.04z"
-            />
-            <path
-              fill="#4285f4"
-              d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.1-2 3.7-4.9 3.7-8.7z"
-            />
-            <path
-              fill="#fbbc05"
-              d="M5.3 14.3c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.4 6.7C.5 8.4 0 10.1 0 12s.5 3.6 1.4 5.3l3.9-3z"
-            />
-            <path
-              fill="#34a853"
-              d="M12 24c3.2 0 6-1.1 8-2.9l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3.1 0-5.8-1.9-6.7-4.7l-3.9 3c1.9 4 5.9 6.7 10 6.7z"
-            />
-          </svg>
-          {isLoading ? "Conectando..." : "Entrar com Google"}
-        </button>
-
-        {/* Botão Criar Conta */}
-        <button
-          onClick={() => onNavigate("register")}
-          type="button"
-          className="w-full h-12 mt-2 font-semibold text-brand-accent dark:text-brand-primary border-2 border-brand-primary/50 hover:border-brand-primary rounded-2xl flex items-center justify-center transition-all cursor-pointer"
-        >
-          Criar nova conta escolar
-        </button>
-
-        {/* Acesso exclusivo da Diretoria */}
-        <button
-          type="button"
-          onClick={() => {
-            setEmail("diretoria@helenawysocki.com");
-            setPassword("senha123");
-            handleClearError();
-          }}
-          className="w-full py-2 px-3 text-[11px] font-medium text-slate-500 hover:text-brand-accent dark:hover:text-brand-primary rounded-xl hover:bg-slate-100 dark:hover:bg-brand-card-dark transition-colors flex items-center justify-center gap-1.5 cursor-pointer mt-1"
-        >
-          <ShieldCheck size={14} className="text-brand-accent dark:text-brand-primary" />
-          <span>Acesso Exclusivo da Diretoria (Admin)</span>
-        </button>
-      </div>
-
-      <p className="text-[10px] text-center text-slate-400 mt-6 mb-4">
-        © 2026 Escola estadual Helena Wysocki. Todos os direitos reservados.
-      </p>
+      </motion.div>
     </div>
-  </motion.div>
   );
 }

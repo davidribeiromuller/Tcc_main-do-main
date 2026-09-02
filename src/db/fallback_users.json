@@ -10,6 +10,7 @@
     "ativo": true,
     "isAdmin": true,
     "institution": "Escola estadual Helena Wysocki",
+    "lastActiveAt": "2026-08-27T11:15:00.000Z",
     "createdAt": "2026-06-23T11:09:58.806Z",
     "updatedAt": "2026-06-23T11:09:58.806Z",
     "password": "senha123"
@@ -26,6 +27,7 @@
     "ativo": true,
     "isAdmin": false,
     "institution": "Escola estadual Helena Wysocki",
+    "lastActiveAt": "2026-08-27T10:35:00.000Z",
     "createdAt": "2026-08-26T10:39:13.092Z",
     "updatedAt": "2026-08-26T10:39:13.092Z"
   },
@@ -41,6 +43,7 @@
     "ativo": true,
     "isAdmin": false,
     "institution": "Escola estadual Helena Wysocki",
+    "lastActiveAt": "2026-08-27T07:15:00.000Z",
     "createdAt": "2026-08-26T10:39:13.092Z",
     "updatedAt": "2026-08-26T10:39:13.092Z"
   },
@@ -55,6 +58,7 @@
     "ativo": true,
     "isAdmin": false,
     "institution": "Escola estadual Helena Wysocki",
+    "lastActiveAt": "2026-08-26T15:00:00.000Z",
     "createdAt": "2026-08-26T10:39:46.949Z",
     "updatedAt": "2026-08-26T11:13:29.635Z"
   },
@@ -69,6 +73,7 @@
     "ativo": true,
     "isAdmin": true,
     "institution": "Escola estadual Helena Wysocki",
+    "lastActiveAt": "2026-08-27T11:18:00.000Z",
     "createdAt": "2026-08-26T11:10:27.391Z",
     "updatedAt": "2026-08-26T11:13:40.822Z"
   }

@@ -31,12 +31,15 @@ export const requireAuth = async (
       const extra = parts[4] ? decodeURIComponent(parts[4]) : undefined;
 
       // User decoder block matching DecodedIdToken fields
+      const cleanEmail = email.toLowerCase().trim();
+      const isAdmin = role === 'Diretor' || cleanEmail === 'diretoria@helenawysocki.com' || cleanEmail === 'davidribeiromuller2009@gmail.com';
       req.user = {
         uid,
         email,
         name,
         picture: isGoogle && extra ? extra : '',
-        role,
+        role: isAdmin ? 'Diretor' : role,
+        isAdmin,
         password: isGoogle ? undefined : extra,
         auth_time: Math.floor(Date.now() / 1000),
         iss: isGoogle ? 'https://accounts.google.com' : 'local-sim',

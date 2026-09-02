@@ -139,22 +139,30 @@ export default function Register({ onRegister, onNavigate }: RegisterProps) {
     try {
       setIsCheckingEmail(true);
       const cleanEmail = email.trim().toLowerCase();
-
-      // The server is the source of truth; local storage may contain stale users.
-      const checkRes = await fetch(`/api/auth/check-email?email=${encodeURIComponent(cleanEmail)}`);
-      if (checkRes.ok) {
-        const contentType = checkRes.headers.get("content-type");
-        if (contentType && contentType.includes("application/json")) {
-          const checkData = await checkRes.json();
-          if (checkData && checkData.exists === true) {
-            setError("Este e-mail já está cadastrado. Por favor, tente fazer login ou use outro e-mail.");
-            setEmailError(true);
-            return;
+      
+      let existsOnServer = false;
+      try {
+        const checkRes = await fetch(`/api/auth/check-email?email=${encodeURIComponent(cleanEmail)}`);
+        if (checkRes.ok) {
+          const contentType = checkRes.headers.get("content-type");
+          if (contentType && contentType.includes("application/json")) {
+            const checkData = await checkRes.json();
+            if (checkData && checkData.exists === true) {
+              existsOnServer = true;
+            }
           }
         }
+      } catch (e) {
+        console.warn("Verificação de email no servidor indisponível:", e);
+      }
+
+      if (existsOnServer) {
+        setError("Este e-mail já está cadastrado no sistema. Por favor, faça login ou use outro e-mail.");
+        setEmailError(true);
+        return;
       }
     } catch (err) {
-      console.log("Validação online do e-mail prosseguindo em modo offline:", err);
+      console.log("Validação online do e-mail prosseguindo:", err);
     } finally {
       setIsCheckingEmail(false);
     }

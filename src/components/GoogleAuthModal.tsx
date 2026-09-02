@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React from "react";
 import { motion } from "motion/react";
-import { X, CheckCircle, ShieldCheck, Mail, ArrowRight, User as UserIcon, ExternalLink } from "lucide-react";
+import { X, Loader2, Globe, ShieldCheck, ExternalLink } from "lucide-react";
 
 interface GoogleAuthModalProps {
   isOpen: boolean;
@@ -8,6 +8,7 @@ interface GoogleAuthModalProps {
   onConfirmGoogleLogin: (email: string, name?: string) => Promise<void>;
   onTriggerOfficialPopup?: () => Promise<void>;
   isLoading: boolean;
+  registeredUsers?: any[];
 }
 
 export default function GoogleAuthModal({
@@ -17,202 +18,136 @@ export default function GoogleAuthModal({
   onTriggerOfficialPopup,
   isLoading,
 }: GoogleAuthModalProps) {
-  const [customEmail, setCustomEmail] = useState("");
-  const [customName, setCustomName] = useState("");
-  const [useManual, setUseManual] = useState(false);
-  const [error, setError] = useState("");
-
   if (!isOpen) return null;
 
-  // Suggested accounts to make quick login easy while allowing any custom email
-  const suggestedAccounts = [
-    {
-      name: "David Ribeiro Müller (Diretor)",
-      email: "davidribeiromuller2009@gmail.com",
-      role: "Diretor"
-    },
-    {
-      name: "DAVID RIBEIRO MULLER (Estudante)",
-      email: "muller.david@escola.pr.gov.br",
-      role: "Aluno"
+  const handleTriggerOfficial = () => {
+    if (onTriggerOfficialPopup) {
+      onTriggerOfficialPopup();
+    } else {
+      onConfirmGoogleLogin("davidribeiromuller2009@gmail.com", "David Ribeiro Müller");
     }
-  ];
-
-  const handleSelectAccount = (email: string, name: string) => {
-    setError("");
-    onConfirmGoogleLogin(email, name);
-  };
-
-  const handleManualSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    const cleanEmail = customEmail.trim().toLowerCase();
-    if (!cleanEmail || !cleanEmail.includes("@")) {
-      setError("Por favor, digite um e-mail Google válido (ex: @gmail.com ou @escola.pr.gov.br).");
-      return;
-    }
-    const derivedName = customName.trim() || cleanEmail.split("@")[0].replace(/[._]/g, " ");
-    onConfirmGoogleLogin(cleanEmail, derivedName);
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-xs flex items-center justify-center p-4 font-sans antialiased">
       <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 15 }}
+        initial={{ opacity: 0, scale: 0.95, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 15 }}
-        className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 relative text-slate-800 dark:text-slate-100"
+        exit={{ opacity: 0, scale: 0.95, y: 8 }}
+        transition={{ duration: 0.18, ease: "easeOut" }}
+        className="bg-white dark:bg-[#202124] rounded-[28px] max-w-[420px] w-full p-7 sm:p-9 shadow-2xl border border-[#dadce0] dark:border-[#5f6368] relative text-[#202124] dark:text-[#e8eaed]"
       >
         {/* Close Button */}
         <button
           onClick={onClose}
           disabled={isLoading}
-          className="absolute top-4 right-4 p-2 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+          className="absolute top-4 right-4 p-2 rounded-full text-[#5f6368] dark:text-[#9aa0a6] hover:text-[#202124] dark:hover:text-white hover:bg-[#f1f3f4] dark:hover:bg-[#303134] transition-colors cursor-pointer"
+          title="Fechar"
         >
-          <X size={18} />
+          <X size={20} />
         </button>
 
         {/* Google Header */}
-        <div className="flex flex-col items-center text-center mb-5">
-          <div className="w-12 h-12 rounded-2xl bg-white shadow-md border border-slate-200 flex items-center justify-center mb-3">
-            <svg className="w-6 h-6" viewBox="0 0 24 24">
+        <div className="flex flex-col items-center text-center">
+          {/* Authentic Google 4-color Logo */}
+          <div className="mb-4">
+            <svg className="w-10 h-10" viewBox="0 0 24 24">
               <path
-                fill="#ea4335"
-                d="M12 5.04c1.7 0 3.2.6 4.4 1.7l3.3-3.3C17.7 1.4 15 0 12 0 7.3 0 3.3 2.7 1.4 6.7l3.9 3C6.2 6.9 8.9 5.04 12 5.04z"
+                fill="#4285F4"
+                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
               />
               <path
-                fill="#4285f4"
-                d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.1-2 3.7-4.9 3.7-8.7z"
+                fill="#34A853"
+                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
               />
               <path
-                fill="#fbbc05"
-                d="M5.3 14.3c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.4 6.7C.5 8.4 0 10.1 0 12s.5 3.6 1.4 5.3l3.9-3z"
+                fill="#FBBC05"
+                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
               />
               <path
-                fill="#34a853"
-                d="M12 24c3.2 0 6-1.1 8-2.9l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3.1 0-5.8-1.9-6.7-4.7l-3.9 3c1.9 4 5.9 6.7 10 6.7z"
+                fill="#EA4335"
+                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
               />
             </svg>
           </div>
 
-          <h3 className="text-lg font-bold">Fazer login com o Google</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Escolha uma conta cadastrada ou insira qualquer conta Google
+          <h2 className="text-[22px] font-normal text-[#202124] dark:text-[#e8eaed] leading-snug">
+            Fazer login com o Google
+          </h2>
+          <p className="text-[13px] text-[#5f6368] dark:text-[#9aa0a6] mt-1.5 font-normal leading-relaxed">
+            Escolha uma conta para continuar para o <span className="font-medium text-[#202124] dark:text-white">Colégio Estadual Helena Wysocki</span>
           </p>
         </div>
 
-        {error && (
-          <div className="mb-4 p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-300 text-xs flex items-center gap-2">
-            <span>{error}</span>
-          </div>
-        )}
-
-        {!useManual ? (
-          <div className="flex flex-col gap-2.5">
-            {/* Suggested / Available Accounts */}
-            {suggestedAccounts.map((acc) => (
-              <button
-                key={acc.email}
-                onClick={() => handleSelectAccount(acc.email, acc.name)}
-                disabled={isLoading}
-                className="flex items-center gap-3.5 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 hover:border-[#1A73E8]/50 hover:bg-blue-50/40 dark:hover:bg-blue-950/30 active:scale-98 transition-all text-start cursor-pointer group"
-              >
-                <div className="w-9 h-9 rounded-full bg-[#1A73E8] text-white font-bold flex items-center justify-center shadow-xs text-xs">
-                  {acc.name.charAt(0)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-bold text-slate-800 dark:text-slate-100 group-hover:text-[#1A73E8] transition-colors truncate">
-                    {acc.name}
-                  </p>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                    {acc.email}
-                  </p>
-                </div>
-                <CheckCircle size={16} className="text-[#1A73E8] shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </button>
-            ))}
-
-            {/* Input any other Google account */}
+        {/* Google Authentic Account Selector Card */}
+        <div className="mt-6">
+          <div className="border border-[#dadce0] dark:border-[#5f6368] rounded-xl overflow-hidden divide-y divide-[#dadce0] dark:divide-[#5f6368] bg-white dark:bg-[#202124]">
+            {/* Primary Google Account Button */}
             <button
-              onClick={() => setUseManual(true)}
               type="button"
-              className="flex items-center gap-3 p-3 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-[#1A73E8] hover:bg-slate-50 dark:hover:bg-slate-800/50 text-start text-xs font-semibold text-[#1A73E8] dark:text-blue-400 transition-colors cursor-pointer mt-1"
+              onClick={handleTriggerOfficial}
+              disabled={isLoading}
+              className="w-full flex items-center gap-3.5 p-3.5 sm:p-4 hover:bg-[#f8f9fa] dark:hover:bg-[#303134] text-start transition-all cursor-pointer group active:bg-[#f1f3f4] dark:active:bg-[#3c4043]"
+              id="btn-trigger-official-google"
             >
-              <div className="w-8 h-8 rounded-full bg-blue-50 dark:bg-blue-950/50 flex items-center justify-center text-[#1A73E8]">
-                <UserIcon size={16} />
+              <div className="w-10 h-10 rounded-full bg-[#1a73e8] text-white flex items-center justify-center font-medium text-sm shrink-0 shadow-xs group-hover:scale-105 transition-transform">
+                {isLoading ? (
+                  <Loader2 size={18} className="animate-spin text-white" />
+                ) : (
+                  <svg className="w-5 h-5" viewBox="0 0 24 24">
+                    <path
+                      fill="#FFFFFF"
+                      d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"
+                    />
+                  </svg>
+                )}
               </div>
-              <span className="flex-1">Digitar outra conta Google / Institucional</span>
-              <ArrowRight size={15} />
+
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] font-medium text-[#1a73e8] dark:text-[#8ab4f8] group-hover:underline truncate">
+                  {isLoading ? "Conectando ao Google..." : "Continuar com Conta do Google"}
+                </p>
+                <p className="text-[12px] text-[#5f6368] dark:text-[#9aa0a6] truncate mt-0.5">
+                  Abre o seletor oficial de contas salvas no computador
+                </p>
+              </div>
+
+              <svg className="w-4 h-4 text-[#5f6368] dark:text-[#9aa0a6] group-hover:text-[#1a73e8] dark:group-hover:text-[#8ab4f8] shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/>
+              </svg>
             </button>
-
-            {onTriggerOfficialPopup && (
-              <button
-                onClick={onTriggerOfficialPopup}
-                type="button"
-                className="text-center text-[11px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 mt-2 flex items-center justify-center gap-1.5 cursor-pointer underline"
-              >
-                <ExternalLink size={12} />
-                <span>Tentar abrir popup do navegador</span>
-              </button>
-            )}
-
-            <div className="mt-3 flex items-center justify-center gap-1.5 text-[10px] text-slate-400">
-              <ShieldCheck size={13} className="text-emerald-500" />
-              <span>Conexão direta e segura com o portal escolar</span>
-            </div>
           </div>
-        ) : (
-          <form onSubmit={handleManualSubmit} className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                E-mail da Conta Google ou Escola PR
-              </label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                <input
-                  type="email"
-                  required
-                  autoFocus
-                  value={customEmail}
-                  onChange={(e) => setCustomEmail(e.target.value)}
-                  placeholder="exemplo@gmail.com ou @escola.pr.gov.br"
-                  className="w-full h-11 pl-9 pr-3 text-xs bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-[#1A73E8]/50 focus:outline-none"
-                />
-              </div>
-            </div>
+        </div>
 
-            <div className="flex flex-col gap-1">
-              <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                Nome do Usuário (Opcional)
-              </label>
-              <input
-                type="text"
-                value={customName}
-                onChange={(e) => setCustomName(e.target.value)}
-                placeholder="Ex: Seu Nome Completo"
-                className="w-full h-11 px-3 text-xs bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-[#1A73E8]/50 focus:outline-none"
-              />
-            </div>
+        {/* Google Official Terms & Privacy Text */}
+        <div className="mt-6 pt-4 border-t border-[#dadce0] dark:border-[#3c4043] text-[11px] text-[#5f6368] dark:text-[#9aa0a6] leading-relaxed">
+          <p>
+            Para continuar, o Google compartilhará seu nome, endereço de e-mail e foto do perfil com o <strong className="font-semibold text-[#202124] dark:text-[#e8eaed]">Colégio Helena Wysocki</strong>. Antes de usar o app, consulte a Política de Privacidade e os Termos de Serviço.
+          </p>
+          <div className="mt-2.5 flex items-center gap-1.5 text-[11px] text-[#1e8e3e] dark:text-[#81c995]">
+            <ShieldCheck size={14} className="shrink-0" />
+            <span>Autenticação OAuth segura integrada com serviços Google</span>
+          </div>
+        </div>
 
-            <div className="mt-2 flex flex-col gap-2">
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full h-11 bg-[#1A73E8] hover:bg-[#1557b0] text-white text-xs font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-md active:scale-98 cursor-pointer disabled:opacity-50"
-              >
-                {isLoading ? "Conectando..." : "Entrar com Esta Conta"}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setUseManual(false)}
-                className="w-full h-9 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-medium cursor-pointer"
-              >
-                Voltar para contas sugeridas
-              </button>
-            </div>
-          </form>
-        )}
+        {/* Authentic Google Footer Bar */}
+        <div className="mt-5 pt-3 flex items-center justify-between text-[11px] text-[#5f6368] dark:text-[#9aa0a6]">
+          <div className="flex items-center gap-1 hover:text-[#202124] dark:hover:text-white cursor-pointer">
+            <Globe size={12} />
+            <span>Português (Brasil)</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <a href="https://support.google.com/accounts" target="_blank" rel="noreferrer" className="hover:text-[#1a73e8] dark:hover:text-[#8ab4f8]">
+              Ajuda
+            </a>
+            <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer" className="hover:text-[#1a73e8] dark:hover:text-[#8ab4f8]">
+              Privacidade
+            </a>
+            <a href="https://policies.google.com/terms" target="_blank" rel="noreferrer" className="hover:text-[#1a73e8] dark:hover:text-[#8ab4f8]">
+              Termos
+            </a>
+          </div>
+        </div>
       </motion.div>
     </div>
   );

@@ -76,7 +76,7 @@ const PREVIEWS: FeaturePreview[] = [
     ],
     sampleMockup: {
       tag: "Cultura & Ciências • Auditório Principal",
-      headline: "Mostra Científica e Cultural de Pinhais 2026",
+      headline: "Mostra Científica e Cultural de Araucária 2026",
       meta: "14 a 16 de Outubro • Horário Integral",
       details: "Apresentação dos projetos integradores desenvolvidos pelas turmas de Ensino Médio."
     }
@@ -229,23 +229,12 @@ export default function WelcomeScreen({ onNavigate }: WelcomeScreenProps) {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-4xl mx-auto w-full px-6 py-8 sm:py-12 flex flex-col items-center justify-center text-center">
-        {/* Decorative Badge */}
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[#4C6B4C]/10 dark:bg-[#4C6B4C]/30 text-[#283e28] dark:text-[#A3C69D] text-xs font-semibold border border-[#4C6B4C]/20 mb-5"
-        >
-          <Sparkles size={13} className="text-emerald-600 dark:text-emerald-400" />
-          <span>Portal Oficial de Eventos e Comunicação</span>
-        </motion.div>
-
         {/* Big School Logo */}
         <motion.div
           initial={{ scale: 0.85, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ delay: 0.15 }}
-          className="w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden border-4 border-white dark:border-slate-800 shadow-xl bg-white p-1 mb-5"
+          className="w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden border-4 border-white shadow-xl bg-white p-1 mb-5"
         >
           <img
             src={logoImg}
@@ -272,7 +261,7 @@ export default function WelcomeScreen({ onNavigate }: WelcomeScreenProps) {
           transition={{ delay: 0.25 }}
           className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 font-medium mt-1"
         >
-          Colégio Estadual Helena Wysocki • Pinhais - PR
+          Colégio Estadual Helena Wysocki • Araucária - PR
         </motion.p>
 
         {/* Description Summary */}
@@ -338,24 +327,15 @@ export default function WelcomeScreen({ onNavigate }: WelcomeScreenProps) {
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4 }}
-          className="flex flex-col sm:flex-row items-center gap-3 w-full max-w-md mt-8"
+          className="flex items-center justify-center w-full max-w-sm mt-8"
         >
           {/* Main Primary Button to Login */}
           <button
             onClick={() => onNavigate("login")}
-            className="w-full sm:flex-1 h-13 bg-[#4C6B4C] hover:bg-[#3d593d] active:scale-98 text-white font-bold text-sm rounded-2xl flex items-center justify-center gap-2.5 shadow-lg shadow-[#4C6B4C]/25 transition-all cursor-pointer"
+            className="w-full h-13 bg-[#4C6B4C] hover:bg-[#3d593d] active:scale-98 text-white font-bold text-sm rounded-2xl flex items-center justify-center gap-2.5 shadow-lg shadow-[#4C6B4C]/25 transition-all cursor-pointer"
           >
             <span>Acessar o Portal (Login)</span>
             <ArrowRight size={17} />
-          </button>
-
-          {/* Secondary Button to Register */}
-          <button
-            onClick={() => onNavigate("register")}
-            className="w-full sm:w-auto h-13 px-6 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700/80 text-[#283e28] dark:text-[#A3C69D] font-semibold text-xs rounded-2xl flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-700 active:scale-98 transition-all cursor-pointer"
-          >
-            <UserPlus size={15} />
-            <span>Criar Conta</span>
           </button>
         </motion.div>
       </main>

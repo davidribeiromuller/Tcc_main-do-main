@@ -29,14 +29,22 @@ export default function App() {
       if (stored) {
         const parsed: User = JSON.parse(stored);
         const cleanEmail = (parsed.email || "").toLowerCase().trim();
-        const isDirectorAccount = cleanEmail === "diretoria@helenawysocki.com";
+        const isDirectorAccount = cleanEmail === "diretoria@helenawysocki.com" || cleanEmail === "davidribeiromuller2009@gmail.com" || parsed.isAdmin === true || parsed.role === "Diretor";
         return {
           ...parsed,
           isAdmin: isDirectorAccount,
-          role: isDirectorAccount ? "Diretor" : (parsed.role === "Diretor" ? "Aluno" : parsed.role)
+          role: isDirectorAccount ? "Diretor" : parsed.role
         };
       }
       return null;
+    } catch {
+      return null;
+    }
+  });
+  const [impersonatorAdmin, setImpersonatorAdmin] = useState<User | null>(() => {
+    try {
+      const saved = localStorage.getItem("impersonator_admin");
+      return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
     }
@@ -52,8 +60,18 @@ export default function App() {
       return null;
     }
   });
-  const [usersList, setUsersList] = useState<User[]>([]);
-  const [adminUserBeforeImpersonation, setAdminUserBeforeImpersonation] = useState<User | null>(null);
+  const [usersList, setUsersList] = useState<User[]>(() => {
+    try {
+      const stored = localStorage.getItem("local_users_db");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      return defaultUsers;
+    } catch {
+      return defaultUsers;
+    }
+  });
   const [isLoadingAuth, setIsLoadingAuth] = useState(false);
   const [isDeletingEvent, setIsDeletingEvent] = useState(false);
   const [feedSearchOpen, setFeedSearchOpen] = useState(false);
@@ -61,9 +79,11 @@ export default function App() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [showGoogleAuthModal, setShowGoogleAuthModal] = useState(false);
 
-  // Set document title
+  // Set document title & force light theme
   useEffect(() => {
     document.title = "Página eloEscola";
+    document.documentElement.classList.remove("dark");
+    localStorage.removeItem("theme_mode");
   }, []);
 
   // Toast notification system
@@ -105,32 +125,38 @@ export default function App() {
   };
 
   // Load all users for admin
-  const loadAllUsers = async (token: string) => {
+  const loadAllUsers = async (customToken?: string) => {
     try {
-      const res = await fetch("/api/users", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const token = customToken || (await getAuthToken()) || "";
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+      const res = await fetch("/api/users", { headers });
       if (res.ok) {
         const data = await res.json();
-        setUsersList(data.users || []);
-        localStorage.setItem("local_users_db", JSON.stringify(data.users || []));
-        return;
+        if (data.users && Array.isArray(data.users)) {
+          setUsersList(data.users);
+          localStorage.setItem("local_users_db", JSON.stringify(data.users));
+          return;
+        }
       }
     } catch (error) {
-      console.log("Servidor backend não atendeu /api/users, usando dados locais.");
+      console.log("Servidor backend não atendeu /api/users, usando dados locais.", error);
     }
 
     // Fallback for static hosting
     try {
       const stored = localStorage.getItem("local_users_db");
       if (stored) {
-        setUsersList(JSON.parse(stored));
-      } else {
-        setUsersList(defaultUsers);
-        localStorage.setItem("local_users_db", JSON.stringify(defaultUsers));
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setUsersList(parsed);
+          return;
+        }
       }
+      setUsersList(defaultUsers);
+      localStorage.setItem("local_users_db", JSON.stringify(defaultUsers));
     } catch {
       setUsersList(defaultUsers);
     }
@@ -288,9 +314,94 @@ export default function App() {
       });
     }
 
-    loadEvents();
-    return () => unsubscribe();
+    // Proactively connect to backend and sync database events & users on app startup
+    const syncDatabaseOnEntry = async () => {
+      try {
+        // Test backend DB connection
+        fetch("/api/db-status").catch(() => {});
+      } catch {}
+      await loadEvents();
+      await loadAllUsers();
+    };
+
+    syncDatabaseOnEntry();
+
+    // Auto-sync on window focus (when user switches back to tab)
+    const handleFocusSync = () => {
+      loadEvents();
+      if (currentUser?.isAdmin || activeScreen === "admin") {
+        loadAllUsers();
+      }
+    };
+    window.addEventListener("focus", handleFocusSync);
+
+    // Periodic automatic background synchronization every 20 seconds
+    const syncInterval = setInterval(() => {
+      loadEvents();
+      if (currentUser?.isAdmin || activeScreen === "admin") {
+        loadAllUsers();
+      }
+    }, 20000);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener("focus", handleFocusSync);
+      clearInterval(syncInterval);
+    };
   }, []);
+
+  // Reload events & users automatically when changing screens
+  useEffect(() => {
+    loadEvents();
+    if (activeScreen === "admin" || currentUser?.isAdmin) {
+      loadAllUsers();
+    }
+  }, [activeScreen, currentUser?.isAdmin]);
+
+  // Periodic heartbeat to track when user is active in the application ("Ativo a...")
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const pingActivity = async () => {
+      const nowIso = new Date().toISOString();
+      
+      // Update local storage and currentUser state timestamp
+      setCurrentUser((prev) => {
+        if (!prev) return null;
+        const updated = { ...prev, lastActiveAt: nowIso };
+        try {
+          localStorage.setItem("local_user", JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+
+      // Update in local usersList
+      setUsersList((prevList) =>
+        prevList.map((u) => (u.id === currentUser.id || u.email === currentUser.email ? { ...u, lastActiveAt: nowIso } : u))
+      );
+
+      // Ping server heartbeat
+      try {
+        const token = (await getAuthToken()) || "";
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (token) headers.Authorization = `Bearer ${token}`;
+
+        await fetch("/api/users/heartbeat", {
+          method: "POST",
+          headers
+        });
+      } catch (err) {
+        // silent fail in offline mode
+      }
+    };
+
+    // Ping on mount
+    pingActivity();
+
+    // Ping every 2 minutes
+    const interval = setInterval(pingActivity, 120000);
+    return () => clearInterval(interval);
+  }, [currentUser?.id, currentUser?.email]);
 
   // Handle Direct Google Login
   const handleDirectGoogleLogin = async (email: string, name?: string) => {
@@ -379,28 +490,64 @@ export default function App() {
     }
   };
 
-  // Trigger real Google Popup
+  // Trigger real Google Popup with account selector
   const handleTriggerGooglePopup = async () => {
     if (!auth || !googleAuthProvider) {
-      showToast("Autenticação direta Google selecionada.", "info");
+      setLoginError("Serviço de autenticação Google não disponível no momento.");
+      showToast("Serviço Google Auth não inicializado.", "error");
       return;
     }
     try {
       setIsLoadingAuth(true);
       setLoginError(null);
+      
+      // Ensure select_account prompt is active to list all computer accounts
+      googleAuthProvider.setCustomParameters({
+        prompt: 'select_account'
+      });
+
       await signInWithPopup(auth, googleAuthProvider);
       setShowGoogleAuthModal(false);
+      showToast("Autenticado com sucesso via Google!", "success");
     } catch (error: any) {
+      console.warn("Google Auth Result:", error);
+      
       if (
         error?.code === "auth/popup-closed-by-user" ||
         error?.code === "auth/cancelled-popup-request" ||
         error?.code === "auth/user-cancelled" ||
         error?.message?.includes("popup-closed-by-user")
       ) {
+        const cancelMsg = "Operação cancelada: a janela de login do Google foi fechada antes de selecionar uma conta.";
+        setLoginError(cancelMsg);
+        showToast("Login com Google cancelado.", "warning");
         return;
       }
-      console.warn("Popup error:", error);
-      showToast("Janela bloqueada pelo navegador. Use o campo direto do modal.", "warning");
+
+      if (error?.code === "auth/popup-blocked") {
+        const blockedMsg = "A janela de login foi bloqueada pelo navegador. Por favor, permita pop-ups para fazer login com o Google.";
+        setLoginError(blockedMsg);
+        showToast(blockedMsg, "error");
+        return;
+      }
+
+      if (error?.code === "auth/network-request-failed") {
+        const netMsg = "Falha de rede ao conectar com os servidores Google. Verifique sua conexão com a internet.";
+        setLoginError(netMsg);
+        showToast(netMsg, "error");
+        return;
+      }
+
+      if (error?.code === "auth/unauthorized-domain") {
+        const domainMsg = "Este domínio não está autorizado no Firebase Authentication para login Google.";
+        setLoginError(domainMsg);
+        showToast(domainMsg, "error");
+        return;
+      }
+
+      const errMsg = error?.message || "Ocorreu um erro ao conectar com a conta Google.";
+      setLoginError(`Erro no login Google: ${errMsg}`);
+      showToast(errMsg, "error");
     } finally {
       setIsLoadingAuth(false);
     }
@@ -408,18 +555,49 @@ export default function App() {
 
   // Handle Google Login button click
   const handleGoogleLogin = async () => {
-    setShowGoogleAuthModal(true);
+    await handleTriggerGooglePopup();
   };
 
   // Helper to generate or fetch token
   const getAuthToken = async (): Promise<string | null> => {
     if (auth?.currentUser) {
-      return await auth.currentUser.getIdToken();
+      try {
+        return await auth.currentUser.getIdToken();
+      } catch (e) {
+        console.warn("Could not get Firebase idToken:", e);
+      }
     }
-    if (currentUser && currentUser.provider === "local") {
-      return `local-${currentUser.uid}|${currentUser.role}|${encodeURIComponent(currentUser.nome)}|${encodeURIComponent(currentUser.email)}`;
+    if (currentUser) {
+      if (currentUser.provider === "google") {
+        return `google-${currentUser.uid}|${currentUser.role || 'Aluno'}|${encodeURIComponent(currentUser.nome || '')}|${encodeURIComponent(currentUser.email || '')}|${encodeURIComponent(currentUser.foto_perfil || '')}`;
+      }
+      return `local-${currentUser.uid}|${currentUser.role || 'Aluno'}|${encodeURIComponent(currentUser.nome || '')}|${encodeURIComponent(currentUser.email || '')}`;
     }
     return null;
+  };
+
+  // Switch/Impersonate user session (Admin feature)
+  const handleImpersonateUser = (targetUser: User) => {
+    if (currentUser && !impersonatorAdmin) {
+      setImpersonatorAdmin(currentUser);
+      localStorage.setItem("impersonator_admin", JSON.stringify(currentUser));
+    }
+    setCurrentUser(targetUser);
+    localStorage.setItem("local_user", JSON.stringify(targetUser));
+    setActiveScreen("feed");
+    showToast(`Acessando a conta de ${targetUser.nome || targetUser.email}`, "success");
+  };
+
+  const handleStopImpersonating = () => {
+    if (impersonatorAdmin) {
+      const adminToRestore = impersonatorAdmin;
+      setCurrentUser(adminToRestore);
+      localStorage.setItem("local_user", JSON.stringify(adminToRestore));
+      setImpersonatorAdmin(null);
+      localStorage.removeItem("impersonator_admin");
+      setActiveScreen("admin");
+      showToast("Você retornou para sua conta de Administrador!", "success");
+    }
   };
 
   // local login with password verification support & static fallback
@@ -945,22 +1123,6 @@ export default function App() {
     }
   };
 
-  const handleAdminImpersonateUser = (user: User) => {
-    if (!currentUser || currentUser.id === user.id) return;
-    setAdminUserBeforeImpersonation(currentUser);
-    setCurrentUser(user);
-    setActiveScreen("feed");
-    showToast(`Você entrou como ${user.nome || user.email}.`, "info");
-  };
-
-  const handleExitImpersonation = () => {
-    if (!adminUserBeforeImpersonation) return;
-    setCurrentUser(adminUserBeforeImpersonation);
-    setAdminUserBeforeImpersonation(null);
-    setActiveScreen("admin");
-    showToast("Você voltou para sua conta administrativa.", "info");
-  };
-
   // Sign out
   const handleLogout = async () => {
     const firebaseUser = auth?.currentUser;
@@ -977,17 +1139,6 @@ export default function App() {
       id="app-root-container"
       className="app-viewport relative flex flex-col justify-between bg-brand-bg-light text-brand-text-light"
     >
-      {adminUserBeforeImpersonation && (
-        <div className="fixed top-0 left-0 right-0 z-[60] flex items-center justify-center gap-3 bg-slate-900 px-4 py-2 text-xs text-white shadow-md">
-          <span>Visualizando a conta de <strong>{currentUser?.nome || currentUser?.email}</strong></span>
-          <button
-            onClick={handleExitImpersonation}
-            className="rounded-md bg-white/15 px-3 py-1 font-semibold hover:bg-white/25 cursor-pointer"
-          >
-            Voltar para administrador
-          </button>
-        </div>
-      )}
       <AnimatePresence mode="wait">
         
         {activeScreen === "splash" && (
@@ -1028,6 +1179,7 @@ export default function App() {
               isLoading={isLoadingAuth}
               loginError={loginError}
               clearLoginError={() => setLoginError(null)}
+              registeredUsers={usersList}
             />
           </motion.div>
         )}
@@ -1074,6 +1226,26 @@ export default function App() {
         {/* LOGGED IN NAVIGATION SHELLS */}
         {["feed", "calendar", "admin", "settings", "contact", "eventDetail", "map"].includes(activeScreen) && (
           <div className="w-full h-full relative overflow-hidden flex flex-col">
+            {/* Impersonation Return Banner */}
+            {impersonatorAdmin && (
+              <div className="bg-amber-500 text-slate-900 px-4 py-2.5 flex items-center justify-between text-xs sm:text-sm font-medium z-50 shadow-md border-b border-amber-600">
+                <div className="flex items-center gap-2 truncate">
+                  <span className="bg-amber-900 text-amber-100 px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider shrink-0">
+                    Modo Administrador
+                  </span>
+                  <span className="truncate">
+                    Acessando conta de: <strong>{currentUser?.nome || currentUser?.email}</strong>
+                  </span>
+                </div>
+                <button
+                  onClick={handleStopImpersonating}
+                  className="shrink-0 ml-3 px-3 py-1 bg-white text-slate-900 rounded-xl font-bold hover:bg-slate-100 active:scale-95 transition-all shadow cursor-pointer text-xs flex items-center gap-1.5"
+                >
+                  <span>Voltar para Administrador</span>
+                </button>
+              </div>
+            )}
+
             <DesktopNavbar 
               activeScreen={activeScreen} 
               onNavigate={setActiveScreen} 
@@ -1177,7 +1349,7 @@ export default function App() {
                       usersList={usersList}
                       onUpdateUser={handleAdminUpdateUser}
                       onDeleteUser={handleAdminDeleteUser}
-                      onImpersonateUser={handleAdminImpersonateUser}
+                      onImpersonateUser={handleImpersonateUser}
                       currentUser={currentUser}
                     />
                   </motion.div>
@@ -1300,6 +1472,7 @@ export default function App() {
         onConfirmGoogleLogin={handleDirectGoogleLogin}
         onTriggerOfficialPopup={handleTriggerGooglePopup}
         isLoading={isLoadingAuth}
+        registeredUsers={usersList}
       />
     </div>
   );

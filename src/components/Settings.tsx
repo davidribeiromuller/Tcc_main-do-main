@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { User, Bell, Palette, MessageSquare, ChevronRight, ArrowLeft, Save, LogOut, Database, Server, Camera, Upload } from "lucide-react";
+import { User, Bell, Palette, MessageSquare, ChevronRight, ArrowLeft, Save, LogOut, Database, Server, Camera, Upload, Moon, Sun } from "lucide-react";
 import { SCHOOLS_LIST } from "../lib/schools.ts";
 
 const ensureDbDateToInputFormat = (dateVal: string): string => {

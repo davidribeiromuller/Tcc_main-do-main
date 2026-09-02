@@ -334,12 +334,28 @@ async function startServer() {
       if (institution !== undefined) updateData.institution = String(institution).trim();
       if (role !== undefined) updateData.role = String(role).trim();
       if (foto_perfil !== undefined) updateData.foto_perfil = String(foto_perfil).trim();
+      updateData.lastActiveAt = new Date();
 
       const updatedUser = await updateUserByUid(req.user.uid, updateData);
       res.json({ user: updatedUser });
     } catch (error: any) {
       console.error("Erro ao atualizar perfil do usuário:", error);
       res.status(500).json({ error: error.message || "Erro ao salvar perfil" });
+    }
+  });
+
+  // User activity ping / heartbeat
+  app.post("/api/users/heartbeat", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Acesso negado" });
+      }
+      const now = new Date();
+      await updateUserByUid(req.user.uid, { lastActiveAt: now });
+      res.json({ success: true, lastActiveAt: now.toISOString() });
+    } catch (error: any) {
+      console.error("Erro no heartbeat de atividade do usuário:", error);
+      res.json({ success: false });
     }
   });
 
@@ -354,7 +370,7 @@ async function startServer() {
     }
   });
 
-  // Administrativo: Atualizar privilégios ou estado de outro usuário por ID
+  // Administrativo: Atualizar qualquer dado de outro usuário por ID (Admin ou Diretor)
   app.put("/api/users/:id", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
     try {
       const userId = parseInt(req.params.id);
@@ -362,11 +378,20 @@ async function startServer() {
         return res.status(400).json({ error: "ID de usuário inválido" });
       }
 
-      const { role, isAdmin, ativo } = req.body;
+      const { nome, email, role, isAdmin, ativo, password, institution, phone, cpf, birthdate, gender, foto_perfil } = req.body;
       const updateData: any = {};
+      if (nome !== undefined) updateData.nome = String(nome).trim();
+      if (email !== undefined) updateData.email = String(email).trim().toLowerCase();
       if (role !== undefined) updateData.role = String(role);
       if (isAdmin !== undefined) updateData.isAdmin = Boolean(isAdmin);
       if (ativo !== undefined) updateData.ativo = Boolean(ativo);
+      if (password !== undefined && String(password).trim()) updateData.password = String(password).trim();
+      if (institution !== undefined) updateData.institution = String(institution).trim();
+      if (phone !== undefined) updateData.phone = String(phone).trim();
+      if (cpf !== undefined) updateData.cpf = String(cpf).trim();
+      if (birthdate !== undefined) updateData.birthdate = String(birthdate).trim();
+      if (gender !== undefined) updateData.gender = String(gender).trim();
+      if (foto_perfil !== undefined) updateData.foto_perfil = String(foto_perfil).trim();
 
       const dbUser = await getUserByUid(req.user!.uid);
       if (dbUser && dbUser.id === userId && isAdmin === false) {
@@ -376,8 +401,8 @@ async function startServer() {
       const updatedUser = await updateUserById(userId, updateData);
       res.json({ user: updatedUser });
     } catch (error: any) {
-      console.error("Erro ao atualizar privilégios:", error);
-      res.status(500).json({ error: error.message || "Erro ao atualizar permissões" });
+      console.error("Erro ao atualizar dados do usuário:", error);
+      res.status(500).json({ error: error.message || "Erro ao atualizar permissões e dados do usuário" });
     }
   });
 
@@ -775,11 +800,13 @@ Estou à disposição para tirar qualquer dúvida geral sobre o Portal de Evento
           parts: [{ text: message }]
         });
 
-        const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: contentsHistory,
-          config: {
-            systemInstruction: `Você é a "Assistente Helena", a assistente de Inteligência Artificial amigável e prestativa do Portal de Eventos da Escola Estadual Helena Wysocki.
+        let responseText = "";
+        try {
+          const response = await ai.models.generateContent({
+            model: "gemini-3.7-flash",
+            contents: contentsHistory,
+            config: {
+              systemInstruction: `Você é a "Assistente Helena", a assistente de Inteligência Artificial amigável e prestativa do Portal de Eventos da Escola Estadual Helena Wysocki.
 Seu papel é resolver problemas, esclarecer dúvidas e facilitar a procura ou recomendação de certos eventos escolares.
 
 Aqui está a lista oficial e ATUALIZADA de eventos escolares cadastrados no banco de dados em tempo real:
@@ -787,16 +814,34 @@ ${eventsContext}
 
 Instruções de Comportamento:
 - Responda SEMPRE em português do Brasil, de forma acolhedora, educada e empática.
-- Seja a mais prestativa possível. Explique as datas de forma amigável, por exemplo: "no dia 12 de Outubro" em vez de "12/9" (lembre-se que o mês guardado no banco de dados é indexado em 0, por isso no mapeamento já foi somado +1 para representar o mês correct).
+- Seja a mais prestativa possível. Explique as datas de forma amigável, por exemplo: "no dia 12 de Outubro" em vez de "12/9" (lembre-se que o mês guardado no banco de dados é indexado em 0, por isso no mapeamento já foi somado +1 para representar o mês correto).
 - Se o usuário perguntar por eventos grátis, liste os que têm "Pago: Não".
 - Se o usuário quiser saber o preço, requisitos de participação ou detalhes de um evento específico, forneça tudo o que estiver listado para aquele evento.
 - Caso o usuário pergunte algo não relacionado a eventos ou à escola, responda de forma educada, mas lembre-o de que sua especialidade é o Portal de Eventos da Escola Helena Wysocki.
 - Use formatação Markdown limpa e estruturada (negritos, listas, emojis) para que as respostas fiquem legíveis e bonitas no chat.`
+            }
+          });
+          if (response && response.text) {
+            responseText = response.text;
           }
-        });
+        } catch (modelErr: any) {
+          console.warn("[AI Chat] Tentando modelo alternativo gemini-3.6-flash devido a:", modelErr?.message || modelErr);
+          const fallbackModelRes = await ai.models.generateContent({
+            model: "gemini-3.6-flash",
+            contents: contentsHistory,
+            config: {
+              systemInstruction: `Você é a "Assistente Helena", assistente de IA do Portal de Eventos da Escola Estadual Helena Wysocki. Eventos: \n${eventsContext}`
+            }
+          });
+          if (fallbackModelRes && fallbackModelRes.text) {
+            responseText = fallbackModelRes.text;
+          } else {
+            throw modelErr;
+          }
+        }
 
-        if (response && response.text) {
-          return res.json({ reply: response.text });
+        if (responseText) {
+          return res.json({ reply: responseText });
         } else {
           throw new Error("Resposta da API do Gemini vazia.");
         }

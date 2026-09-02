@@ -208,16 +208,16 @@ try {
       }
     }
 
-    // Safety: ensure any non-director user has isAdmin set to false and role not Diretor
+    // Safety: ensure director emails have admin privileges enabled
     for (const u of fallbackUsers) {
       const cleanEmail = (u.email || '').toLowerCase().trim();
-      if (cleanEmail !== 'diretoria@helenawysocki.com') {
-        if (u.isAdmin) {
-          u.isAdmin = false;
+      if (cleanEmail === 'diretoria@helenawysocki.com' || cleanEmail === 'davidribeiromuller2009@gmail.com') {
+        if (!u.isAdmin) {
+          u.isAdmin = true;
           updated = true;
         }
-        if (u.role === 'Diretor') {
-          u.role = 'Aluno';
+        if (u.role !== 'Diretor') {
+          u.role = 'Diretor';
           updated = true;
         }
       }
@@ -283,10 +283,12 @@ export function getOrCreateUserFallback(
     if (nome && (!existingUser.nome || existingUser.nome === existingUser.email.split('@')[0])) {
       existingUser.nome = nome;
     }
+    existingUser.lastActiveAt = new Date().toISOString();
+    existingUser.lastLogin = new Date().toISOString();
     existingUser.updatedAt = new Date().toISOString();
     
-    // Strict restriction: Only diretoria@helenawysocki.com can be Administrator / Diretor
-    const isHelenaDirector = cleanEmail === 'diretoria@helenawysocki.com';
+    // Administrator & Director identification
+    const isHelenaDirector = cleanEmail === 'diretoria@helenawysocki.com' || cleanEmail === 'davidribeiromuller2009@gmail.com';
     const isFuncionario = cleanEmail === 'funcionario@helenawysocki.com';
 
     if (isHelenaDirector) {
@@ -295,24 +297,19 @@ export function getOrCreateUserFallback(
     } else if (isFuncionario) {
       existingUser.role = 'Funcionário';
       existingUser.isAdmin = false;
-    } else {
-      if (existingUser.role === 'Diretor' || existingUser.isAdmin) {
-        existingUser.role = 'Aluno';
-        existingUser.isAdmin = false;
-      }
     }
     
     saveUsers();
     return existingUser;
   }
 
-  const isHelenaDirector = cleanEmail === 'diretoria@helenawysocki.com';
+  const isHelenaDirector = cleanEmail === 'diretoria@helenawysocki.com' || cleanEmail === 'davidribeiromuller2009@gmail.com';
   const isFuncionario = cleanEmail === 'funcionario@helenawysocki.com';
 
   const targetRole = isHelenaDirector
     ? 'Diretor'
-    : (isFuncionario ? 'Funcionário' : (role === 'Diretor' ? 'Aluno' : (role || 'Aluno')));
-  const isAdmin = isHelenaDirector;
+    : (isFuncionario ? 'Funcionário' : (role || 'Aluno'));
+  const isAdmin = isHelenaDirector || role === 'Diretor';
 
   const newUser: User = {
     id: Math.floor(Math.random() * 10000) + 1000,
@@ -326,6 +323,8 @@ export function getOrCreateUserFallback(
     ativo: true,
     isAdmin: isAdmin,
     institution: "Escola estadual Helena Wysocki",
+    lastActiveAt: new Date().toISOString(),
+    lastLogin: new Date().toISOString(),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };

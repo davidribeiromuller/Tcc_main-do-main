@@ -27,8 +27,8 @@ import {
 } from "lucide-react";
 import { Event } from "../types";
 
-// Default coordinates for Escola Estadual Helena Wysocki (Pinhais / Curitiba - PR)
-const SCHOOL_COORDINATES: [number, number] = [-25.4385, -49.1925];
+// Default coordinates for Escola Estadual Helena Wysocki (Araucária - PR)
+const SCHOOL_COORDINATES: [number, number] = [-25.5936, -49.4103];
 
 interface MapViewProps {
   events: Event[];
@@ -39,18 +39,18 @@ interface MapViewProps {
   onUserCoordsChange?: (coords: { lat: number; lng: number }) => void;
 }
 
-// Fallback coordinates helper around Pinhais / Curitiba
+// Fallback coordinates helper around Araucária
 function getEventCoordinates(event: Event, index: number): [number, number] {
   if (event.lat && event.lng) {
     return [event.lat, event.lng];
   }
   const offsets: [number, number][] = [
-    [-25.4385, -49.1925],
-    [-25.4392, -49.1936],
-    [-25.4376, -49.1912],
-    [-25.4415, -49.1865],
-    [-25.4362, -49.1948],
-    [-25.4431, -49.1908],
+    [-25.5936, -49.4103],
+    [-25.5942, -49.4116],
+    [-25.5926, -49.4092],
+    [-25.5965, -49.4045],
+    [-25.5912, -49.4128],
+    [-25.5981, -49.4088],
   ];
   return offsets[index % offsets.length];
 }
@@ -307,7 +307,7 @@ export default function MapView({
 
     L.marker(SCHOOL_COORDINATES, { icon: schoolPin })
       .addTo(markersGroup)
-      .bindPopup("<b>Colégio Estadual Helena Wysocki</b><br/>Campus Principal - Pinhais/PR");
+      .bindPopup("<b>Colégio Estadual Helena Wysocki</b><br/>Campus Principal - Araucária/PR");
 
     // Add Markers for each event
     filteredEvents.forEach((ev, idx) => {
@@ -430,7 +430,7 @@ export default function MapView({
         setIsLocating(false);
         setShowLocationModal(false);
         alert(
-          "Permissão de localização não concedida. O mapa continuará funcionando com os endereços de Pinhais."
+          "Permissão de localização não concedida. O mapa continuará funcionando com os endereços de Araucária."
         );
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
@@ -731,7 +731,7 @@ export default function MapView({
               <div>
                 <h2 className="text-sm font-bold text-slate-800 dark:text-white">Locais dos Eventos</h2>
                 <p className="text-[10px] text-slate-400 font-mono">
-                  {filteredEvents.length} eventos mapeados em Pinhais
+                  {filteredEvents.length} eventos mapeados em Araucária
                 </p>
               </div>
               <button
@@ -853,7 +853,7 @@ export default function MapView({
       {/* Google Maps Bottom Attribution / Status */}
       <div className="absolute bottom-2 left-2 z-[999] bg-white/90 dark:bg-slate-900/90 backdrop-blur-xs px-2.5 py-1 rounded-md border border-slate-200/80 dark:border-slate-800 text-[10px] text-slate-600 dark:text-slate-400 font-sans flex items-center gap-1.5 shadow-xs pointer-events-auto">
         <span className="w-2 h-2 rounded-full bg-[#34A853] inline-block" />
-        <span>Helena Wysocki Maps • Pinhais, PR</span>
+        <span>Helena Wysocki Maps • Araucária, PR</span>
       </div>
     </div>
   );

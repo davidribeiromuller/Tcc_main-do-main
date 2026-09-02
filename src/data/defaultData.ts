@@ -62,7 +62,7 @@ export const defaultEvents: Event[] = [
   {
     id: 9904,
     title: "Palestra: Introdução à IA Generativa",
-    location: "Teatro Municipal de Pinhais",
+    location: "Teatro Municipal de Araucária",
     day: 18,
     month: (currentMonth + 1) % 12,
     year: currentMonth === 11 ? currentYear + 1 : currentYear,
@@ -92,6 +92,7 @@ export const defaultUsers: User[] = [
     ativo: true,
     isAdmin: true,
     institution: "Escola estadual Helena Wysocki",
+    lastActiveAt: new Date(Date.now() - 3 * 60 * 1000).toISOString(), // 3 minutes ago
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   },
@@ -107,6 +108,7 @@ export const defaultUsers: User[] = [
     ativo: true,
     isAdmin: false,
     institution: "Escola estadual Helena Wysocki",
+    lastActiveAt: new Date(Date.now() - 45 * 60 * 1000).toISOString(), // 45 minutes ago
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   },
@@ -122,6 +124,7 @@ export const defaultUsers: User[] = [
     ativo: true,
     isAdmin: false,
     institution: "Escola estadual Helena Wysocki",
+    lastActiveAt: new Date(Date.now() - 4 * 3600 * 1000).toISOString(), // 4 hours ago
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   },
@@ -136,6 +139,7 @@ export const defaultUsers: User[] = [
     ativo: true,
     isAdmin: false,
     institution: "Escola estadual Helena Wysocki",
+    lastActiveAt: new Date(Date.now() - 26 * 3600 * 1000).toISOString(), // ontem
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   },
@@ -150,6 +154,7 @@ export const defaultUsers: User[] = [
     ativo: true,
     isAdmin: true,
     institution: "Escola estadual Helena Wysocki",
+    lastActiveAt: new Date().toISOString(), // agora
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   }

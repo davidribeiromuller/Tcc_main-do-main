@@ -92,10 +92,7 @@ export default function IntroBanner({ onNavigate, userName }: IntroBannerProps) 
                 </div>
                 <span className="px-2.5 py-0.5 rounded-full bg-white/15 text-[#e6f3e4] text-[11px] font-mono uppercase tracking-wider font-semibold border border-white/10 backdrop-blur-xs flex items-center gap-1.5">
                   <Sparkles size={11} className="text-yellow-300" />
-                  Portal Oficial eloEscola
-                </span>
-                <span className="text-[11px] text-white/70 font-mono tracking-tight hidden sm:inline-block">
-                  • C.E. Helena Wysocki
+                  eloEscola • C.E. Helena Wysocki
                 </span>
               </div>
 

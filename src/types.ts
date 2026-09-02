@@ -16,6 +16,8 @@ export interface User {
   institution?: string;
   createdAt?: string;
   updatedAt?: string;
+  lastActiveAt?: string;
+  lastLogin?: string;
 }
 
 export interface Event {

@@ -74,6 +74,26 @@ export default function BottomNav({ activeTab, onTabChange, isAdmin }: BottomNav
         </button>
       )}
 
+      <button
+        onClick={() => onTabChange("settings")}
+        className="relative flex flex-col items-center justify-center p-2 focus:outline-none transition-all cursor-pointer"
+        id="btn-nav-settings"
+        title="Configurações"
+      >
+        <Settings
+          size={24}
+          className={`${
+            activeTab === "settings" ? "text-white scale-110" : "text-white/60 hover:text-white/80"
+          } transition-all duration-250`}
+        />
+        {activeTab === "settings" && (
+          <motion.div
+            layoutId="activeTabIndicator"
+            className="absolute -bottom-1 w-1.5 h-1.5 rounded-full bg-white"
+          />
+        )}
+      </button>
+
       </div>
     </div>
   );

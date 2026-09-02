@@ -37,17 +37,19 @@ export async function getOrCreateUser(
     const cleanEmail = (email || '').trim().toLowerCase();
 
     // 1. Check if user already exists by UID
+    const isDirector = cleanEmail === 'diretoria@helenawysocki.com' || cleanEmail === 'davidribeiromuller2009@gmail.com';
     const existingByUid = await getUserByUid(uid);
     if (existingByUid) {
-      const isDirector = cleanEmail === 'diretoria@helenawysocki.com';
       const updated = await updateUserByUid(uid, {
         email: cleanEmail || existingByUid.email,
         provider: provider || existingByUid.provider,
         ...(password ? { password } : {}),
         ...(fotoPerfil ? { foto_perfil: fotoPerfil } : {}),
         ...(nome ? { nome } : {}),
-        role: isDirector ? 'Diretor' : (existingByUid.role === 'Diretor' ? 'Aluno' : existingByUid.role),
-        isAdmin: isDirector,
+        role: isDirector ? 'Diretor' : existingByUid.role,
+        isAdmin: isDirector || existingByUid.isAdmin,
+        lastActiveAt: new Date(),
+        lastLogin: new Date(),
       });
       markDbOnline();
       return updated || existingByUid;
@@ -57,7 +59,6 @@ export async function getOrCreateUser(
     if (cleanEmail) {
       const existingByEmail = await getUserByEmail(cleanEmail);
       if (existingByEmail) {
-        const isDirector = cleanEmail === 'diretoria@helenawysocki.com';
         // Update user's UID and provider to match new login credentials
         const updated = await updateUserById(existingByEmail.id, {
           uid,
@@ -65,8 +66,10 @@ export async function getOrCreateUser(
           ...(password ? { password } : {}),
           ...(fotoPerfil ? { foto_perfil: fotoPerfil } : {}),
           ...(nome ? { nome } : {}),
-          role: isDirector ? 'Diretor' : (existingByEmail.role === 'Diretor' ? 'Aluno' : existingByEmail.role),
-          isAdmin: isDirector,
+          role: isDirector ? 'Diretor' : existingByEmail.role,
+          isAdmin: isDirector || existingByEmail.isAdmin,
+          lastActiveAt: new Date(),
+          lastLogin: new Date(),
         });
         markDbOnline();
         return updated || existingByEmail;
@@ -74,10 +77,9 @@ export async function getOrCreateUser(
     }
 
     // 3. Otherwise, create a new user record
-    const isDirector = cleanEmail === 'diretoria@helenawysocki.com';
     const isFuncionario = cleanEmail === 'funcionario@helenawysocki.com';
 
-    const defaultRole = isDirector ? 'Diretor' : (isFuncionario ? 'Funcionário' : (role === 'Diretor' ? 'Aluno' : (role || 'Aluno')));
+    const defaultRole = isDirector ? 'Diretor' : (isFuncionario ? 'Funcionário' : (role || 'Aluno'));
     const isAdmin = isDirector;
 
     const result = await db.insert(users)
@@ -91,6 +93,8 @@ export async function getOrCreateUser(
         role: defaultRole,
         ativo: true,
         isAdmin: isAdmin,
+        lastActiveAt: new Date(),
+        lastLogin: new Date(),
       })
       .onConflictDoUpdate({
         target: users.uid,
@@ -101,6 +105,8 @@ export async function getOrCreateUser(
           foto_perfil: sql`COALESCE(${users.foto_perfil}, ${fotoPerfil || ''})`,
           role: isDirector ? 'Diretor' : (role === 'Diretor' ? 'Aluno' : sql`${users.role}`),
           isAdmin: isDirector,
+          lastActiveAt: new Date(),
+          lastLogin: new Date(),
           updatedAt: new Date(),
         },
       })

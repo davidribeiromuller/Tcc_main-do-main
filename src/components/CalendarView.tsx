@@ -13,7 +13,10 @@ import {
   ArrowRight,
   CheckCircle,
   Filter,
-  Bell
+  Bell,
+  Image as ImageIcon,
+  Upload,
+  Trash2
 } from "lucide-react";
 import { Event } from "../types";
 import EventNotificationModal, { NotificationSchedule } from "./EventNotificationModal";
@@ -58,7 +61,7 @@ export default function CalendarView({
   const [showNotificationModal, setShowNotificationModal] = useState<boolean>(false);
   const [notificationSuccessMsg, setNotificationSuccessMsg] = useState<string | null>(null);
 
-  // Form State (Sem campo de URL de imagem)
+  // Form State
   const [formOpen, setFormOpen] = useState(false);
   const [evtTitle, setEvtTitle] = useState("");
   const [evtLocation, setEvtLocation] = useState("");
@@ -69,6 +72,7 @@ export default function CalendarView({
   const [evtIsPaid, setEvtIsPaid] = useState(false);
   const [evtPrice, setEvtPrice] = useState("");
   const [evtRequirements, setEvtRequirements] = useState("");
+  const [evtImage, setEvtImage] = useState("");
   const [formError, setFormError] = useState("");
 
   const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
@@ -195,6 +199,7 @@ export default function CalendarView({
         isPaid: evtIsPaid,
         price: evtIsPaid ? evtPrice.trim() : "",
         requirements: evtRequirements.trim(),
+        image: evtImage.trim() || undefined,
       });
 
       // Reset Form
@@ -205,6 +210,7 @@ export default function CalendarView({
       setEvtIsPaid(false);
       setEvtPrice("");
       setEvtRequirements("");
+      setEvtImage("");
       setFormError("");
 
       setCurrentMonth(evtMonth);
@@ -886,6 +892,93 @@ export default function CalendarView({
                     placeholder="Ex: Levar documento com foto, Uniforme escolar"
                     className="w-full h-11 px-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl"
                   />
+                </div>
+
+                {/* Imagem do Evento */}
+                <div className="flex flex-col gap-2 p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                      <ImageIcon size={14} className="text-emerald-600" />
+                      <span>Imagem de Capa do Evento</span>
+                    </label>
+                    {evtImage && (
+                      <button
+                        type="button"
+                        onClick={() => setEvtImage("")}
+                        className="text-[10px] text-red-500 hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 size={11} />
+                        <span>Remover</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {evtImage ? (
+                    <div className="relative w-full h-32 rounded-xl overflow-hidden border border-slate-200 shadow-xs bg-slate-100">
+                      <img
+                        src={evtImage}
+                        alt="Prévia do Evento"
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <label className="flex-1 h-10 border border-dashed border-slate-300 dark:border-slate-600 rounded-xl flex items-center justify-center gap-2 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition-colors">
+                          <Upload size={14} className="text-emerald-600" />
+                          <span>Enviar do Computador</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onloadend = () => {
+                                  if (typeof reader.result === "string") {
+                                    setEvtImage(reader.result);
+                                  }
+                                };
+                                reader.readAsDataURL(file);
+                              }
+                            }}
+                          />
+                        </label>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="url"
+                          value={evtImage}
+                          onChange={(e) => setEvtImage(e.target.value)}
+                          placeholder="Ou cole a URL da imagem (https://...)"
+                          className="w-full h-9 px-3 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
+                        />
+                      </div>
+
+                      {/* Sugestões de temas escolares rápidos */}
+                      <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                        <span className="text-[10px] text-slate-400">Sugestões:</span>
+                        {[
+                          { label: "Ciências", url: "https://images.unsplash.com/photo-1532094349884-543bc11b234d?w=800" },
+                          { label: "Esportes", url: "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=800" },
+                          { label: "Cultura", url: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800" },
+                          { label: "Palestra", url: "https://images.unsplash.com/photo-1475721027785-f74eccf877e2?w=800" }
+                        ].map((preset) => (
+                          <button
+                            key={preset.label}
+                            type="button"
+                            onClick={() => setEvtImage(preset.url)}
+                            className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 border border-slate-200 transition-colors cursor-pointer"
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="mt-3 flex gap-2">
