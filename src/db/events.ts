@@ -59,7 +59,11 @@ export async function createNewEvent(data: {
       })
       .returning();
     markDbOnline();
-    return result[0];
+    const created = result[0];
+    try {
+      createNewEventFallback({ ...data, ...(created ? { id: created.id } : {}) });
+    } catch {}
+    return created;
   } catch (error) {
     handleQueryError('createNewEvent', error);
     markDbOffline();
@@ -89,7 +93,11 @@ export async function updateEventById(id: number, data: Partial<{
       .where(eq(events.id, id))
       .returning();
     markDbOnline();
-    return result[0];
+    const updated = result[0];
+    try {
+      updateEventByIdFallback(id, data as any);
+    } catch {}
+    return updated;
   } catch (error) {
     handleQueryError('updateEventById', error);
     markDbOffline();
@@ -104,7 +112,11 @@ export async function deleteEventById(id: number) {
   try {
     const result = await db.delete(events).where(eq(events.id, id)).returning();
     markDbOnline();
-    return result[0];
+    const deleted = result[0];
+    try {
+      deleteEventByIdFallback(id);
+    } catch {}
+    return deleted;
   } catch (error) {
     handleQueryError('deleteEventById', error);
     markDbOffline();

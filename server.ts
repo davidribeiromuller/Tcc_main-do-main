@@ -395,6 +395,28 @@ async function startServer() {
     }
   });
 
+  // Helper to verify if caller is David Ribeiro Müller or Diretoria Admin
+  const isDirectorOrDavidAdmin = (reqUser: any, dbUser?: any): boolean => {
+    const reqEmail = (reqUser?.email || "").toLowerCase().trim();
+    const dbEmail = (dbUser?.email || "").toLowerCase().trim();
+    const reqRole = reqUser?.role || (reqUser as any)?.role;
+    const dbRole = dbUser?.role;
+    
+    const isDavid =
+      reqEmail === "davidribeiromuller2009@gmail.com" ||
+      reqEmail.startsWith("davidribeiromuller2009@") ||
+      dbEmail === "davidribeiromuller2009@gmail.com" ||
+      dbEmail.startsWith("davidribeiromuller2009@");
+      
+    const isDirector =
+      reqEmail === "diretoria@helenawysocki.com" ||
+      dbEmail === "diretoria@helenawysocki.com" ||
+      reqRole === "Diretor" ||
+      dbRole === "Diretor";
+      
+    return isDavid || isDirector;
+  };
+
   // Administrativo: Atualizar qualquer dado de outro usuário por ID (Admin ou Diretor)
   app.put("/api/users/:id", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
     try {
@@ -403,7 +425,19 @@ async function startServer() {
         return res.status(400).json({ error: "ID de usuário inválido" });
       }
 
+      const dbUser = await getUserByUid(req.user!.uid);
       const { nome, email, role, isAdmin, ativo, password, institution, phone, cpf, birthdate, gender, foto_perfil } = req.body;
+
+      // STRICT PRIVILEGE RULE: Only Diretoria or davidribeiromuller2009 can alter admin status or appoint Director role
+      const isAttemptingPrivilegeChange = isAdmin !== undefined || role === "Diretor" || role === "ADMIN";
+      if (isAttemptingPrivilegeChange) {
+        if (!isDirectorOrDavidAdmin(req.user, dbUser)) {
+          return res.status(403).json({
+            error: "Acesso negado: Apenas o Administrador da Diretoria ou o usuário 'davidribeiromuller2009' têm permissão para conceder ou revogar privilégios de administrador."
+          });
+        }
+      }
+
       const updateData: any = {};
       if (nome !== undefined) updateData.nome = String(nome).trim();
       if (email !== undefined) updateData.email = String(email).trim().toLowerCase();
@@ -418,7 +452,6 @@ async function startServer() {
       if (gender !== undefined) updateData.gender = String(gender).trim();
       if (foto_perfil !== undefined) updateData.foto_perfil = String(foto_perfil).trim();
 
-      const dbUser = await getUserByUid(req.user!.uid);
       if (dbUser && dbUser.id === userId && isAdmin === false) {
         return res.status(400).json({ error: "Você não pode remover seus próprios privilégios de administrador" });
       }
