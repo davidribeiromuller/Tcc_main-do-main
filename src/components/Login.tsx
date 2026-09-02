@@ -76,45 +76,10 @@ export default function Login({
     if (clearLoginError) clearLoginError();
   };
 
-  // Load recognized credentials and saved history from localStorage
+  // Load recognized credentials and saved history ONLY from this browser's localStorage
   useEffect(() => {
     const loadRecognizedAccounts = () => {
       const accountsMap = new Map<string, RecognizedAccount>();
-
-      // 0. Default credential accounts
-      const defaultRecognized: RecognizedAccount[] = [
-        {
-          email: "davidribeiromuller2009@gmail.com",
-          name: "David Ribeiro Müller",
-          role: "Diretor / Admin",
-          isAdmin: true,
-          password: "admin",
-          provider: "google",
-          appLabel: "eloEscola • Diretoria"
-        },
-        {
-          email: "diretoria@helenawysocki.com",
-          name: "Diretoria Helena Wysocki",
-          role: "Diretoria",
-          isAdmin: true,
-          password: "admin",
-          provider: "local",
-          appLabel: "eloEscola • Gestão"
-        },
-        {
-          email: "aluno@escola.pr.gov.br",
-          name: "Aluno Helena Wysocki",
-          role: "Aluno",
-          isAdmin: false,
-          password: "aluno",
-          provider: "local",
-          appLabel: "eloEscola • Estudante"
-        }
-      ];
-
-      defaultRecognized.forEach((acc) => {
-        accountsMap.set(acc.email.toLowerCase().trim(), acc);
-      });
 
       // 1. Check current logged-in user on this browser
       try {
@@ -135,7 +100,7 @@ export default function Login({
         }
       } catch {}
 
-      // 2. Check saved account history on this browser
+      // 2. Check saved account history on this specific browser
       try {
         const savedHistory = localStorage.getItem("saved_accounts_history");
         if (savedHistory) {
@@ -156,31 +121,11 @@ export default function Login({
         }
       } catch {}
 
-      // 3. Registered users passed from App
-      if (Array.isArray(registeredUsers)) {
-        registeredUsers.forEach((u) => {
-          if (u && u.email) {
-            const key = u.email.toLowerCase().trim();
-            if (!accountsMap.has(key)) {
-              accountsMap.set(key, {
-                email: u.email,
-                name: u.nome || u.email.split("@")[0],
-                role: u.role || (u.isAdmin ? "Diretor" : "Aluno"),
-                isAdmin: !!u.isAdmin,
-                password: u.password || "senha123",
-                provider: u.provider || "local",
-                appLabel: "eloEscola"
-              });
-            }
-          }
-        });
-      }
-
       setSavedAccounts(Array.from(accountsMap.values()));
     };
 
     loadRecognizedAccounts();
-  }, [registeredUsers]);
+  }, []);
 
   // Click outside listener for the autofill popup
   useEffect(() => {
@@ -862,21 +807,6 @@ export default function Login({
               <GraduationCap size={16} className="text-emerald-600 dark:text-emerald-400" />
               <span>Conectar com Área do Aluno (CGM)</span>
               <ChevronRight size={14} className="text-emerald-500 opacity-80" />
-            </button>
-
-            {/* Acesso exclusivo da Diretoria */}
-            <button
-              type="button"
-              onClick={() => {
-                setEmail("davidribeiromuller2009@gmail.com");
-                setPassword("senha123");
-                handleClearError();
-                setShowAutofillMenu(false);
-              }}
-              className="w-full py-2 px-3 text-[11px] font-semibold text-slate-500 hover:text-brand-accent dark:hover:text-brand-primary rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex items-center justify-center gap-1.5 cursor-pointer mt-1"
-            >
-              <ShieldCheck size={14} className="text-brand-accent dark:text-brand-primary" />
-              <span>Acesso Exclusivo da Diretoria (Admin)</span>
             </button>
           </div>
         </div>
