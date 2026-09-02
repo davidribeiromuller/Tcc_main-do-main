@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import React, { useState } from "react";
+import { motion } from "motion/react";
 import {
   Mail,
   Lock,
@@ -7,16 +7,7 @@ import {
   ChevronRight,
   GraduationCap,
   ArrowLeft,
-  ShieldCheck,
-  UserPlus,
-  Globe,
-  KeyRound,
-  Check,
-  Sparkles,
-  Smartphone,
-  ChevronDown,
-  X,
-  Trash2
+  UserPlus
 } from "lucide-react";
 import logoImg from "../assets/images/logo.jpg";
 import { User } from "../types";
@@ -31,26 +22,13 @@ interface LoginProps {
   registeredUsers?: User[];
 }
 
-interface RecognizedAccount {
-  id?: string | number;
-  email: string;
-  name: string;
-  role: string;
-  isAdmin?: boolean;
-  password?: string;
-  provider?: string;
-  lastLogin?: string;
-  appLabel?: string;
-}
-
 export default function Login({
   onGoogleLogin,
   onLocalLogin,
   onNavigate,
   isLoading,
   loginError,
-  clearLoginError,
-  registeredUsers = []
+  clearLoginError
 }: LoginProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -60,14 +38,6 @@ export default function Login({
   const [cgm, setCgm] = useState("");
   const [cgmPassword, setCgmPassword] = useState("");
   const [localError, setLocalError] = useState("");
-  const [autoFilledMsg, setAutoFilledMsg] = useState<string | null>(null);
-  
-  // Floating Autofill / Credential Selector state
-  const [showAutofillMenu, setShowAutofillMenu] = useState(false);
-  const [savedAccounts, setSavedAccounts] = useState<RecognizedAccount[]>([]);
-  const [showManageModal, setShowManageModal] = useState(false);
-  const autofillRef = useRef<HTMLDivElement>(null);
-  const emailInputRef = useRef<HTMLInputElement>(null);
 
   const activeError = localError || loginError || "";
 
@@ -76,127 +46,9 @@ export default function Login({
     if (clearLoginError) clearLoginError();
   };
 
-  // Load recognized credentials and saved history ONLY from this browser's localStorage
-  useEffect(() => {
-    const loadRecognizedAccounts = () => {
-      const accountsMap = new Map<string, RecognizedAccount>();
-
-      // 1. Check current logged-in user on this browser
-      try {
-        const storedUser = localStorage.getItem("local_user");
-        if (storedUser) {
-          const u = JSON.parse(storedUser);
-          if (u && u.email) {
-            accountsMap.set(u.email.toLowerCase().trim(), {
-              email: u.email,
-              name: u.nome || u.name || u.email.split("@")[0].replace(/[._]/g, " "),
-              role: u.role || (u.isAdmin ? "Diretor" : "Aluno"),
-              isAdmin: !!u.isAdmin,
-              password: u.password || "senha123",
-              provider: u.provider || "local",
-              appLabel: "eloEscola"
-            });
-          }
-        }
-      } catch {}
-
-      // 2. Check saved account history on this specific browser
-      try {
-        const savedHistory = localStorage.getItem("saved_accounts_history");
-        if (savedHistory) {
-          const list: RecognizedAccount[] = JSON.parse(savedHistory);
-          if (Array.isArray(list)) {
-            list.forEach((acc) => {
-              if (acc && acc.email) {
-                const key = acc.email.toLowerCase().trim();
-                accountsMap.set(key, {
-                  ...acc,
-                  name: acc.name || acc.email.split("@")[0].replace(/[._]/g, " "),
-                  role: acc.role || (acc.isAdmin ? "Diretor" : "Aluno"),
-                  appLabel: acc.appLabel || "eloEscola"
-                });
-              }
-            });
-          }
-        }
-      } catch {}
-
-      setSavedAccounts(Array.from(accountsMap.values()));
-    };
-
-    loadRecognizedAccounts();
-  }, []);
-
-  // Click outside listener for the autofill popup
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        autofillRef.current &&
-        !autofillRef.current.contains(event.target as Node) &&
-        emailInputRef.current &&
-        !emailInputRef.current.contains(event.target as Node)
-      ) {
-        setShowAutofillMenu(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  // Save account to history upon login
-  const persistAccountToHistory = (cleanEmail: string, accName?: string, role?: string, pass?: string) => {
-    try {
-      const existingHistory = localStorage.getItem("saved_accounts_history");
-      let list: RecognizedAccount[] = [];
-      if (existingHistory) list = JSON.parse(existingHistory);
-      const isDirector = cleanEmail === "davidribeiromuller2009@gmail.com" || cleanEmail === "diretoria@helenawysocki.com";
-      const newEntry: RecognizedAccount = {
-        email: cleanEmail,
-        name: accName || cleanEmail.split("@")[0].replace(/[._]/g, " "),
-        role: role || (isDirector ? "Diretor" : "Aluno"),
-        isAdmin: isDirector,
-        password: pass || "senha123",
-        appLabel: "eloEscola",
-        lastLogin: new Date().toLocaleDateString("pt-BR")
-      };
-      const filtered = list.filter((a) => a.email.toLowerCase() !== cleanEmail.toLowerCase());
-      filtered.unshift(newEntry);
-      localStorage.setItem("saved_accounts_history", JSON.stringify(filtered.slice(0, 10)));
-    } catch {}
-  };
-
-  const handleSelectAutofillAccount = (acc: RecognizedAccount, autoSubmit: boolean = false) => {
-    setEmail(acc.email);
-    setPassword(acc.password || "senha123");
-    setShowAutofillMenu(false);
-    handleClearError();
-    setAutoFilledMsg(`Credenciais preenchidas para ${acc.email}`);
-    setTimeout(() => setAutoFilledMsg(null), 3000);
-
-    if (autoSubmit) {
-      persistAccountToHistory(acc.email, acc.name, acc.role, acc.password);
-      onLocalLogin(acc.email, acc.password || "senha123");
-    }
-  };
-
-  const handleRemoveSavedAccount = (e: React.MouseEvent, emailToRemove: string) => {
-    e.stopPropagation();
-    try {
-      const existingHistory = localStorage.getItem("saved_accounts_history");
-      if (existingHistory) {
-        const list: RecognizedAccount[] = JSON.parse(existingHistory);
-        const updated = list.filter((a) => a.email.toLowerCase() !== emailToRemove.toLowerCase());
-        localStorage.setItem("saved_accounts_history", JSON.stringify(updated));
-      }
-      setSavedAccounts((prev) => prev.filter((a) => a.email.toLowerCase() !== emailToRemove.toLowerCase()));
-    } catch {}
-  };
-
   const handleStandardSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     handleClearError();
-    setShowAutofillMenu(false);
 
     const cleanEmail = email.trim();
     if (!cleanEmail) {
@@ -220,7 +72,6 @@ export default function Login({
       return;
     }
 
-    persistAccountToHistory(cleanEmail, undefined, undefined, password);
     onLocalLogin(cleanEmail, password);
   };
 
@@ -243,7 +94,6 @@ export default function Login({
     }
 
     const fauxEmail = `cgm-${cleanCgm}@aluno.pr.gov.br`;
-    persistAccountToHistory(fauxEmail, `Aluno CGM ${cleanCgm}`, "Aluno", cgmPassword);
     onLocalLogin(fauxEmail, cgmPassword);
   };
 
@@ -261,17 +111,6 @@ export default function Login({
     }
     onNavigate("codeSent");
   };
-
-  // Filter accounts when user types
-  const filteredAccounts = savedAccounts.filter((acc) => {
-    if (!email) return true;
-    const q = email.toLowerCase().trim();
-    return (
-      acc.email.toLowerCase().includes(q) ||
-      acc.name.toLowerCase().includes(q) ||
-      acc.role.toLowerCase().includes(q)
-    );
-  });
 
   if (activeSubView === "forgot") {
     return (
@@ -531,194 +370,27 @@ export default function Login({
             </motion.div>
           )}
 
-          {/* Auto filled feedback toast */}
-          <AnimatePresence>
-            {autoFilledMsg && (
-              <motion.div
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                className="mb-3 p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300 text-xs font-medium flex items-center gap-2 shadow-2xs"
-              >
-                <Check size={14} className="text-emerald-600 shrink-0" />
-                <span className="truncate">{autoFilledMsg}</span>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          <form onSubmit={handleStandardSubmit} autoComplete="on" className="flex flex-col gap-3.5">
-            {/* Input with Attached Floating Credential Autofill Popover */}
-            <div className="flex flex-col gap-1 relative">
-              <label htmlFor="username" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Número de celular, nome de usuário ou email
+          <form onSubmit={handleStandardSubmit} className="flex flex-col gap-3.5">
+            {/* Email input */}
+            <div className="flex flex-col gap-1">
+              <label htmlFor="email" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Email ou Registro
               </label>
 
               <div className="relative">
                 <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
                 <input
-                  ref={emailInputRef}
-                  id="username"
-                  name="username"
-                  type="text"
-                  autoComplete="username webauthn"
+                  id="email"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
                   required
                   value={email}
-                  onFocus={() => setShowAutofillMenu(true)}
-                  onClick={() => setShowAutofillMenu(true)}
-                  onChange={(e) => {
-                    setEmail(e.target.value);
-                    if (!showAutofillMenu) setShowAutofillMenu(true);
-                  }}
-                  placeholder="Número de celular, nome de usuário ou email"
-                  className="w-full h-11 pl-10 pr-10 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs transition-shadow"
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="exemplo@gmail.com ou institucional"
+                  className="w-full h-11 pl-10 pr-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowAutofillMenu(!showAutofillMenu)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg transition-colors cursor-pointer"
-                  title="Acesso rápido a contas guardadas"
-                >
-                  <ChevronDown size={15} className={`transition-transform duration-200 ${showAutofillMenu ? "rotate-180 text-blue-600" : ""}`} />
-                </button>
               </div>
-
-              {/* NATIVE-STYLE FLOATING AUTOFILL POPOVER (Matched to user's screenshot) */}
-              <AnimatePresence>
-                {showAutofillMenu && (
-                  <motion.div
-                    ref={autofillRef}
-                    initial={{ opacity: 0, y: -4, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -4, scale: 0.98 }}
-                    transition={{ duration: 0.12 }}
-                    className="absolute top-[calc(100%+6px)] left-0 right-0 z-50 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-750 rounded-2xl shadow-2xl overflow-hidden text-left"
-                    style={{ filter: "drop-shadow(0 15px 25px rgba(0,0,0,0.15))" }}
-                  >
-                    {/* Subtle top indicator arrow pointing right to the input field */}
-                    <div className="absolute -top-1.5 left-7 w-3 h-3 bg-white dark:bg-slate-900 border-t border-l border-slate-200 dark:border-slate-700 rotate-45" />
-
-                    {/* Section 1: Saved account items */}
-                    <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-56 overflow-y-auto">
-                      {filteredAccounts.map((acc) => {
-                        const isSelected = email.toLowerCase().trim() === acc.email.toLowerCase().trim();
-                        const isDirector = acc.isAdmin || acc.role?.toLowerCase().includes("diretor");
-                        const displayName = acc.email.split("@")[0];
-
-                        return (
-                          <div
-                            key={acc.email}
-                            onClick={() => handleSelectAutofillAccount(acc, false)}
-                            className={`p-3 transition-colors flex items-center justify-between gap-3 cursor-pointer group ${
-                              isSelected
-                                ? "bg-blue-50/80 dark:bg-blue-950/50"
-                                : "hover:bg-slate-50 dark:hover:bg-slate-800/80"
-                            }`}
-                          >
-                            <div className="flex items-center gap-3 min-w-0 flex-1">
-                              {/* Globe / Credential Icon */}
-                              <div className="w-7 h-7 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 shrink-0 group-hover:text-blue-600 group-hover:bg-blue-100/60 transition-colors">
-                                <Globe size={15} />
-                              </div>
-
-                              {/* Credential username and masked password bullets */}
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
-                                    {displayName}
-                                  </span>
-                                  <span className="text-[11px] text-slate-400 dark:text-slate-400 font-normal truncate">
-                                    {acc.appLabel || "eloEscola"}
-                                  </span>
-                                </div>
-                                <div className="text-[11px] text-slate-500 dark:text-slate-400 tracking-widest font-mono select-none">
-                                  ••••••••
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Actions on hover */}
-                            <div className="flex items-center gap-1.5 shrink-0 opacity-80 group-hover:opacity-100">
-                              <span className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 border border-blue-100 dark:border-blue-900 group-hover:bg-blue-600 group-hover:text-white transition-all">
-                                Preencher
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Section 2: Google Account credentials prompt */}
-                    <div
-                      onClick={async () => {
-                        setShowAutofillMenu(false);
-                        await onGoogleLogin();
-                      }}
-                      className="p-3 bg-slate-50/60 dark:bg-slate-800/40 hover:bg-slate-100/80 dark:hover:bg-slate-800 transition-colors flex items-start gap-3 cursor-pointer border-t border-slate-100 dark:divide-slate-800"
-                    >
-                      <div className="w-7 h-7 rounded-full bg-white dark:bg-slate-800 shadow-2xs border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0 mt-0.5">
-                        <svg className="w-4 h-4" viewBox="0 0 24 24">
-                          <path
-                            fill="#ea4335"
-                            d="M12 5.04c1.7 0 3.2.6 4.4 1.7l3.3-3.3C17.7 1.4 15 0 12 0 7.3 0 3.3 2.7 1.4 6.7l3.9 3C6.2 6.9 8.9 5.04 12 5.04z"
-                          />
-                          <path
-                            fill="#4285f4"
-                            d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.1-2 3.7-4.9 3.7-8.7z"
-                          />
-                          <path
-                            fill="#fbbc05"
-                            d="M5.3 14.3c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.4 6.7C.5 8.4 0 10.1 0 12s.5 3.6 1.4 5.3l3.9-3z"
-                          />
-                          <path
-                            fill="#34a853"
-                            d="M12 24c3.2 0 6-1.1 8-2.9l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3.1 0-5.8-1.9-6.7-4.7l-3.9 3c1.9 4 5.9 6.7 10 6.7z"
-                          />
-                        </svg>
-                      </div>
-                      <p className="text-[11px] text-slate-700 dark:text-slate-200 leading-snug font-medium">
-                        Para usar as palavras-passe e outros itens guardados na sua Conta Google, valide a sua identidade
-                      </p>
-                    </div>
-
-                    {/* Section 3: Access key / Other device */}
-                    <div
-                      onClick={() => {
-                        setShowAutofillMenu(false);
-                        setActiveSubView("aluno_cgm");
-                      }}
-                      className="p-3 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-3 cursor-pointer border-t border-slate-100 dark:border-slate-800"
-                    >
-                      <div className="w-7 h-7 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 shrink-0">
-                        <Smartphone size={14} />
-                      </div>
-                      <span className="text-xs text-slate-700 dark:text-slate-300 font-medium">
-                        Usar chave de acesso de outro dispositivo (ou CGM)
-                      </span>
-                    </div>
-
-                    {/* Section 4: Manage Passwords */}
-                    <div
-                      onClick={() => {
-                        setShowAutofillMenu(false);
-                        setShowManageModal(true);
-                      }}
-                      className="p-2.5 bg-slate-50/90 dark:bg-slate-850 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex items-center justify-between cursor-pointer border-t border-slate-100 dark:border-slate-800 text-slate-600 dark:text-slate-300"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-600 dark:text-slate-300">
-                          <KeyRound size={13} />
-                        </div>
-                        <span className="text-xs font-medium">Gerir palavras-passe...</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" />
-                        <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" />
-                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
             </div>
 
             {/* Password input */}
@@ -736,7 +408,7 @@ export default function Login({
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Senha"
+                  placeholder="Digite sua senha de acesso"
                   className="w-full h-11 pl-10 pr-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs"
                 />
               </div>
@@ -814,76 +486,6 @@ export default function Login({
         <p className="text-[10px] text-center text-slate-400 mt-6">
           © 2026 Colégio Estadual Helena Wysocki • Araucária - PR
         </p>
-
-        {/* Gerir Palavras-Passe Modal */}
-        <AnimatePresence>
-          {showManageModal && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
-              onClick={() => setShowManageModal(false)}
-            >
-              <motion.div
-                initial={{ scale: 0.95, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.95, opacity: 0 }}
-                onClick={(e) => e.stopPropagation()}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 max-w-sm w-full shadow-2xl"
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <KeyRound className="text-blue-600 dark:text-blue-400" size={20} />
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                      Palavras-passe Guardadas
-                    </h3>
-                  </div>
-                  <button
-                    onClick={() => setShowManageModal(false)}
-                    className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-lg cursor-pointer"
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-
-                <p className="text-xs text-slate-500 dark:text-slate-400 mb-3 leading-relaxed">
-                  Contas e credenciais salvas neste dispositivo para preenchimento automático.
-                </p>
-
-                <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-60 overflow-y-auto mb-4 border border-slate-100 dark:border-slate-800 rounded-xl">
-                  {savedAccounts.map((acc) => (
-                    <div
-                      key={acc.email}
-                      className="p-2.5 flex items-center justify-between gap-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-slate-800 dark:text-slate-200 truncate">{acc.email}</p>
-                        <p className="text-[10px] text-slate-400 font-mono">•••••••• ({acc.role})</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={(e) => handleRemoveSavedAccount(e, acc.email)}
-                        className="p-1 text-slate-400 hover:text-red-500 rounded transition-colors cursor-pointer"
-                        title="Remover credencial salva"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowManageModal(false)}
-                  className="w-full py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
-                >
-                  Concluído
-                </button>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </motion.div>
     </div>
   );
