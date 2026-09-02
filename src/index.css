@@ -62,45 +62,12 @@
   line-height: 1.4 !important;
 }
 
-/* Hide all scrollbars completely on desktop and mobile as requested */
-* {
-  scrollbar-width: none !important; /* Firefox */
-  -ms-overflow-style: none !important; /* IE and Edge */
-}
-
-*::-webkit-scrollbar {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
-}
-
-html, body, #root {
-  scrollbar-width: none !important;
-  -ms-overflow-style: none !important;
-}
-
-/* Disable any visible scrollbar globally */
-* {
-  scrollbar-width: none !important;
-}
-
-/* Hide the scrollbar on desktop while keeping scrolling available. */
-@media (min-width: 768px) {
-  * {
-    scrollbar-width: none;
-  }
-
-  *::-webkit-scrollbar {
-    display: none;
-    width: 0;
-    height: 0;
-  }
-}
-
 /* Base custom styles */
 html {
   scroll-behavior: smooth;
   -webkit-text-size-adjust: 100%;
+  height: 100%;
+  width: 100%;
 }
 
 body {
@@ -108,12 +75,13 @@ body {
   padding: 0;
   background-color: var(--color-brand-bg-light);
   color: var(--color-brand-text-light);
-  min-height: 100vh;
-  min-height: 100dvh;
-  height: 100dvh;
-  overflow: hidden;
+  min-height: 100%;
+  height: 100%;
+  width: 100%;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y pinch-zoom;
 }
 
 html.dark body {
@@ -123,26 +91,40 @@ html.dark body {
 
 #root {
   width: 100%;
-  min-height: 100vh;
-  min-height: 100dvh;
-  height: 100dvh;
+  height: 100%;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Smooth touch and scroll containers */
-.overflow-y-auto, .overflow-x-auto {
+.overflow-y-auto, .overflow-x-auto, .scrollable-content {
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  overscroll-behavior-y: contain;
 }
 
 /* Fluid responsive layout view container */
 .app-viewport {
   width: 100%;
-  height: 100vh;
-  height: 100dvh;
+  height: 100%;
+  min-height: 100%;
   position: relative;
-  overflow: hidden;
   background-color: var(--color-brand-bg-light);
 }
 
 html.dark .app-viewport {
   background-color: var(--color-brand-bg-dark);
+}
+
+/* Clean invisible scrollbar styling with fully working native touch scrolling */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }

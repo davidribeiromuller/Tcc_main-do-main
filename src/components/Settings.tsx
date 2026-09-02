@@ -1,7 +1,31 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { User, Bell, Palette, MessageSquare, ChevronRight, ArrowLeft, Save, LogOut, Database, Server, Camera, Upload, Moon, Sun } from "lucide-react";
+import { 
+  User, 
+  Bell, 
+  Palette, 
+  MessageSquare, 
+  ChevronRight, 
+  ArrowLeft, 
+  Save, 
+  LogOut, 
+  Database, 
+  Server, 
+  Camera, 
+  Upload, 
+  Moon, 
+  Sun,
+  Ticket,
+  Calendar,
+  Route as RouteIcon,
+  CheckCircle2,
+  Sparkles,
+  ShieldCheck,
+  BellRing
+} from "lucide-react";
 import { SCHOOLS_LIST } from "../lib/schools.ts";
+import { Event } from "../types.ts";
+import { calculateRealUserStats } from "../lib/userStats.ts";
 
 const ensureDbDateToInputFormat = (dateVal: string): string => {
   if (!dateVal) return "";
@@ -18,6 +42,7 @@ const ensureDbDateToInputFormat = (dateVal: string): string => {
 
 interface SettingsProps {
   user: any;
+  events?: Event[];
   onUpdateProfile: (profileData: any) => Promise<void>;
   onNavigate: (screen: string) => void;
   onLogout: () => void;
@@ -25,6 +50,7 @@ interface SettingsProps {
 
 export default function Settings({
   user,
+  events = [],
   onUpdateProfile,
   onNavigate,
   onLogout
@@ -119,6 +145,38 @@ export default function Settings({
     sdkInstalled: boolean;
     error?: string;
   } | null>(null);
+
+  const [notificationStatus, setNotificationStatus] = useState<string>(() => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      return Notification.permission;
+    }
+    return "unsupported";
+  });
+
+  const handleRequestNotificationPermission = async () => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      try {
+        const permission = await Notification.requestPermission();
+        setNotificationStatus(permission);
+        if (permission === "granted") {
+          try {
+            new Notification("Escola Estadual Helena Wysocki", {
+              body: "Notificações escolares ativadas com sucesso! Você receberá avisos sobre novos eventos.",
+              icon: "/favicon.ico"
+            });
+          } catch {}
+        }
+      } catch (e) {
+        console.warn("Erro ao solicitar notificação:", e);
+      }
+    } else {
+      alert("Notificações do sistema não são suportadas pelo seu navegador atual.");
+    }
+  };
+
+  const userStats = useMemo(() => {
+    return calculateRealUserStats(user?.id, events || []);
+  }, [user?.id, events]);
 
   const [isLoadingDbStatus, setIsLoadingDbStatus] = useState(true);
 
@@ -227,6 +285,67 @@ export default function Settings({
               </div>
             </div>
 
+            {/* Real User Statistics Grid */}
+            <div className="bg-brand-secondary/30 dark:bg-brand-card-dark rounded-3xl p-5 border border-brand-primary/10 flex flex-col gap-3">
+              <div className="flex items-center justify-between pb-2 border-b border-brand-primary/10">
+                <div className="flex items-center gap-2">
+                  <Sparkles size={18} className="text-brand-accent dark:text-brand-primary" />
+                  <span className="text-sm font-semibold text-slate-800 dark:text-white">Minhas Estatísticas no Portal</span>
+                </div>
+                <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Atividade Real</span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="p-3 bg-white dark:bg-black/20 rounded-2xl border border-brand-primary/10 flex flex-col items-center justify-center text-center">
+                  <div className="p-2 rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400 mb-1">
+                    <Ticket size={16} />
+                  </div>
+                  <span className="text-xl font-bold font-mono text-slate-800 dark:text-white leading-none">
+                    {userStats.participatedEventsCount}
+                  </span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-1">
+                    Inscrições
+                  </span>
+                </div>
+
+                <div className="p-3 bg-white dark:bg-black/20 rounded-2xl border border-brand-primary/10 flex flex-col items-center justify-center text-center">
+                  <div className="p-2 rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-950/30 dark:text-purple-400 mb-1">
+                    <Calendar size={16} />
+                  </div>
+                  <span className="text-xl font-bold font-mono text-slate-800 dark:text-white leading-none">
+                    {userStats.createdEventsCount}
+                  </span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-1">
+                    Eventos Criados
+                  </span>
+                </div>
+
+                <div className="p-3 bg-white dark:bg-black/20 rounded-2xl border border-brand-primary/10 flex flex-col items-center justify-center text-center">
+                  <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400 mb-1">
+                    <RouteIcon size={16} />
+                  </div>
+                  <span className="text-xl font-bold font-mono text-slate-800 dark:text-white leading-none">
+                    {userStats.routesCalculatedCount}
+                  </span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-1">
+                    Rotas Traçadas
+                  </span>
+                </div>
+
+                <div className="p-3 bg-white dark:bg-black/20 rounded-2xl border border-brand-primary/10 flex flex-col items-center justify-center text-center">
+                  <div className="p-2 rounded-xl bg-orange-50 text-orange-600 dark:bg-orange-950/30 dark:text-orange-400 mb-1">
+                    <MessageSquare size={16} />
+                  </div>
+                  <span className="text-xl font-bold font-mono text-slate-800 dark:text-white leading-none">
+                    {userStats.feedbacksSentCount}
+                  </span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-1">
+                    Contatos / Avisos
+                  </span>
+                </div>
+              </div>
+            </div>
+
             {/* List Menu Options */}
             <div className="flex flex-col gap-2">
               <button
@@ -242,18 +361,35 @@ export default function Settings({
                 <ChevronRight size={18} className="text-slate-400" />
               </button>
 
-              <div className="w-full h-14 px-4 rounded-2xl bg-white dark:bg-brand-card-dark border border-brand-primary/10 flex md:hidden items-center justify-between">
+              {/* Notification Permission Request Flow */}
+              <div className="w-full p-4 rounded-2xl bg-white dark:bg-brand-card-dark border border-brand-primary/10 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400">
                     <Bell size={18} />
                   </div>
-                  <span className="text-sm font-semibold">Notificações Escolares</span>
+                  <div>
+                    <div className="text-sm font-semibold leading-tight">Notificações Escolares</div>
+                    <div className="text-[11px] text-slate-400">
+                      {notificationStatus === "granted"
+                        ? "Permissão concedida no sistema"
+                        : notificationStatus === "denied"
+                        ? "Permissão bloqueada no navegador"
+                        : "Receba alertas sobre novos eventos"}
+                    </div>
+                  </div>
                 </div>
-                <input
-                  type="checkbox"
-                  defaultChecked
-                  className="w-9 h-5 bg-slate-200 checked:bg-brand-accent rounded-full appearance-none relative before:content-[''] before:absolute before:h-4 before:w-4 before:rounded-full before:bg-white before:top-0.5 before:left-0.5 checked:before:translate-x-4 before:transition-all cursor-pointer border border-slate-300 dark:border-slate-700"
-                />
+
+                <button
+                  type="button"
+                  onClick={handleRequestNotificationPermission}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-all ${
+                    notificationStatus === "granted"
+                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+                      : "bg-[#1A73E8] text-white hover:bg-[#1557b0] shadow-sm active:scale-95"
+                  }`}
+                >
+                  {notificationStatus === "granted" ? "Ativado ✓" : "Ativar Permissão"}
+                </button>
               </div>
 
               <button

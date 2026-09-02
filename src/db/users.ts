@@ -1,5 +1,5 @@
 import { db, isDbCachedOffline, markDbOffline, markDbOnline } from './index.ts';
-import { users } from './schema.ts';
+import { users, events } from './schema.ts';
 import { eq, sql } from 'drizzle-orm';
 import {
   getOrCreateUserFallback,
@@ -8,7 +8,9 @@ import {
   updateUserByUidFallback,
   updateUserByIdFallback,
   listAllUsersFallback,
-  deleteUserByIdFallback
+  deleteUserByIdFallback,
+  blockUserByIdFallback,
+  unblockUserByIdFallback
 } from './fallbackStore.ts';
 
 const handleQueryError = (opsName: string, error: any) => {
@@ -249,16 +251,73 @@ export async function listAllUsers() {
   }
 }
 
-export async function deleteUserById(id: number) {
+export async function blockUserById(id: number) {
+  try {
+    blockUserByIdFallback(id);
+  } catch (e) {}
+
+  if (isDbCachedOffline()) {
+    return blockUserByIdFallback(id);
+  }
+  try {
+    const result = await db.update(users)
+      .set({ ativo: false, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    markDbOnline();
+    return result[0];
+  } catch (error) {
+    handleQueryError('blockUserById', error);
+    markDbOffline();
+    return blockUserByIdFallback(id);
+  }
+}
+
+export async function unblockUserById(id: number) {
+  try {
+    unblockUserByIdFallback(id);
+  } catch (e) {}
+
+  if (isDbCachedOffline()) {
+    return unblockUserByIdFallback(id);
+  }
+  try {
+    const result = await db.update(users)
+      .set({ ativo: true, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    markDbOnline();
+    return result[0];
+  } catch (error) {
+    handleQueryError('unblockUserById', error);
+    markDbOffline();
+    return unblockUserByIdFallback(id);
+  }
+}
+
+export async function deleteUserPermanentlyById(id: number) {
+  // Always clean fallback store as well for immediate consistency
+  try {
+    deleteUserByIdFallback(id);
+  } catch (e) {}
+
   if (isDbCachedOffline()) {
     return deleteUserByIdFallback(id);
   }
   try {
+    // 1. Unlink any events created by this user to avoid FK constraint violations
+    try {
+      await db.update(events).set({ creatorId: null }).where(eq(events.creatorId, id));
+    } catch (unlinkErr) {
+      console.warn('[Database] Could not unlink events for user', id, unlinkErr);
+    }
+
+    // 2. Delete user from Supabase / Postgres table
     const result = await db.delete(users).where(eq(users.id, id)).returning();
     markDbOnline();
     return result[0];
   } catch (error) {
-    handleQueryError('deleteUserById', error);
+    handleQueryError('deleteUserPermanentlyById', error);
     markDbOffline();
     try {
       return deleteUserByIdFallback(id);
@@ -267,4 +326,9 @@ export async function deleteUserById(id: number) {
       throw error;
     }
   }
+}
+
+export async function deleteUserById(id: number) {
+  // Deleting from admin dashboard soft-deletes / blocks user so they appear in "Contas bloqueadas"
+  return blockUserById(id);
 }

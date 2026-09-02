@@ -1,12 +1,18 @@
 import { motion } from "motion/react";
 import { ArrowLeft, AlertCircle, Bug, Lightbulb, Mail, MessageSquare } from "lucide-react";
+import { User } from "../types";
+import { recordFeedbackSent } from "../lib/userStats.ts";
 
 interface ContactProps {
   onNavigate: (screen: string) => void;
+  currentUser?: User | null;
 }
 
-export default function Contact({ onNavigate }: ContactProps) {
+export default function Contact({ onNavigate, currentUser }: ContactProps) {
   const handleEmailRedirect = (subject: string) => {
+    if (currentUser) {
+      recordFeedbackSent(currentUser.id);
+    }
     const encodedSubject = encodeURIComponent(subject);
     const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=solucoes@gmail.com&su=${encodedSubject}`;
     const mailtoUrl = `mailto:solucoes@gmail.com?subject=${encodedSubject}`;

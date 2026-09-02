@@ -24,16 +24,24 @@ import {
   DollarSign,
   ExternalLink,
   Sparkles,
-  Info
+  Info,
+  Lock,
+  Unlock,
+  Ticket,
+  Route as RouteIcon,
+  AlertTriangle
 } from "lucide-react";
 import { User, Event } from "../types";
 import { formatLastActive, formatDateTimeBR } from "../lib/dateUtils";
+import { calculateRealUserStats } from "../lib/userStats.ts";
 
 interface AdminPanelProps {
   usersList: User[];
   events?: Event[];
   onUpdateUser: (userId: number, updateData: any) => Promise<void>;
   onDeleteUser: (userId: number) => Promise<void>;
+  onUnblockUser?: (userId: number) => Promise<void>;
+  onPermanentDeleteUser?: (userId: number) => Promise<void>;
   onImpersonateUser?: (user: User) => void;
   onAddEvent?: (eventData: any) => Promise<void>;
   onUpdateEvent?: (eventId: number, eventData: Partial<Event>) => Promise<void>;
@@ -47,6 +55,8 @@ export default function AdminPanel({
   events = [],
   onUpdateUser,
   onDeleteUser,
+  onUnblockUser,
+  onPermanentDeleteUser,
   onImpersonateUser,
   onAddEvent,
   onUpdateEvent,
@@ -54,13 +64,15 @@ export default function AdminPanel({
   onSelectEvent,
   currentUser
 }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<"users" | "events">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "blocked" | "events">("users");
   const [searchTerm, setSearchTerm] = useState("");
   const [eventSearchTerm, setEventSearchTerm] = useState("");
   
   // User modals state
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [userToUnblock, setUserToUnblock] = useState<User | null>(null);
+  const [userToPermanentDelete, setUserToPermanentDelete] = useState<User | null>(null);
   const [editFormData, setEditFormData] = useState({
     nome: "",
     email: "",
@@ -102,6 +114,9 @@ export default function AdminPanel({
       (u.institution && u.institution.toLowerCase().includes(term))
     );
   });
+
+  const activeUsers = filteredUsers.filter(u => u.ativo !== false);
+  const blockedUsers = filteredUsers.filter(u => u.ativo === false);
 
   const filteredEvents = events.filter((ev) => {
     const term = eventSearchTerm.toLowerCase();
@@ -171,6 +186,28 @@ export default function AdminPanel({
       setIsDeleting(true);
       await onDeleteUser(userToDelete.id);
       setUserToDelete(null);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const confirmUnblockUser = async () => {
+    if (!userToUnblock || !onUnblockUser) return;
+    try {
+      setIsDeleting(true);
+      await onUnblockUser(userToUnblock.id);
+      setUserToUnblock(null);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const confirmPermanentDeleteUser = async () => {
+    if (!userToPermanentDelete || !onPermanentDeleteUser) return;
+    try {
+      setIsDeleting(true);
+      await onPermanentDeleteUser(userToPermanentDelete.id);
+      setUserToPermanentDelete(null);
     } finally {
       setIsDeleting(false);
     }
@@ -297,44 +334,57 @@ export default function AdminPanel({
             </div>
 
             {/* Quick Stats Tabs */}
-            <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl border border-slate-200 dark:border-slate-700 flex-wrap">
               <button
                 type="button"
                 onClick={() => setActiveTab("users")}
-                className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
                   activeTab === "users"
                     ? "bg-white dark:bg-brand-card-dark text-brand-accent dark:text-brand-primary shadow-xs"
                     : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
                 }`}
               >
-                <Users size={15} />
-                <span>Usuários ({usersList.length})</span>
+                <Users size={14} />
+                <span>Ativos ({activeUsers.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab("blocked")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  activeTab === "blocked"
+                    ? "bg-red-500 text-white shadow-xs font-bold"
+                    : "text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20"
+                }`}
+              >
+                <Lock size={14} />
+                <span>Bloqueados ({blockedUsers.length})</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveTab("events")}
-                className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
                   activeTab === "events"
                     ? "bg-white dark:bg-brand-card-dark text-brand-accent dark:text-brand-primary shadow-xs"
                     : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
                 }`}
               >
-                <Calendar size={15} />
-                <span>Eventos Escolares ({events.length})</span>
+                <Calendar size={14} />
+                <span>Eventos ({events.length})</span>
               </button>
             </div>
           </div>
 
           {/* Search & Action Bar */}
-          {activeTab === "users" ? (
+          {activeTab !== "events" ? (
             <div className="relative mt-4">
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
               <input
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Pesquisar usuários por nome, e-mail ou instituição..."
+                placeholder={activeTab === "blocked" ? "Pesquisar contas bloqueadas..." : "Pesquisar usuários por nome, e-mail ou instituição..."}
                 className="w-full h-11 pl-10 pr-4 text-xs bg-white dark:bg-brand-card-dark border border-brand-primary/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-accent text-brand-text-light dark:text-brand-text-dark placeholder-slate-400 shadow-xs"
               />
             </div>
@@ -385,7 +435,7 @@ export default function AdminPanel({
             <div className="bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 p-4 rounded-2xl flex items-start gap-3 shadow-xs">
               <CheckCircle2 className="text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" size={18} />
               <div className="text-xs text-emerald-800 dark:text-emerald-300 leading-relaxed">
-                <p className="font-semibold">Gerenciamento Escolar & Atividade de Usuários:</p>
+                <p className="font-semibold">Gerenciamento Escolar & Atividade de Usuários Ativos:</p>
                 <p className="text-[11px] opacity-90 mt-0.5">
                   Acompanhe a <strong>última vez que cada usuário entrou no aplicativo</strong>, acesse contas com 1 clique, ative <strong>Privilégios de Administrador</strong>, modifique dados cadastrais e gerencie acessos com segurança.
                 </p>
@@ -393,18 +443,19 @@ export default function AdminPanel({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredUsers.length === 0 ? (
+              {activeUsers.length === 0 ? (
                 <div className="col-span-full flex flex-col items-center justify-center py-16 text-center text-slate-400">
                   <Users size={40} className="text-slate-300 dark:text-slate-600 mb-2" />
-                  <p className="text-sm font-medium">Nenhum perfil escolar encontrado.</p>
-                  <p className="text-xs text-slate-400 mt-1">Verifique o termo de pesquisa digitado.</p>
+                  <p className="text-sm font-medium">Nenhum usuário ativo encontrado.</p>
+                  <p className="text-xs text-slate-400 mt-1">Verifique o termo de pesquisa ou a aba de bloqueados.</p>
                 </div>
               ) : (
-                filteredUsers.map((u) => {
+                activeUsers.map((u) => {
                   const isMe = currentUser?.id === u.id || (currentUser?.email && u.email && currentUser.email.toLowerCase() === u.email.toLowerCase());
                   const activityDate = u.lastActiveAt || u.updatedAt || u.createdAt;
                   const activity = formatLastActive(activityDate);
                   const formattedDateStr = formatDateTimeBR(activityDate);
+                  const uStats = calculateRealUserStats(u.id, events);
 
                   return (
                     <div
@@ -464,11 +515,27 @@ export default function AdminPanel({
                             }}
                             disabled={isMe}
                             className="p-2 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-400 disabled:opacity-25 transition-colors cursor-pointer"
-                            title="Excluir conta permanentemente"
+                            title="Bloquear/Suspender conta escolar"
                           >
                             <Trash2 size={14} />
                           </button>
                         </div>
+                      </div>
+
+                      {/* Real User Stats Badges */}
+                      <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-slate-500 dark:text-slate-400">
+                        <span className="bg-slate-100 dark:bg-slate-800/90 px-2 py-0.5 rounded-md font-mono flex items-center gap-1">
+                          <Ticket size={11} className="text-blue-500" />
+                          <span>{uStats.participatedEventsCount} inscr.</span>
+                        </span>
+                        <span className="bg-slate-100 dark:bg-slate-800/90 px-2 py-0.5 rounded-md font-mono flex items-center gap-1">
+                          <RouteIcon size={11} className="text-emerald-500" />
+                          <span>{uStats.routesCalculatedCount} rotas</span>
+                        </span>
+                        <span className="bg-slate-100 dark:bg-slate-800/90 px-2 py-0.5 rounded-md font-mono flex items-center gap-1">
+                          <Calendar size={11} className="text-purple-500" />
+                          <span>{uStats.createdEventsCount} criados</span>
+                        </span>
                       </div>
 
                       {/* Última Atividade */}
@@ -531,6 +598,113 @@ export default function AdminPanel({
                           >
                             <LogIn size={13} />
                             <span>Entrar nesta conta</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </>
+        )}
+
+        {/* ================= BLOCKED USERS TAB ================= */}
+        {activeTab === "blocked" && (
+          <>
+            <div className="bg-red-50/80 dark:bg-red-950/30 border border-red-200 dark:border-red-800/40 p-4 rounded-2xl flex items-start gap-3 shadow-xs">
+              <ShieldAlert className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" size={18} />
+              <div className="text-xs text-red-900 dark:text-red-200 leading-relaxed">
+                <p className="font-semibold">Gerenciamento de Contas Bloqueadas & Suspensas:</p>
+                <p className="text-[11px] opacity-90 mt-0.5">
+                  Estas contas estão <strong>impedidas de acessar o portal escolar</strong>. Você pode restabelecer o acesso com 1 clique ("Desbloquear") ou remover permanentemente o registro do banco de dados ("Excluir Definitivamente").
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {blockedUsers.length === 0 ? (
+                <div className="col-span-full flex flex-col items-center justify-center py-16 text-center text-slate-400 bg-white dark:bg-brand-card-dark rounded-3xl border border-dashed border-slate-300 dark:border-slate-700 p-8">
+                  <Unlock size={44} className="text-emerald-500 mb-2 opacity-80" />
+                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                    Nenhuma conta bloqueada no momento!
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1 max-w-sm">
+                    Todos os usuários cadastrados estão com acesso ativo e regular às funcionalidades do portal escolar.
+                  </p>
+                </div>
+              ) : (
+                blockedUsers.map((u) => {
+                  const activityDate = u.lastActiveAt || u.updatedAt || u.createdAt;
+                  const formattedDateStr = formatDateTimeBR(activityDate);
+
+                  return (
+                    <div
+                      key={u.id}
+                      className="bg-white dark:bg-brand-card-dark rounded-2xl p-5 border-2 border-red-200 dark:border-red-900/50 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between gap-3.5 relative overflow-hidden"
+                    >
+                      <div className="absolute top-0 left-0 right-0 h-1 bg-red-500" />
+
+                      {/* Header info */}
+                      <div className="flex justify-between items-start gap-2 pt-1">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center font-bold text-sm uppercase shrink-0 border border-red-200 dark:border-red-800">
+                            <Lock size={16} />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <h4 className="font-semibold text-xs text-slate-900 dark:text-white truncate">
+                                {u.nome || "Usuário Bloqueado"}
+                              </h4>
+                              <span className="text-[10px] bg-red-100 dark:bg-red-950/80 text-red-700 dark:text-red-300 px-2 py-0.5 rounded font-bold border border-red-200 dark:border-red-800">
+                                Bloqueado
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono block truncate mt-0.5">
+                              {u.email}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* School and Role */}
+                      <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-100 dark:border-slate-800 text-xs flex flex-col gap-1">
+                        <div className="flex justify-between items-center text-[11px]">
+                          <span className="text-slate-500">Função:</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-300">{u.role || "Aluno"}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-[11px]">
+                          <span className="text-slate-500">Instituição:</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[150px]">{u.institution || "Escola Helena Wysocki"}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-[11px] pt-1 border-t border-slate-200/50 dark:border-slate-800">
+                          <span className="text-slate-500">Último Acesso:</span>
+                          <span className="font-mono text-slate-600 dark:text-slate-400">{formattedDateStr}</span>
+                        </div>
+                      </div>
+
+                      {/* Action Buttons for Blocked Accounts */}
+                      <div className="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                        {onUnblockUser && (
+                          <button
+                            type="button"
+                            onClick={() => setUserToUnblock(u)}
+                            className="flex-1 h-9 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                          >
+                            <Unlock size={14} />
+                            <span>Desbloquear</span>
+                          </button>
+                        )}
+
+                        {onPermanentDeleteUser && (
+                          <button
+                            type="button"
+                            onClick={() => setUserToPermanentDelete(u)}
+                            className="h-9 px-3 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/50 text-red-600 dark:text-red-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-red-200 dark:border-red-800"
+                            title="Excluir Definitivamente do Banco de Dados"
+                          >
+                            <Trash2 size={14} />
+                            <span>Excluir</span>
                           </button>
                         )}
                       </div>
@@ -711,8 +885,98 @@ export default function AdminPanel({
                   disabled={isDeleting}
                   className="flex-1 h-10 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
                 >
+                  <Lock size={14} />
+                  <span>{isDeleting ? "Bloqueando..." : "Sim, Bloquear"}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Unblock User Modal */}
+      <AnimatePresence>
+        {userToUnblock && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-slate-900 rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
+                <Unlock size={24} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Desbloquear Acesso Escolar?
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                  Deseja restabelecer o acesso do usuário <strong>{userToUnblock.nome || userToUnblock.email}</strong>? Ele poderá entrar novamente e utilizar todas as funções do portal escolar.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setUserToUnblock(null)}
+                  disabled={isDeleting}
+                  className="flex-1 h-10 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmUnblockUser}
+                  disabled={isDeleting}
+                  className="flex-1 h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+                >
+                  <Unlock size={14} />
+                  <span>{isDeleting ? "Desbloqueando..." : "Sim, Desbloquear"}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Permanent Delete User Modal */}
+      <AnimatePresence>
+        {userToPermanentDelete && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-slate-900 rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-red-200 dark:border-red-900/50 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto border border-red-200 dark:border-red-800">
+                <Trash2 size={24} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-red-600 dark:text-red-400">
+                  Excluir Definitivamente?
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                  ATENÇÃO: A conta de <strong>{userToPermanentDelete.nome || userToPermanentDelete.email}</strong> será <strong>apagada permanentemente</strong> do banco de dados (Supabase / local). Esta ação é irreversível!
+                </p>
+              </div>
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setUserToPermanentDelete(null)}
+                  disabled={isDeleting}
+                  className="flex-1 h-10 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmPermanentDeleteUser}
+                  disabled={isDeleting}
+                  className="flex-1 h-10 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+                >
                   <Trash2 size={14} />
-                  <span>{isDeleting ? "Excluindo..." : "Sim, Excluir"}</span>
+                  <span>{isDeleting ? "Excluindo..." : "Excluir Definitivo"}</span>
                 </button>
               </div>
             </motion.div>

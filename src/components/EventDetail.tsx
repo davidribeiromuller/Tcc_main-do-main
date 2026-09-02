@@ -26,6 +26,8 @@ import {
   CheckCircle
 } from "lucide-react";
 import { Event, User } from "../types";
+import { fetchStreetRoute } from "../lib/routing.ts";
+import { recordEventParticipation, recordRouteCalculation } from "../lib/userStats.ts";
 
 interface EventDetailProps {
   event: Event;
@@ -203,10 +205,13 @@ export default function EventDetail({
   const eventLng = typeof event.lng === "number" && !isNaN(event.lng) ? event.lng : DEFAULT_LNG;
 
   const handleEnroll = () => {
+    if (currentUser) {
+      recordEventParticipation(currentUser.id, event.id);
+    }
     if (event.website) {
       window.open(event.website, "_blank", "noopener,noreferrer");
     } else {
-      alert(`Parabéns! Sua vaga para o evento "${event.title}" foi reservada com sucesso! Um comprovante foi encaminhado para seu email escolar.`);
+      alert(`Parabéns! Sua vaga para o evento "${event.title}" foi confirmada com sucesso! Um comprovante foi associado à sua conta escolar.`);
     }
   };
 
@@ -363,34 +368,44 @@ export default function EventDetail({
           .bindPopup("<b>Sua Posição</b>");
       }
 
-      // Draw Route Polyline
+      // Draw Real Street Route Polyline
       if (routePolylineRef.current) {
         map.removeLayer(routePolylineRef.current);
       }
 
-      const polyline = L.polyline(
-        [
-          [userCoords.lat, userCoords.lng],
-          [eventLat, eventLng],
-        ],
-        {
-          color: "#4285F4",
-          weight: 4,
-          opacity: 0.9,
-          dashArray: "6, 6",
+      let isMounted = true;
+      fetchStreetRoute(
+        userCoords.lat,
+        userCoords.lng,
+        eventLat,
+        eventLng
+      ).then((routeRes) => {
+        if (!isMounted || !mapInstanceRef.current) return;
+
+        if (routePolylineRef.current) {
+          mapInstanceRef.current.removeLayer(routePolylineRef.current);
         }
-      ).addTo(map);
 
-      routePolylineRef.current = polyline;
+        const polyline = L.polyline(routeRes.coordinates, {
+          color: "#1A73E8",
+          weight: 5,
+          opacity: 0.95,
+          lineCap: "round",
+          lineJoin: "round",
+        }).addTo(mapInstanceRef.current);
 
-      // Fit bounds nicely
-      const bounds = L.latLngBounds([
-        [userCoords.lat, userCoords.lng],
-        [eventLat, eventLng],
-      ]);
-      map.fitBounds(bounds, { padding: [35, 35] });
+        routePolylineRef.current = polyline;
+        recordRouteCalculation(currentUser?.id);
+
+        const bounds = L.latLngBounds(routeRes.coordinates);
+        mapInstanceRef.current.fitBounds(bounds, { padding: [35, 35] });
+      });
+
+      return () => {
+        isMounted = false;
+      };
     }
-  }, [userCoords, eventLat, eventLng]);
+  }, [userCoords, eventLat, eventLng, currentUser]);
 
   // Invalidate map size on expand / collapse
   useEffect(() => {

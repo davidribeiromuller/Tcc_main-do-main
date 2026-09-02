@@ -47,6 +47,11 @@ export async function createNewEvent(data: {
   image?: string | null;
   creatorId?: number;
 }) {
+  // Always synchronize fallback store
+  try {
+    createNewEventFallback(data);
+  } catch (e) {}
+
   if (isDbCachedOffline()) {
     return createNewEventFallback(data);
   }
@@ -59,11 +64,7 @@ export async function createNewEvent(data: {
       })
       .returning();
     markDbOnline();
-    const created = result[0];
-    try {
-      createNewEventFallback({ ...data, ...(created ? { id: created.id } : {}) });
-    } catch {}
-    return created;
+    return result[0];
   } catch (error) {
     handleQueryError('createNewEvent', error);
     markDbOffline();
@@ -84,6 +85,10 @@ export async function updateEventById(id: number, data: Partial<{
   website?: string | null;
   image?: string | null;
 }>) {
+  try {
+    updateEventByIdFallback(id, data as any);
+  } catch (e) {}
+
   if (isDbCachedOffline()) {
     return updateEventByIdFallback(id, data as any);
   }
@@ -93,11 +98,7 @@ export async function updateEventById(id: number, data: Partial<{
       .where(eq(events.id, id))
       .returning();
     markDbOnline();
-    const updated = result[0];
-    try {
-      updateEventByIdFallback(id, data as any);
-    } catch {}
-    return updated;
+    return result[0];
   } catch (error) {
     handleQueryError('updateEventById', error);
     markDbOffline();
@@ -106,17 +107,17 @@ export async function updateEventById(id: number, data: Partial<{
 }
 
 export async function deleteEventById(id: number) {
+  try {
+    deleteEventByIdFallback(id);
+  } catch (e) {}
+
   if (isDbCachedOffline()) {
     return deleteEventByIdFallback(id);
   }
   try {
     const result = await db.delete(events).where(eq(events.id, id)).returning();
     markDbOnline();
-    const deleted = result[0];
-    try {
-      deleteEventByIdFallback(id);
-    } catch {}
-    return deleted;
+    return result[0];
   } catch (error) {
     handleQueryError('deleteEventById', error);
     markDbOffline();

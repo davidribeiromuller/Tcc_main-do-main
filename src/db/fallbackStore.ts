@@ -410,6 +410,34 @@ export function listAllUsersFallback(): User[] {
   });
 }
 
+export function blockUserByIdFallback(id: number): User {
+  const index = fallbackUsers.findIndex(u => u.id === id);
+  if (index === -1) {
+    throw new Error('Usuário não encontrado para bloquear na memória');
+  }
+  fallbackUsers[index] = {
+    ...fallbackUsers[index],
+    ativo: false,
+    updatedAt: new Date().toISOString()
+  };
+  saveUsers();
+  return fallbackUsers[index];
+}
+
+export function unblockUserByIdFallback(id: number): User {
+  const index = fallbackUsers.findIndex(u => u.id === id);
+  if (index === -1) {
+    throw new Error('Usuário não encontrado para desbloquear na memória');
+  }
+  fallbackUsers[index] = {
+    ...fallbackUsers[index],
+    ativo: true,
+    updatedAt: new Date().toISOString()
+  };
+  saveUsers();
+  return fallbackUsers[index];
+}
+
 export function deleteUserByIdFallback(id: number): User {
   const index = fallbackUsers.findIndex(u => u.id === id);
   if (index === -1) {

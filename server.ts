@@ -16,7 +16,10 @@ import {
   updateUserByUid,
   updateUserById,
   listAllUsers,
-  deleteUserById
+  deleteUserById,
+  blockUserById,
+  unblockUserById,
+  deleteUserPermanentlyById
 } from "./src/db/users.ts";
 import {
   listAllEvents,
@@ -237,6 +240,12 @@ async function startServer() {
         }
       }
 
+      if (user && user.ativo === false) {
+        return res.status(403).json({
+          error: "Sua conta foi bloqueada ou desativada pela administração. Entre em contato com a diretoria da Escola Helena Wysocki para solicitar o desbloqueio."
+        });
+      }
+
       // Generate local token matching standard requireAuth middleware expectation
       const token = `local-${user.uid}|${user.role || 'Aluno'}|${encodeURIComponent(user.nome || '')}|${encodeURIComponent(user.email)}`;
 
@@ -269,6 +278,12 @@ async function startServer() {
         "google",
         userRole
       );
+
+      if (user && user.ativo === false) {
+        return res.status(403).json({
+          error: "Sua conta foi bloqueada ou desativada pela administração escolar. Entre em contato com a diretoria da Escola Helena Wysocki para solicitar o desbloqueio."
+        });
+      }
 
       const token = `google-${uid}|${user.role || 'Aluno'}|${encodeURIComponent(user.nome || '')}|${encodeURIComponent(cleanEmail)}|${encodeURIComponent(userPhoto)}`;
 
@@ -308,6 +323,12 @@ async function startServer() {
         role,
         password
       );
+
+      if (user && user.ativo === false) {
+        return res.status(403).json({
+          error: "Sua conta foi bloqueada ou desativada pela administração escolar. Entre em contato com a diretoria da Escola Helena Wysocki para solicitar o desbloqueio."
+        });
+      }
 
       res.json({ user });
     } catch (error: any) {
@@ -395,28 +416,6 @@ async function startServer() {
     }
   });
 
-  // Helper to verify if caller is David Ribeiro Müller or Diretoria Admin
-  const isDirectorOrDavidAdmin = (reqUser: any, dbUser?: any): boolean => {
-    const reqEmail = (reqUser?.email || "").toLowerCase().trim();
-    const dbEmail = (dbUser?.email || "").toLowerCase().trim();
-    const reqRole = reqUser?.role || (reqUser as any)?.role;
-    const dbRole = dbUser?.role;
-    
-    const isDavid =
-      reqEmail === "davidribeiromuller2009@gmail.com" ||
-      reqEmail.startsWith("davidribeiromuller2009@") ||
-      dbEmail === "davidribeiromuller2009@gmail.com" ||
-      dbEmail.startsWith("davidribeiromuller2009@");
-      
-    const isDirector =
-      reqEmail === "diretoria@helenawysocki.com" ||
-      dbEmail === "diretoria@helenawysocki.com" ||
-      reqRole === "Diretor" ||
-      dbRole === "Diretor";
-      
-    return isDavid || isDirector;
-  };
-
   // Administrativo: Atualizar qualquer dado de outro usuário por ID (Admin ou Diretor)
   app.put("/api/users/:id", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
     try {
@@ -425,19 +424,7 @@ async function startServer() {
         return res.status(400).json({ error: "ID de usuário inválido" });
       }
 
-      const dbUser = await getUserByUid(req.user!.uid);
       const { nome, email, role, isAdmin, ativo, password, institution, phone, cpf, birthdate, gender, foto_perfil } = req.body;
-
-      // STRICT PRIVILEGE RULE: Only Diretoria or davidribeiromuller2009 can alter admin status or appoint Director role
-      const isAttemptingPrivilegeChange = isAdmin !== undefined || role === "Diretor" || role === "ADMIN";
-      if (isAttemptingPrivilegeChange) {
-        if (!isDirectorOrDavidAdmin(req.user, dbUser)) {
-          return res.status(403).json({
-            error: "Acesso negado: Apenas o Administrador da Diretoria ou o usuário 'davidribeiromuller2009' têm permissão para conceder ou revogar privilégios de administrador."
-          });
-        }
-      }
-
       const updateData: any = {};
       if (nome !== undefined) updateData.nome = String(nome).trim();
       if (email !== undefined) updateData.email = String(email).trim().toLowerCase();
@@ -452,6 +439,7 @@ async function startServer() {
       if (gender !== undefined) updateData.gender = String(gender).trim();
       if (foto_perfil !== undefined) updateData.foto_perfil = String(foto_perfil).trim();
 
+      const dbUser = await getUserByUid(req.user!.uid);
       if (dbUser && dbUser.id === userId && isAdmin === false) {
         return res.status(400).json({ error: "Você não pode remover seus próprios privilégios de administrador" });
       }
@@ -464,7 +452,43 @@ async function startServer() {
     }
   });
 
-  // Administrativo: Deletar usuário do database
+  // Administrativo: Desbloquear / Reativar conta de usuário
+  app.post("/api/users/:id/unblock", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ error: "ID inválido" });
+      }
+
+      const unblockedUser = await unblockUserById(userId);
+      res.json({ success: true, user: unblockedUser });
+    } catch (error: any) {
+      console.error("Erro ao desbloquear usuário:", error);
+      res.status(500).json({ error: error.message || "Não foi possível desbloquear o usuário" });
+    }
+  });
+
+  // Administrativo: Excluir definitivamente usuário do database
+  app.delete("/api/users/:id/permanent", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ error: "ID inválido" });
+      }
+
+      // Evitar deletar a si mesmo
+      const dbUser = await getUserByUid(req.user!.uid);
+      if (dbUser && dbUser.id === userId) {
+        return res.status(400).json({ error: "Você não pode deletar sua própria conta escolar ativa" });
+      }
+
+      const deletedUser = await deleteUserPermanentlyById(userId);
+      res.json({ success: true, user: deletedUser });
+    } catch (error: any) {
+      console.error("Erro ao excluir permanentemente usuário:", error);
+      res.status(500).json({ error: error.message || "Não foi possível excluir o usuário" });
+    }
+  });
   app.delete("/api/users/:id", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
     try {
       const userId = parseInt(req.params.id);

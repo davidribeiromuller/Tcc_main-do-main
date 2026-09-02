@@ -25,7 +25,9 @@ import {
   Plus,
   Minus
 } from "lucide-react";
-import { Event } from "../types";
+import { Event, User } from "../types";
+import { fetchStreetRoute } from "../lib/routing.ts";
+import { recordRouteCalculation } from "../lib/userStats.ts";
 
 // Default coordinates for Escola Estadual Helena Wysocki (Araucária - PR)
 const SCHOOL_COORDINATES: [number, number] = [-25.5936, -49.4103];
@@ -37,6 +39,7 @@ interface MapViewProps {
   initialSelectedEventId?: number | null;
   userCoords?: { lat: number; lng: number } | null;
   onUserCoordsChange?: (coords: { lat: number; lng: number }) => void;
+  currentUser?: User | null;
 }
 
 // Fallback coordinates helper around Araucária
@@ -152,6 +155,7 @@ export default function MapView({
   initialSelectedEventId,
   userCoords,
   onUserCoordsChange,
+  currentUser,
 }: MapViewProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -162,6 +166,8 @@ export default function MapView({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<"all" | "free" | "school" | "external">("all");
   const [activeEvent, setActiveEvent] = useState<Event | null>(null);
+  const [activeEventRealDistance, setActiveEventRealDistance] = useState<number | null>(null);
+  const [activeEventRealDuration, setActiveEventRealDuration] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
@@ -321,7 +327,7 @@ export default function MapView({
     }
   }, [filteredEvents, activeEvent, currentUserLocation]);
 
-  // Draw Route Polyline when Active Event and User Location exist
+  // Draw Real Street Route Polyline when Active Event and User Location exist
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -335,32 +341,48 @@ export default function MapView({
       const eventIdx = events.findIndex((e) => e.id === activeEvent.id);
       const eventCoords = getEventCoordinates(activeEvent, eventIdx >= 0 ? eventIdx : 0);
 
-      // Route polyline with Google Maps blue color and dashing
-      const polyline = L.polyline(
-        [
-          [currentUserLocation.lat, currentUserLocation.lng],
-          eventCoords,
-        ],
-        {
-          color: "#4285F4",
-          weight: 5,
-          opacity: 0.9,
-          dashArray: "8, 8",
+      let isMounted = true;
+      fetchStreetRoute(
+        currentUserLocation.lat,
+        currentUserLocation.lng,
+        eventCoords[0],
+        eventCoords[1]
+      ).then((routeRes) => {
+        if (!isMounted || !mapInstanceRef.current) return;
+
+        if (routeLayerRef.current) {
+          mapInstanceRef.current.removeLayer(routeLayerRef.current);
+        }
+
+        // Real street navigation polyline
+        const polyline = L.polyline(routeRes.coordinates, {
+          color: "#1A73E8",
+          weight: 6,
+          opacity: 0.95,
           lineCap: "round",
           lineJoin: "round",
-        }
-      ).addTo(map);
+        }).addTo(mapInstanceRef.current);
 
-      routeLayerRef.current = polyline;
+        routeLayerRef.current = polyline;
+        setActiveEventRealDistance(routeRes.distanceKm);
+        setActiveEventRealDuration(routeRes.durationMin);
 
-      // Fit bounds to show both user and event
-      const bounds = L.latLngBounds([
-        [currentUserLocation.lat, currentUserLocation.lng],
-        eventCoords,
-      ]);
-      map.fitBounds(bounds, { padding: [80, 80] });
+        // Record real user route calculation in statistics
+        recordRouteCalculation(currentUser?.id);
+
+        // Fit bounds with comfortable padding
+        const bounds = L.latLngBounds(routeRes.coordinates);
+        mapInstanceRef.current.fitBounds(bounds, { padding: [60, 60] });
+      });
+
+      return () => {
+        isMounted = false;
+      };
+    } else {
+      setActiveEventRealDistance(null);
+      setActiveEventRealDuration(null);
     }
-  }, [activeEvent, currentUserLocation, events]);
+  }, [activeEvent, currentUserLocation, events, currentUser]);
 
   // Initial event selection
   useEffect(() => {
@@ -684,10 +706,12 @@ export default function MapView({
                   </p>
                 </div>
 
-                {activeEventDistance !== null && (
-                  <div className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] font-bold font-mono">
-                    <Car size={11} />
-                    <span>{activeEventDistance} km de você • ~{Math.ceil(activeEventDistance * 2.2)} min</span>
+                {(activeEventRealDistance !== null || activeEventDistance !== null) && (
+                  <div className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] font-bold font-mono">
+                    <Car size={12} className="text-[#1A73E8]" />
+                    <span>
+                      {activeEventRealDistance !== null ? activeEventRealDistance : activeEventDistance} km por vias reais • ~{activeEventRealDuration !== null ? activeEventRealDuration : (activeEventDistance ? Math.ceil(activeEventDistance * 2.2) : 5)} min
+                    </span>
                   </div>
                 )}
               </div>

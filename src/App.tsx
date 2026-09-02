@@ -536,9 +536,9 @@ export default function App() {
     }
   };
 
-  // Handle Google Login button click
+  // Handle Google Login button click - Triggers official Google OAuth API
   const handleGoogleLogin = async () => {
-    setShowGoogleAuthModal(true);
+    await handleTriggerGooglePopup();
   };
 
   // Helper to generate or fetch token
@@ -1075,7 +1075,7 @@ export default function App() {
     }
   };
 
-  // Admin: Delete user from database
+  // Admin: Delete user from database (Soft delete / Block)
   const handleAdminDeleteUser = async (userId: number) => {
     try {
       const token = await getAuthToken();
@@ -1095,11 +1095,89 @@ export default function App() {
 
       if (res && res.ok) {
         await loadAllUsers(token || "");
-        showToast("Conta escolar removida com sucesso.", "info");
+        showToast("Conta escolar bloqueada com sucesso.", "info");
         return;
       } else if (res) {
         const detail = await res.json().catch(() => ({}));
-        showToast(detail.error || "Não foi possível remover este usuário.", "error");
+        showToast(detail.error || "Não foi possível bloquear este usuário.", "error");
+        return;
+      }
+
+      // Local storage fallback
+      const updatedList = usersList.map(u => u.id === userId ? { ...u, ativo: false, updatedAt: new Date().toISOString() } : u);
+      setUsersList(updatedList);
+      localStorage.setItem("local_users_db", JSON.stringify(updatedList));
+      showToast("Conta escolar bloqueada com sucesso.", "info");
+    } catch (error) {
+      console.error("Admin deletion failed:", error);
+      showToast("Erro ao bloquear usuário.", "error");
+    }
+  };
+
+  // Admin: Unblock user
+  const handleAdminUnblockUser = async (userId: number) => {
+    try {
+      const token = await getAuthToken();
+      let res: Response | null = null;
+      if (token) {
+        try {
+          res = await fetch(`/api/users/${userId}/unblock`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+        } catch (netErr) {
+          res = null;
+        }
+      }
+
+      if (res && res.ok) {
+        await loadAllUsers(token || "");
+        showToast("Conta escolar desbloqueada com sucesso!", "success");
+        return;
+      } else if (res) {
+        const detail = await res.json().catch(() => ({}));
+        showToast(detail.error || "Não foi possível desbloquear o usuário.", "error");
+        return;
+      }
+
+      // Local storage fallback
+      const updatedList = usersList.map(u => u.id === userId ? { ...u, ativo: true, updatedAt: new Date().toISOString() } : u);
+      setUsersList(updatedList);
+      localStorage.setItem("local_users_db", JSON.stringify(updatedList));
+      showToast("Conta escolar desbloqueada com sucesso!", "success");
+    } catch (error) {
+      console.error("Admin unblock failed:", error);
+      showToast("Erro ao desbloquear usuário.", "error");
+    }
+  };
+
+  // Admin: Permanent Delete user
+  const handleAdminPermanentDeleteUser = async (userId: number) => {
+    try {
+      const token = await getAuthToken();
+      let res: Response | null = null;
+      if (token) {
+        try {
+          res = await fetch(`/api/users/${userId}/permanent`, {
+            method: "DELETE",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+        } catch (netErr) {
+          res = null;
+        }
+      }
+
+      if (res && res.ok) {
+        await loadAllUsers(token || "");
+        showToast("Conta escolar excluída definitivamente!", "info");
+        return;
+      } else if (res) {
+        const detail = await res.json().catch(() => ({}));
+        showToast(detail.error || "Não foi possível excluir o usuário permanentemente.", "error");
         return;
       }
 
@@ -1107,10 +1185,10 @@ export default function App() {
       const updatedList = usersList.filter(u => u.id !== userId);
       setUsersList(updatedList);
       localStorage.setItem("local_users_db", JSON.stringify(updatedList));
-      showToast("Conta escolar removida com sucesso.", "info");
+      showToast("Conta escolar excluída definitivamente!", "info");
     } catch (error) {
-      console.error("Admin deletion failed:", error);
-      showToast("Erro ao deletar usuário.", "error");
+      console.error("Admin permanent deletion failed:", error);
+      showToast("Erro ao excluir usuário definitivamente.", "error");
     }
   };
 
@@ -1161,7 +1239,7 @@ export default function App() {
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.98 }}
-            className="absolute inset-0"
+            className="absolute inset-0 overflow-y-auto"
           >
             <Login
               onGoogleLogin={handleGoogleLogin}
@@ -1181,7 +1259,7 @@ export default function App() {
             initial={{ opacity: 0, x: 50 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -50 }}
-            className="absolute inset-0"
+            className="absolute inset-0 overflow-y-auto"
           >
             <Register
               onRegister={handleRegister}
@@ -1256,7 +1334,7 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="absolute inset-0 overflow-hidden"
+                    className="absolute inset-0 overflow-y-auto"
                   >
                     <Feed
                       events={events}
@@ -1312,7 +1390,7 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="absolute inset-0 overflow-hidden"
+                    className="absolute inset-0 overflow-y-auto"
                   >
                     <CalendarView
                       events={events}
@@ -1334,13 +1412,15 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="absolute inset-0 overflow-hidden"
+                    className="absolute inset-0 overflow-y-auto"
                   >
                     <AdminPanel
                       usersList={usersList}
                       events={events}
                       onUpdateUser={handleAdminUpdateUser}
                       onDeleteUser={handleAdminDeleteUser}
+                      onUnblockUser={handleAdminUnblockUser}
+                      onPermanentDeleteUser={handleAdminPermanentDeleteUser}
                       onImpersonateUser={handleImpersonateUser}
                       onAddEvent={handleAddEvent}
                       onUpdateEvent={handleUpdateEvent}
@@ -1357,10 +1437,11 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="absolute inset-0 overflow-hidden"
+                    className="absolute inset-0 overflow-y-auto"
                   >
                     <Settings
                       user={currentUser}
+                      events={events}
                       onUpdateProfile={handleUpdateProfile}
                       onNavigate={setActiveScreen}
                       onLogout={handleLogout}
@@ -1374,7 +1455,7 @@ export default function App() {
                     initial={{ opacity: 0, x: 20 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -20 }}
-                    className="absolute inset-0 overflow-hidden"
+                    className="absolute inset-0 overflow-y-auto"
                   >
                     <Contact onNavigate={setActiveScreen} />
                   </motion.div>
@@ -1386,7 +1467,7 @@ export default function App() {
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.95 }}
-                    className="absolute inset-0 overflow-hidden"
+                    className="absolute inset-0 overflow-y-auto"
                   >
                     <EventDetail
                       event={selectedEvent}

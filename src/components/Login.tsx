@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { motion } from "motion/react";
+import { motion, AnimatePresence } from "motion/react";
 import {
   Mail,
   Lock,
@@ -7,6 +7,7 @@ import {
   ChevronRight,
   GraduationCap,
   ArrowLeft,
+  ShieldCheck,
   UserPlus
 } from "lucide-react";
 import logoImg from "../assets/images/logo.jpg";
@@ -28,7 +29,8 @@ export default function Login({
   onNavigate,
   isLoading,
   loginError,
-  clearLoginError
+  clearLoginError,
+  registeredUsers = []
 }: LoginProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -79,120 +81,134 @@ export default function Login({
     e.preventDefault();
     handleClearError();
 
-    const cleanCgm = cgm.trim();
+    const cleanCgm = cgm.trim().replace(/\D/g, "");
     if (!cleanCgm) {
-      setLocalError("Por favor, informe seu número de matrícula CGM.");
-      return;
-    }
-    if (cleanCgm.length < 6) {
-      setLocalError("O CGM escolar deve conter pelo menos 6 dígitos numéricos.");
-      return;
-    }
-    if (!cgmPassword) {
-      setLocalError("Por favor, informe sua senha de acesso para a Área do Aluno.");
+      setLocalError("Por favor, informe o seu número de CGM (Cadastro Geral de Matrícula).");
       return;
     }
 
-    const fauxEmail = `cgm-${cleanCgm}@aluno.pr.gov.br`;
-    onLocalLogin(fauxEmail, cgmPassword);
+    if (cleanCgm.length < 5) {
+      setLocalError("O número de CGM precisa ter pelo menos 5 dígitos.");
+      return;
+    }
+
+    if (!cgmPassword) {
+      setLocalError("Por favor, informe a senha cadastrada na Área do Aluno.");
+      return;
+    }
+
+    const virtualEmail = `aluno.cgm${cleanCgm}@escola.pr.gov.br`;
+    onLocalLogin(virtualEmail, cgmPassword);
   };
 
-  const handleRecoverySubmit = (e: React.FormEvent) => {
+  const handleForgotSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     handleClearError();
 
-    if (!recoveryEmail || !recoveryEmail.includes("@")) {
-      setLocalError("Por favor, informe um e-mail escolar válido para recuperação.");
+    if (!recoveryEmail.trim()) {
+      setLocalError("Por favor, informe o e-mail cadastrado.");
       return;
     }
-    if (!recoveryCpf || recoveryCpf.replace(/\D/g, "").length < 11) {
-      setLocalError("Por favor, digite um CPF válido com 11 dígitos.");
-      return;
-    }
+
+    // Navigate to codeSent screen
     onNavigate("codeSent");
   };
 
-  if (activeSubView === "forgot") {
+  if (activeSubView === "aluno_cgm") {
     return (
       <div className="min-h-full w-full flex items-center justify-center p-4 md:p-8 bg-slate-50 dark:bg-slate-950 overflow-y-auto">
         <motion.div
-          initial={{ opacity: 0, scale: 0.97 }}
+          initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.97 }}
-          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl max-w-md w-full text-slate-800 dark:text-slate-100 flex flex-col justify-center my-auto"
+          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl max-w-md w-full text-slate-800 dark:text-slate-100 my-auto"
         >
-          <div className="flex flex-col items-center mb-6">
-            <h2 className="text-xl sm:text-2xl font-display font-semibold text-center leading-tight">
-              Recuperar Senha
+          <div className="flex items-center justify-between mb-4">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveSubView("options");
+                handleClearError();
+              }}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-brand-accent transition-colors p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+            >
+              <ArrowLeft size={16} />
+              <span>Voltar</span>
+            </button>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">
+              Área do Aluno SEED-PR
+            </span>
+          </div>
+
+          <div className="flex flex-col items-center mb-6 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-3">
+              <GraduationCap size={28} />
+            </div>
+            <h2 className="text-xl font-display font-bold text-slate-900 dark:text-white">
+              Entrar com CGM Escolar
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 text-center leading-relaxed">
-              Insira seu email e CPF cadastrados para receber um código de verificação seguro.
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xs leading-relaxed">
+              Acesso exclusivo para estudantes da rede estadual do Paraná
             </p>
           </div>
 
           {activeError && (
-            <motion.div
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mb-4 p-3.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 text-xs font-medium flex items-start justify-between gap-2.5"
-            >
-              <div className="flex items-start gap-2">
-                <span className="shrink-0 w-4 h-4 rounded-full bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300 flex items-center justify-center font-bold text-[10px] mt-0.5">!</span>
-                <p className="leading-snug text-slate-800 dark:text-slate-200">{activeError}</p>
-              </div>
-              <button
-                type="button"
-                onClick={handleClearError}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold text-sm shrink-0 cursor-pointer"
-              >
-                ✕
-              </button>
-            </motion.div>
+            <div className="mb-4 p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 text-xs font-medium flex items-start gap-2">
+              <span className="shrink-0 w-4 h-4 rounded-full bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300 flex items-center justify-center font-bold text-[10px] mt-0.5">!</span>
+              <p className="leading-snug">{activeError}</p>
+            </div>
           )}
 
-          <form onSubmit={handleRecoverySubmit} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">Email Escolar</label>
-              <div className="relative">
-                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
-                <input
-                  type="email"
-                  required
-                  value={recoveryEmail}
-                  onChange={(e) => setRecoveryEmail(e.target.value)}
-                  placeholder="exemplo@escola.pr.gov.br"
-                  className="w-full h-11 pl-10 pr-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">CPF Cadastrado</label>
+          <form onSubmit={handleCgmSubmit} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Número do CGM
+              </label>
               <div className="relative">
                 <input
                   type="text"
                   required
-                  value={recoveryCpf}
-                  onChange={(e) => setRecoveryCpf(e.target.value)}
-                  placeholder="000.000.000-00"
-                  className="w-full h-11 px-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs"
+                  value={cgm}
+                  onChange={(e) => setCgm(e.target.value.replace(/\D/g, ""))}
+                  placeholder="Ex: 12345678"
+                  className="w-full h-11 px-3.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Senha de Acesso
+              </label>
+              <div className="relative">
+                <input
+                  type="password"
+                  required
+                  value={cgmPassword}
+                  onChange={(e) => setCgmPassword(e.target.value)}
+                  placeholder="Senha cadastrada"
+                  className="w-full h-11 px-3.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-xs"
                 />
               </div>
             </div>
 
             <button
               type="submit"
-              className="w-full h-11 mt-2 bg-brand-accent text-white font-semibold rounded-xl flex items-center justify-center gap-2 hover:opacity-90 active:scale-98 transition-all shadow-md cursor-pointer text-xs"
+              disabled={isLoading}
+              className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl flex items-center justify-center gap-2 active:scale-98 transition-all shadow-sm cursor-pointer text-xs disabled:opacity-50 mt-2"
             >
-              Enviar Código de Recuperação
+              <LogIn size={16} />
+              {isLoading ? "Validando CGM..." : "Entrar com CGM"}
             </button>
 
             <button
               type="button"
-              onClick={() => setActiveSubView("options")}
+              onClick={() => {
+                setActiveSubView("options");
+                handleClearError();
+              }}
               className="w-full h-11 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold rounded-xl flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-98 transition-all cursor-pointer text-xs"
             >
-              Voltar ao Login
+              Voltar para login tradicional
             </button>
           </form>
         </motion.div>
@@ -200,90 +216,82 @@ export default function Login({
     );
   }
 
-  if (activeSubView === "aluno_cgm") {
+  if (activeSubView === "forgot") {
     return (
       <div className="min-h-full w-full flex items-center justify-center p-4 md:p-8 bg-slate-50 dark:bg-slate-950 overflow-y-auto">
         <motion.div
-          initial={{ opacity: 0, scale: 0.97 }}
+          initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.97 }}
-          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl max-w-md w-full text-slate-800 dark:text-slate-100 flex flex-col justify-center my-auto"
+          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl max-w-md w-full text-slate-800 dark:text-slate-100 my-auto"
         >
-          <div className="flex flex-col items-center mb-6">
-            <div className="w-16 h-16 rounded-full overflow-hidden border border-brand-primary/20 shadow-md mb-3 bg-white p-1 flex items-center justify-center">
-              <img
-                src={logoImg}
-                alt="Logo Helena Wysocki"
-                className="w-full h-full object-cover rounded-full"
-                referrerPolicy="no-referrer"
-              />
+          <div className="flex items-center justify-between mb-4">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveSubView("options");
+                handleClearError();
+              }}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-brand-accent transition-colors p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+            >
+              <ArrowLeft size={16} />
+              <span>Voltar</span>
+            </button>
+          </div>
+
+          <div className="flex flex-col items-center mb-6 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-brand-primary/10 text-brand-accent dark:text-brand-primary flex items-center justify-center mb-3">
+              <Mail size={26} />
             </div>
-            <h2 className="text-xl font-display font-semibold text-center leading-tight">
-              Área do Aluno • CGM
+            <h2 className="text-xl font-display font-bold text-slate-900 dark:text-white">
+              Recuperar Acesso
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 text-center leading-relaxed">
-              Informe sua matrícula CGM e senha cadastrada na secretaria escolar.
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xs leading-relaxed">
+              Informe seu e-mail cadastrado ou CPF para receber o código de verificação
             </p>
           </div>
 
           {activeError && (
-            <motion.div
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mb-4 p-3.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 text-xs font-medium flex items-start justify-between gap-2.5"
-            >
-              <div className="flex items-start gap-2">
-                <span className="shrink-0 w-4 h-4 rounded-full bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300 flex items-center justify-center font-bold text-[10px] mt-0.5">!</span>
-                <p className="leading-snug text-slate-800 dark:text-slate-200">{activeError}</p>
-              </div>
-              <button
-                type="button"
-                onClick={handleClearError}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold text-sm shrink-0 cursor-pointer"
-              >
-                ✕
-              </button>
-            </motion.div>
+            <div className="mb-4 p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 text-xs font-medium flex items-start gap-2">
+              <span className="shrink-0 w-4 h-4 rounded-full bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300 flex items-center justify-center font-bold text-[10px] mt-0.5">!</span>
+              <p className="leading-snug">{activeError}</p>
+            </div>
           )}
 
-          <form onSubmit={handleCgmSubmit} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">MATRÍCULA / CGM</label>
+          <form onSubmit={handleForgotSubmit} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                E-mail Cadastrado
+              </label>
               <input
-                type="text"
+                type="email"
                 required
-                value={cgm}
-                onChange={(e) => {
-                  setCgm(e.target.value.replace(/\D/g, ""));
-                  setLocalError("");
-                }}
-                maxLength={10}
-                placeholder="Exemplo: 4893021"
-                className="w-full h-11 px-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs font-mono tracking-wider"
+                value={recoveryEmail}
+                onChange={(e) => setRecoveryEmail(e.target.value)}
+                placeholder="seu.email@exemplo.com"
+                className="w-full h-11 px-3.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs"
               />
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">Senha do Aluno</label>
-              <div className="relative">
-                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
-                <input
-                  type="password"
-                  required
-                  value={cgmPassword}
-                  onChange={(e) => setCgmPassword(e.target.value)}
-                  placeholder="Digite sua senha de acesso"
-                  className="w-full h-11 pl-10 pr-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs"
-                />
-              </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                CPF (Opcional)
+              </label>
+              <input
+                type="text"
+                value={recoveryCpf}
+                onChange={(e) => setRecoveryCpf(e.target.value)}
+                placeholder="000.000.000-00"
+                className="w-full h-11 px-3.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs"
+              />
             </div>
 
             <button
               type="submit"
-              className="w-full h-11 mt-2 bg-brand-primary text-white font-semibold rounded-xl flex items-center justify-center gap-2 hover:opacity-95 active:scale-98 transition-all shadow-md cursor-pointer text-xs"
+              disabled={isLoading}
+              className="w-full h-11 bg-brand-primary text-white font-semibold rounded-xl flex items-center justify-center gap-2 hover:opacity-95 active:scale-98 transition-all shadow-sm cursor-pointer text-xs disabled:opacity-50 mt-2"
             >
-              <LogIn size={15} />
-              Conectar na Área do Aluno
+              <Mail size={16} />
+              Enviar Código de Recuperação
             </button>
 
             <button
@@ -371,19 +379,16 @@ export default function Login({
           )}
 
           <form onSubmit={handleStandardSubmit} className="flex flex-col gap-3.5">
-            {/* Email input */}
-            <div className="flex flex-col gap-1">
-              <label htmlFor="email" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+            {/* Email Input */}
+            <div className="flex flex-col gap-1 relative">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                 Email ou Registro
               </label>
 
               <div className="relative">
                 <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
                 <input
-                  id="email"
-                  name="email"
                   type="email"
-                  autoComplete="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -393,18 +398,13 @@ export default function Login({
               </div>
             </div>
 
-            {/* Password input */}
+            {/* Senha Input */}
             <div className="flex flex-col gap-1">
-              <label htmlFor="password" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Senha
-              </label>
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Senha</label>
               <div className="relative">
                 <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
                 <input
-                  id="password"
-                  name="password"
                   type="password"
-                  autoComplete="current-password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
