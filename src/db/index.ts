@@ -61,45 +61,92 @@ export function markDbOnline() {
   }
 }
 
-// Function to create a new connection pool.
+// Function to create a new connection pool with persistent keep-alive
 export const createPool = () => {
-  const supabaseUrl = process.env.SUPABASE_DB_URL;
-  const dbUrl = process.env.DATABASE_URL;
+  const supabaseUrl = process.env.SUPABASE_DB_URL || process.env.SUPABASE_DATABASE_URL || process.env.POSTGRES_URL;
+  const dbUrl = process.env.DATABASE_URL || process.env.DIRECT_URL;
   
   const hasValidSupabaseUrl = !!(supabaseUrl && (supabaseUrl.startsWith('postgres://') || supabaseUrl.startsWith('postgresql://')));
   const hasValidDbUrl = !!(dbUrl && (dbUrl.startsWith('postgres://') || dbUrl.startsWith('postgresql://')));
 
+  const baseConfig = {
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10000,
+  };
+
   if (hasValidSupabaseUrl) {
     return new Pool({
+      ...baseConfig,
       connectionString: supabaseUrl,
-      connectionTimeoutMillis: 15000, // 15s timeout
-      ssl: { rejectUnauthorized: false } // Required for external secure SSL connection pools like Supabase
+      ssl: { rejectUnauthorized: false } // Required for Supabase SSL connections
     });
   }
   if (hasValidDbUrl) {
     return new Pool({
+      ...baseConfig,
       connectionString: dbUrl,
-      connectionTimeoutMillis: 15000, // 15s timeout
-      ssl: { rejectUnauthorized: false } // Required for external secure SSL connection pools like Supabase
+      ssl: { rejectUnauthorized: false } // Required for Supabase SSL connections
     });
   }
   return new Pool({
-    host: process.env.SQL_HOST,
-    user: process.env.SQL_USER,
+    ...baseConfig,
+    host: process.env.SQL_HOST || '127.0.0.1',
+    user: process.env.SQL_USER || 'postgres',
     password: process.env.SQL_PASSWORD,
-    database: process.env.SQL_DB_NAME,
-    connectionTimeoutMillis: 15000, // 15s timeout
+    database: process.env.SQL_DB_NAME || 'postgres',
   });
 };
 
 // Create a pool instance.
-const pool = createPool();
+export const pool = createPool();
 
 // Prevent unhandled pool-level errors from crashing the application
 pool.on('error', (err) => {
-  console.error('Unexpected error on idle SQL pool client:', err);
+  console.error('[Database Pool] Unexpected error on idle SQL client:', err.message || err);
   markDbOffline();
 });
+
+// Periodic background heartbeat to ensure constant Supabase/PostgreSQL connectivity
+let heartbeatInterval: NodeJS.Timeout | null = null;
+let lastHeartbeatLatencyMs = 0;
+let lastSuccessfulHeartbeat = 0;
+
+export function startHeartbeatMonitor() {
+  if (heartbeatInterval) return;
+  
+  heartbeatInterval = setInterval(async () => {
+    if (!hasValidDbConfig()) return;
+    const start = Date.now();
+    try {
+      await pool.query('SELECT 1 as ping;');
+      lastHeartbeatLatencyMs = Date.now() - start;
+      lastSuccessfulHeartbeat = Date.now();
+      markDbOnline();
+    } catch (err: any) {
+      console.warn('[Database Heartbeat] Ping failed, attempting auto-recovery:', err.message || err);
+      markDbOffline();
+    }
+  }, 25000); // Ping every 25 seconds to prevent idle disconnects
+}
+
+export function getDbHealthStats() {
+  return {
+    isOffline: isDbOffline,
+    consecutiveFailures,
+    lastLatencyMs: lastHeartbeatLatencyMs,
+    lastSuccessfulHeartbeat: lastSuccessfulHeartbeat ? new Date(lastSuccessfulHeartbeat).toISOString() : null,
+    totalCount: pool.totalCount,
+    idleCount: pool.idleCount,
+    waitingCount: pool.waitingCount,
+    hasValidConfig: hasValidDbConfig()
+  };
+}
+
+// Start background heartbeat immediately
+startHeartbeatMonitor();
 
 // Initialize Drizzle with the pool and schema.
 export const db = drizzle(pool, { schema });

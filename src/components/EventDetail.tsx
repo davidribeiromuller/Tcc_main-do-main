@@ -181,7 +181,6 @@ export default function EventDetail({
     setEditWebsite(event.website || "");
   }, [event]);
 
-  const [mapType, setMapType] = useState<"roadmap" | "satellite">("roadmap");
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(() => {
     if (propUserCoords) return propUserCoords;
@@ -211,44 +210,75 @@ export default function EventDetail({
     }
   };
 
-  const handleAuthorizeLocation = () => {
+  const handleAuthorizeLocation = (fallbackPreset?: { lat: number; lng: number }) => {
+    if (fallbackPreset) {
+      setUserCoords(fallbackPreset);
+      try {
+        localStorage.setItem("user_geolocation_coords", JSON.stringify(fallbackPreset));
+      } catch {}
+      if (onUserCoordsChange) {
+        onUserCoordsChange(fallbackPreset);
+      }
+      setShowLocationPermissionModal(false);
+      if (mapInstanceRef.current) {
+        const bounds = L.latLngBounds([
+          [fallbackPreset.lat, fallbackPreset.lng],
+          [eventLat, eventLng],
+        ]);
+        mapInstanceRef.current.fitBounds(bounds, { padding: [40, 40] });
+      }
+      return;
+    }
+
     setIsLocating(true);
     if (!("geolocation" in navigator)) {
-      alert("Seu dispositivo/navegador não suporta geolocalização.");
+      const defaultCoords = { lat: -25.5920, lng: -49.4080 };
+      setUserCoords(defaultCoords);
+      if (onUserCoordsChange) onUserCoordsChange(defaultCoords);
       setIsLocating(false);
       setShowLocationPermissionModal(false);
       return;
     }
 
+    const applyCoords = (coords: { lat: number; lng: number }) => {
+      setUserCoords(coords);
+      try {
+        localStorage.setItem("user_geolocation_coords", JSON.stringify(coords));
+      } catch {}
+      if (onUserCoordsChange) {
+        onUserCoordsChange(coords);
+      }
+      setIsLocating(false);
+      setShowLocationPermissionModal(false);
+
+      if (mapInstanceRef.current) {
+        const bounds = L.latLngBounds([
+          [coords.lat, coords.lng],
+          [eventLat, eventLng],
+        ]);
+        mapInstanceRef.current.fitBounds(bounds, { padding: [40, 40] });
+      }
+    };
+
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        setUserCoords(coords);
-        try {
-          localStorage.setItem("user_geolocation_coords", JSON.stringify(coords));
-        } catch {}
-        if (onUserCoordsChange) {
-          onUserCoordsChange(coords);
-        }
-        setIsLocating(false);
-        setShowLocationPermissionModal(false);
-
-        // Update map view to show route bounds
-        if (mapInstanceRef.current) {
-          const bounds = L.latLngBounds([
-            [coords.lat, coords.lng],
-            [eventLat, eventLng],
-          ]);
-          mapInstanceRef.current.fitBounds(bounds, { padding: [40, 40] });
-        }
+        applyCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
       },
       (err) => {
-        console.warn("Location permission denied/error:", err);
-        setIsLocating(false);
-        setShowLocationPermissionModal(false);
-        alert("Permissão de localização não foi concedida. Você pode visualizar o endereço no mapa normalmente.");
+        console.warn("High accuracy geolocation failed, trying low accuracy fallback:", err.message);
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            applyCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+          },
+          () => {
+            // Default center of Araucária so route trajectory always computes
+            const araucariaCenter = { lat: -25.5925, lng: -49.4085 };
+            applyCoords(araucariaCenter);
+          },
+          { enableHighAccuracy: false, timeout: 4000, maximumAge: 300000 }
+        );
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+      { enableHighAccuracy: true, timeout: 6000, maximumAge: 60000 }
     );
   };
 
@@ -313,31 +343,6 @@ export default function EventDetail({
       console.error("Leaflet map init error in EventDetail:", err);
     }
   }, [event.id, eventLat, eventLng, event.isPaid, event.title, event.location]);
-
-  // Update map layer type (Roadmap vs Satellite)
-  useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
-
-    if (tileLayerRef.current) {
-      map.removeLayer(tileLayerRef.current);
-    }
-
-    let tileUrl = "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
-    let subdomains = "abcd";
-
-    if (mapType === "satellite") {
-      tileUrl = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
-      subdomains = "";
-    }
-
-    const newTile = L.tileLayer(tileUrl, {
-      maxZoom: 19,
-      subdomains: subdomains || undefined,
-    }).addTo(map);
-
-    tileLayerRef.current = newTile;
-  }, [mapType]);
 
   // Handle user live marker and route polyline inside event map
   useEffect(() => {
@@ -504,43 +509,47 @@ export default function EventDetail({
         />
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-950/30 to-transparent" />
         
-        {/* Floating Back Button over Banner */}
-        <button
-          onClick={onNavigateBack}
-          className="absolute top-4 left-4 px-3.5 py-2 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center gap-1.5 backdrop-blur-md active:scale-95 transition-all cursor-pointer shadow-lg text-xs font-semibold"
-          id="btn-event-back-floating"
-        >
-          <ArrowLeft size={15} />
-          <span>Voltar</span>
-        </button>
+        {/* Floating Back Button over Banner - Hidden when editing */}
+        {!showEditModal && (
+          <button
+            onClick={onNavigateBack}
+            className="absolute top-4 left-4 px-3.5 py-2 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center gap-1.5 backdrop-blur-md active:scale-95 transition-all cursor-pointer shadow-lg text-xs font-semibold"
+            id="btn-event-back-floating"
+          >
+            <ArrowLeft size={15} />
+            <span>Voltar</span>
+          </button>
+        )}
 
-        <div className="absolute top-4 right-4 flex items-center gap-2">
-          {canEdit && onUpdateEvent && (
-            <button
-              onClick={() => setShowEditModal(true)}
-              className="p-2 px-3 rounded-full bg-emerald-600/90 hover:bg-emerald-700 text-white flex items-center gap-1.5 shadow-lg backdrop-blur-md active:scale-95 transition-all cursor-pointer text-xs font-semibold"
-              title="Editar evento"
-            >
-              <Pencil size={14} />
-              <span className="hidden sm:inline">Editar</span>
-            </button>
-          )}
+        {!showEditModal && (
+          <div className="absolute top-4 right-4 flex items-center gap-2">
+            {canEdit && onUpdateEvent && (
+              <button
+                onClick={() => setShowEditModal(true)}
+                className="p-2 px-3 rounded-full bg-emerald-600/90 hover:bg-emerald-700 text-white flex items-center gap-1.5 shadow-lg backdrop-blur-md active:scale-95 transition-all cursor-pointer text-xs font-semibold"
+                title="Editar evento"
+              >
+                <Pencil size={14} />
+                <span className="hidden sm:inline">Editar</span>
+              </button>
+            )}
 
-          {canDelete && (
-            <button
-              onClick={() => {
-                if (confirm(`Tem certeza de que deseja deletar permanentemente o evento pedagógico "${event.title}"?`)) {
-                  onDeleteEvent(event.id);
-                }
-              }}
-              disabled={isDeleting}
-              className="p-2.5 rounded-full bg-red-600/80 text-white hover:bg-red-700 active:scale-95 transition-all shadow-lg backdrop-blur-md cursor-pointer disabled:opacity-50"
-              title="Excluir evento"
-            >
-              <Trash2 size={16} />
-            </button>
-          )}
-        </div>
+            {canDelete && (
+              <button
+                onClick={() => {
+                  if (confirm(`Tem certeza de que deseja deletar permanentemente o evento pedagógico "${event.title}"?`)) {
+                    onDeleteEvent(event.id);
+                  }
+                }}
+                disabled={isDeleting}
+                className="p-2.5 rounded-full bg-red-600/80 text-white hover:bg-red-700 active:scale-95 transition-all shadow-lg backdrop-blur-md cursor-pointer disabled:opacity-50"
+                title="Excluir evento"
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="absolute bottom-4 left-6 right-6 flex flex-col gap-1 text-white">
           <span className="text-[10px] uppercase font-mono tracking-widest font-bold text-white/80">
@@ -629,68 +638,61 @@ export default function EventDetail({
               </div>
             </div>
 
-            {/* Floating Right Map Controls */}
-            <div className="absolute top-2.5 right-2.5 z-[1000] flex flex-col gap-1.5 pointer-events-auto">
-              {/* Layer switch */}
-              <button
-                onClick={() => setMapType(mapType === "roadmap" ? "satellite" : "roadmap")}
-                className="w-8 h-8 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 rounded-lg shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-50 active:scale-95 transition-all cursor-pointer"
-                title="Alternar Satélite / Mapa"
-              >
-                <Layers size={15} />
-              </button>
+            {/* Floating Right Map Controls - Hidden when editing */}
+            {!showEditModal && (
+              <div className="absolute top-2.5 right-2.5 z-[1000] flex flex-col gap-1.5 pointer-events-auto">
+                {/* Zoom Controls */}
+                <button
+                  onClick={() => mapInstanceRef.current?.zoomIn()}
+                  className="w-8 h-8 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 rounded-lg shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-50 active:scale-95 transition-all cursor-pointer"
+                  title="Aumentar Zoom"
+                >
+                  <Plus size={15} />
+                </button>
 
-              {/* Zoom Controls */}
-              <button
-                onClick={() => mapInstanceRef.current?.zoomIn()}
-                className="w-8 h-8 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 rounded-lg shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-50 active:scale-95 transition-all cursor-pointer"
-                title="Aumentar Zoom"
-              >
-                <Plus size={15} />
-              </button>
+                <button
+                  onClick={() => mapInstanceRef.current?.zoomOut()}
+                  className="w-8 h-8 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 rounded-lg shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-50 active:scale-95 transition-all cursor-pointer"
+                  title="Diminuir Zoom"
+                >
+                  <Minus size={15} />
+                </button>
 
-              <button
-                onClick={() => mapInstanceRef.current?.zoomOut()}
-                className="w-8 h-8 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 rounded-lg shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-50 active:scale-95 transition-all cursor-pointer"
-                title="Diminuir Zoom"
-              >
-                <Minus size={15} />
-              </button>
-
-              {/* GPS Request Permission Button */}
-              <button
-                onClick={() => {
-                  if (userCoords) {
-                    if (mapInstanceRef.current) {
-                      const bounds = L.latLngBounds([
-                        [userCoords.lat, userCoords.lng],
-                        [eventLat, eventLng],
-                      ]);
-                      mapInstanceRef.current.fitBounds(bounds, { padding: [30, 30] });
+                {/* GPS Request Permission Button */}
+                <button
+                  onClick={() => {
+                    if (userCoords) {
+                      if (mapInstanceRef.current) {
+                        const bounds = L.latLngBounds([
+                          [userCoords.lat, userCoords.lng],
+                          [eventLat, eventLng],
+                        ]);
+                        mapInstanceRef.current.fitBounds(bounds, { padding: [30, 30] });
+                      }
+                    } else {
+                      setShowLocationPermissionModal(true);
                     }
-                  } else {
-                    setShowLocationPermissionModal(true);
-                  }
-                }}
-                className={`w-8 h-8 rounded-lg shadow-md border flex items-center justify-center cursor-pointer transition-all active:scale-95 ${
-                  userCoords
-                    ? "bg-[#1A73E8] text-white border-[#1A73E8]"
-                    : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50"
-                }`}
-                title="Minha Posição (GPS)"
-              >
-                <Navigation size={15} />
-              </button>
+                  }}
+                  className={`w-8 h-8 rounded-lg shadow-md border flex items-center justify-center cursor-pointer transition-all active:scale-95 ${
+                    userCoords
+                      ? "bg-[#1A73E8] text-white border-[#1A73E8]"
+                      : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50"
+                  }`}
+                  title="Minha Posição (GPS)"
+                >
+                  <Navigation size={15} />
+                </button>
 
-              {/* Expand / Collapse Map size */}
-              <button
-                onClick={() => setIsMapExpanded(!isMapExpanded)}
-                className="w-8 h-8 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 rounded-lg shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-50 active:scale-95 transition-all cursor-pointer"
-                title={isMapExpanded ? "Reduzir Mapa" : "Expandir Mapa"}
-              >
-                {isMapExpanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-              </button>
-            </div>
+                {/* Expand / Collapse Map size */}
+                <button
+                  onClick={() => setIsMapExpanded(!isMapExpanded)}
+                  className="w-8 h-8 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 rounded-lg shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-50 active:scale-95 transition-all cursor-pointer"
+                  title={isMapExpanded ? "Reduzir Mapa" : "Expandir Mapa"}
+                >
+                  {isMapExpanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                </button>
+              </div>
+            )}
 
             {/* DOM Map Container */}
             <div
@@ -796,17 +798,25 @@ export default function EventDetail({
 
               <div className="flex flex-col gap-2">
                 <button
-                  onClick={handleAuthorizeLocation}
+                  onClick={() => handleAuthorizeLocation()}
                   disabled={isLocating}
                   className="w-full h-10 bg-[#1A73E8] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 shadow-md hover:bg-[#1557b0] cursor-pointer"
                 >
                   <ShieldCheck size={16} />
-                  <span>{isLocating ? "Obtendo Localização..." : "Autorizar Localização"}</span>
+                  <span>{isLocating ? "Obtendo Localização..." : "Autorizar Localização (GPS)"}</span>
+                </button>
+
+                <button
+                  onClick={() => handleAuthorizeLocation({ lat: -25.5925, lng: -49.4085 })}
+                  className="w-full h-9 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <MapPin size={14} className="text-brand-accent" />
+                  <span>Usar Centro de Araucária (Padrão)</span>
                 </button>
 
                 <button
                   onClick={() => setShowLocationPermissionModal(false)}
-                  className="w-full h-9 text-xs text-slate-500 hover:text-slate-700 font-semibold cursor-pointer"
+                  className="w-full h-8 text-xs text-slate-500 hover:text-slate-700 font-semibold cursor-pointer"
                 >
                   Cancelar
                 </button>
@@ -817,7 +827,7 @@ export default function EventDetail({
 
         {/* Modal de Edição de Evento por Administradores */}
         {showEditModal && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[9999] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
             <motion.div
               initial={{ scale: 0.9, opacity: 0, y: 30 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}

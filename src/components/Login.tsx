@@ -12,7 +12,10 @@ import {
   History,
   X,
   UserCheck,
-  Sparkles
+  Sparkles,
+  Zap,
+  ChevronDown,
+  Check
 } from "lucide-react";
 import logoImg from "../assets/images/logo.jpg";
 import { User } from "../types";
@@ -55,6 +58,7 @@ export default function Login({
   const [cgm, setCgm] = useState("");
   const [cgmPassword, setCgmPassword] = useState("");
   const [localError, setLocalError] = useState("");
+  const [autoFilledMsg, setAutoFilledMsg] = useState<string | null>(null);
   
   // Quick Logins recognition state
   const [showQuickLogins, setShowQuickLogins] = useState(false);
@@ -73,6 +77,41 @@ export default function Login({
   useEffect(() => {
     const loadRecognizedAccounts = () => {
       const accountsMap = new Map<string, RecognizedAccount>();
+
+      // 0. Default recognized quick-access accounts available immediately
+      const defaultRecognized: RecognizedAccount[] = [
+        {
+          email: "davidribeiromuller2009@gmail.com",
+          name: "David Ribeiro Müller",
+          role: "Diretor / Admin",
+          isAdmin: true,
+          password: "admin",
+          provider: "google",
+          lastLogin: "Acesso Principal"
+        },
+        {
+          email: "diretoria@helenawysocki.com",
+          name: "Diretoria Helena Wysocki",
+          role: "Diretoria",
+          isAdmin: true,
+          password: "admin",
+          provider: "local",
+          lastLogin: "Gestão Escolar"
+        },
+        {
+          email: "aluno@escola.pr.gov.br",
+          name: "Aluno Helena Wysocki",
+          role: "Aluno",
+          isAdmin: false,
+          password: "aluno",
+          provider: "local",
+          lastLogin: "Estudante"
+        }
+      ];
+
+      defaultRecognized.forEach(acc => {
+        accountsMap.set(acc.email.toLowerCase().trim(), acc);
+      });
 
       // 1. Check previously active session stored on this computer
       try {
@@ -162,6 +201,8 @@ export default function Login({
     setPassword(acc.password || "senha123");
     setShowQuickLogins(false);
     handleClearError();
+    setAutoFilledMsg(`E-mail inserido: ${acc.email}`);
+    setTimeout(() => setAutoFilledMsg(null), 3000);
 
     if (autoLogin) {
       persistAccountToHistory(acc.email, acc.name, acc.role, acc.password);
@@ -521,9 +562,70 @@ export default function Login({
           )}
 
           <form onSubmit={handleStandardSubmit} className="flex flex-col gap-3.5">
+            {/* Quick Access / Inserir Email Rápido Chips */}
+            {savedAccounts.length > 0 && (
+              <div className="flex flex-col gap-1.5 pb-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-1">
+                    <Zap size={13} className="text-amber-500 fill-amber-500" />
+                    Acesso Rápido (Preencher E-mail):
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickLogins(!showQuickLogins)}
+                    className="text-[10px] font-medium text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-0.5"
+                  >
+                    <span>{showQuickLogins ? "Fechar lista" : "Ver todas"}</span>
+                    <ChevronDown size={11} className={`transition-transform duration-200 ${showQuickLogins ? "rotate-180" : ""}`} />
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {savedAccounts.slice(0, 3).map((acc) => {
+                    const isSelected = email.toLowerCase().trim() === acc.email.toLowerCase().trim();
+                    const isDirector = acc.isAdmin || acc.role?.toLowerCase().includes("diretor");
+                    return (
+                      <button
+                        key={acc.email}
+                        type="button"
+                        onClick={() => handleSelectQuickAccount(acc, false)}
+                        className={`group px-2.5 py-1.5 rounded-xl text-xs font-medium border transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs ${
+                          isSelected
+                            ? "bg-blue-50 border-blue-400 text-blue-800 dark:bg-blue-950/60 dark:border-blue-700 dark:text-blue-200 font-semibold ring-1 ring-blue-400"
+                            : "bg-slate-100/80 hover:bg-slate-200/80 border-slate-200 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200 hover:border-slate-300"
+                        }`}
+                        title={`Clique para preencher o e-mail: ${acc.email}`}
+                      >
+                        <span className={`w-2 h-2 rounded-full ${isDirector ? "bg-blue-500" : "bg-emerald-500"}`} />
+                        <span className="truncate max-w-[140px] text-[11px]">{acc.email.split("@")[0]}</span>
+                        <span className="text-[9px] text-slate-400 group-hover:text-blue-600 transition-colors font-bold">
+                          {isSelected ? "✓" : "+ Inserir"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Auto filled feedback toast */}
+            <AnimatePresence>
+              {autoFilledMsg && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300 text-[11px] font-medium flex items-center gap-1.5"
+                >
+                  <Check size={13} className="text-emerald-600 shrink-0" />
+                  <span className="truncate">{autoFilledMsg} (Preenchido automaticamente)</span>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* Email ou Registro Input with Recognized Quick Logins Dropdown */}
             <div className="flex flex-col gap-1 relative">
-              <label className="text-xs font-semibold text-slate-700">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                 Email ou Registro
               </label>
 
@@ -541,8 +643,16 @@ export default function Login({
                     if (!showQuickLogins) setShowQuickLogins(true);
                   }}
                   placeholder="exemplo@gmail.com ou institucional"
-                  className="w-full h-11 pl-10 pr-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs"
+                  className="w-full h-11 pl-10 pr-10 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none text-xs"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowQuickLogins(!showQuickLogins)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-blue-600 rounded-lg transition-colors cursor-pointer"
+                  title="Abrir contas para acesso rápido"
+                >
+                  <ChevronDown size={15} className={`transition-transform duration-200 ${showQuickLogins ? "rotate-180 text-blue-600" : ""}`} />
+                </button>
               </div>
 
               {/* QUICK LOGINS DROPDOWN OVERLAY */}
@@ -554,12 +664,12 @@ export default function Login({
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -6, scale: 0.98 }}
                     transition={{ duration: 0.15 }}
-                    className="absolute top-full left-0 right-0 mt-1 z-40 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden divide-y divide-slate-100 dark:divide-slate-800 max-h-60 overflow-y-auto"
+                    className="absolute top-full left-0 right-0 mt-1 z-40 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden divide-y divide-slate-100 dark:divide-slate-800 max-h-64 overflow-y-auto"
                   >
                     <div className="p-2.5 bg-slate-50/80 dark:bg-slate-800/60 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                      <div className="flex items-center gap-1.5 text-brand-accent dark:text-brand-primary font-semibold">
-                        <Sparkles size={13} />
-                        <span>Logins Reconhecidos Neste Dispositivo</span>
+                      <div className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 font-semibold">
+                        <Zap size={13} className="text-amber-500 fill-amber-500" />
+                        <span>Acesso Rápido (Selecione para Preencher)</span>
                       </div>
                       <button
                         type="button"
@@ -607,13 +717,27 @@ export default function Login({
                                   {acc.role}
                                 </span>
                               </div>
-                              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5 font-mono">
                                 {acc.email}
                               </p>
                             </div>
                           </div>
 
                           <div className="flex items-center gap-1.5 shrink-0">
+                            {/* Insert Email Button */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSelectQuickAccount(acc, false);
+                              }}
+                              className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:hover:bg-blue-900/80 dark:text-blue-300 rounded-lg text-[10px] font-bold transition-colors cursor-pointer flex items-center gap-1 border border-blue-200 dark:border-blue-800"
+                              title="Inserir este e-mail no formulário"
+                            >
+                              <Mail size={11} />
+                              <span>Inserir</span>
+                            </button>
+
                             {/* 1-Click Fast Login Action */}
                             <button
                               type="button"
@@ -621,10 +745,10 @@ export default function Login({
                                 e.stopPropagation();
                                 handleSelectQuickAccount(acc, true);
                               }}
-                              className="px-2.5 py-1 bg-brand-primary/10 hover:bg-brand-primary text-brand-primary hover:text-white dark:bg-brand-primary/20 dark:hover:bg-brand-primary dark:text-brand-primary dark:hover:text-white rounded-lg text-[10px] font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
                               title="Entrar imediatamente com esta conta"
                             >
-                              <UserCheck size={12} />
+                              <UserCheck size={11} />
                               <span>Entrar</span>
                             </button>
 

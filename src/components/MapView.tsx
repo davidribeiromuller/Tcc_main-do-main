@@ -162,10 +162,10 @@ export default function MapView({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<"all" | "free" | "school" | "external">("all");
   const [activeEvent, setActiveEvent] = useState<Event | null>(null);
-  const [mapType, setMapType] = useState<"roadmap" | "satellite">("roadmap");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
+  const [locationStatusMessage, setLocationStatusMessage] = useState<string | null>(null);
   const [localUserLocation, setLocalUserLocation] = useState<{ lat: number; lng: number } | null>(() => {
     if (userCoords) return userCoords;
     try {
@@ -213,11 +213,11 @@ export default function MapView({
       const map = L.map(mapContainerRef.current, {
         center: SCHOOL_COORDINATES,
         zoom: 15,
-        zoomControl: false, // We'll render custom Google Maps zoom controls
+        zoomControl: false,
         attributionControl: false,
       });
 
-      // Google Maps Clean Tiles (CartoDB Positron / OpenStreetMap)
+      // Google Maps Clean Tiles (CartoDB Positron / OpenStreetMap Voyager)
       const baseTile = L.tileLayer(
         "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
         {
@@ -249,28 +249,6 @@ export default function MapView({
       }
     };
   }, []);
-
-  // Update Map Layer type (Roadmap vs Satellite)
-  useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
-
-    if ((map as any)._customBaseTile) {
-      map.removeLayer((map as any)._customBaseTile);
-    }
-
-    let tileUrl = "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
-    if (mapType === "satellite") {
-      tileUrl = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
-    }
-
-    const newTile = L.tileLayer(tileUrl, {
-      maxZoom: 19,
-      subdomains: "abcd",
-    }).addTo(map);
-
-    (map as any)._customBaseTile = newTile;
-  }, [mapType]);
 
   // Update Event Markers
   useEffect(() => {
@@ -399,41 +377,83 @@ export default function MapView({
     }
   }, [initialSelectedEventId, events]);
 
-  // Handle Geolocation Authorization Request
-  const handleRequestLocationAuthorization = () => {
+  // Handle Geolocation Authorization Request with multi-tier fallback
+  const handleRequestLocationAuthorization = (fallbackPreset?: { lat: number; lng: number }) => {
+    if (fallbackPreset) {
+      setLocalUserLocation(fallbackPreset);
+      try {
+        localStorage.setItem("user_geolocation_coords", JSON.stringify(fallbackPreset));
+      } catch {}
+      if (onUserCoordsChange) {
+        onUserCoordsChange(fallbackPreset);
+      }
+      setShowLocationModal(false);
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.flyTo([fallbackPreset.lat, fallbackPreset.lng], 16, { duration: 1 });
+      }
+      return;
+    }
+
     setIsLocating(true);
+    setLocationStatusMessage("Solicitando permissão de GPS...");
+
     if (!("geolocation" in navigator)) {
-      alert("Seu navegador não suporta geolocalização.");
+      // Fallback for unsupported browsers
+      const defaultCoords = { lat: -25.5920, lng: -49.4080 }; // Centro de Araucária
+      setLocalUserLocation(defaultCoords);
+      if (onUserCoordsChange) onUserCoordsChange(defaultCoords);
       setIsLocating(false);
       setShowLocationModal(false);
       return;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        setLocalUserLocation(coords);
+    // Try High Accuracy first, if timeout/error fallback gracefully
+    const onSuccess = (pos: GeolocationPosition) => {
+      const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      setLocalUserLocation(coords);
+      try {
         localStorage.setItem("user_geolocation_coords", JSON.stringify(coords));
-        if (onUserCoordsChange) {
-          onUserCoordsChange(coords);
-        }
+      } catch {}
+      if (onUserCoordsChange) {
+        onUserCoordsChange(coords);
+      }
+      setIsLocating(false);
+      setShowLocationModal(false);
 
-        setIsLocating(false);
-        setShowLocationModal(false);
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.flyTo([coords.lat, coords.lng], 16, { duration: 1 });
+      }
+    };
 
-        if (mapInstanceRef.current) {
-          mapInstanceRef.current.flyTo([coords.lat, coords.lng], 16, { duration: 1 });
-        }
-      },
-      (err) => {
-        console.warn("Geolocation permission error:", err);
-        setIsLocating(false);
-        setShowLocationModal(false);
-        alert(
-          "Permissão de localização não concedida. O mapa continuará funcionando com os endereços de Araucária."
-        );
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    const onError = (err: GeolocationPositionError) => {
+      console.warn("High accuracy geolocation failed, trying standard accuracy:", err.message);
+      // Try with low accuracy
+      navigator.geolocation.getCurrentPosition(
+        onSuccess,
+        () => {
+          // If browser or iframe permissions block GPS, use Araucária default location for immediate route calculation
+          const araucariaCenter = { lat: -25.5925, lng: -49.4085 };
+          setLocalUserLocation(araucariaCenter);
+          try {
+            localStorage.setItem("user_geolocation_coords", JSON.stringify(araucariaCenter));
+          } catch {}
+          if (onUserCoordsChange) {
+            onUserCoordsChange(araucariaCenter);
+          }
+          setIsLocating(false);
+          setShowLocationModal(false);
+          if (mapInstanceRef.current) {
+            mapInstanceRef.current.flyTo([araucariaCenter.lat, araucariaCenter.lng], 16, { duration: 1 });
+          }
+        },
+        { enableHighAccuracy: false, timeout: 4000, maximumAge: 300000 }
+      );
+    };
+
+    navigator.geolocation.getCurrentPosition(
+      onSuccess,
+      onError,
+      { enableHighAccuracy: true, timeout: 6000, maximumAge: 60000 }
     );
   };
 
@@ -559,15 +579,6 @@ export default function MapView({
 
       {/* Floating Action Buttons (Right Side - Google Maps UI) */}
       <div className="absolute right-3 top-3 md:right-6 md:top-6 z-[1000] flex flex-col gap-2 pointer-events-auto">
-        {/* Layer Switcher (Roadmap / Satellite) */}
-        <button
-          onClick={() => setMapType(mapType === "roadmap" ? "satellite" : "roadmap")}
-          className="w-10 h-10 md:w-11 md:h-11 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 rounded-full shadow-[0_2px_6px_rgba(0,0,0,0.2)] border border-slate-200 dark:border-slate-800 flex items-center justify-center hover:bg-slate-50 active:scale-95 transition-all cursor-pointer"
-          title={mapType === "roadmap" ? "Mudar para visualização Satélite" : "Mudar para visualização Mapa Padrão"}
-        >
-          <Layers size={18} />
-        </button>
-
         {/* User Geolocation Center Button with Authorization Prompt */}
         <button
           onClick={() => {
@@ -827,20 +838,29 @@ export default function MapView({
                 O aplicativo gostaria de acessar sua posição geográfica para exibir sua localização em tempo real no mapa e calcular o trajeto e a distância até os eventos da escola.
               </p>
 
-              <div className="mt-6 flex flex-col gap-2">
+              <div className="mt-5 flex flex-col gap-2">
                 <button
-                  onClick={handleRequestLocationAuthorization}
+                  onClick={() => handleRequestLocationAuthorization()}
                   disabled={isLocating}
                   className="w-full h-11 bg-[#1A73E8] text-white text-xs font-semibold rounded-2xl flex items-center justify-center gap-2 hover:bg-[#1557b0] active:scale-98 transition-all cursor-pointer shadow-md"
                 >
                   <ShieldCheck size={16} />
-                  {isLocating ? "Obtendo localização..." : "Permitir e Ver Minha Posição"}
+                  {isLocating ? (locationStatusMessage || "Obtendo localização...") : "Permitir e Ver Minha Posição"}
+                </button>
+
+                <button
+                  onClick={() => handleRequestLocationAuthorization({ lat: -25.5925, lng: -49.4085 })}
+                  disabled={isLocating}
+                  className="w-full h-10 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-xs font-semibold rounded-2xl hover:bg-blue-100 active:scale-98 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <MapPin size={14} />
+                  <span>Usar Centro de Araucária (Padrão)</span>
                 </button>
 
                 <button
                   onClick={() => setShowLocationModal(false)}
                   disabled={isLocating}
-                  className="w-full h-10 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-medium rounded-2xl hover:bg-slate-200 active:scale-98 transition-all cursor-pointer"
+                  className="w-full h-9 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-medium rounded-2xl hover:bg-slate-200 active:scale-98 transition-all cursor-pointer"
                 >
                   Agora Não (Explorar Manualmente)
                 </button>
