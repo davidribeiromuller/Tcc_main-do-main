@@ -58,23 +58,25 @@
     "ativo": true,
     "isAdmin": false,
     "institution": "Escola estadual Helena Wysocki",
-    "lastActiveAt": "2026-08-26T15:00:00.000Z",
+    "lastActiveAt": "2026-09-08T01:20:42.375Z",
     "createdAt": "2026-08-26T10:39:46.949Z",
-    "updatedAt": "2026-08-26T11:13:29.635Z"
+    "updatedAt": "2026-09-08T01:20:42.375Z",
+    "lastLogin": "2026-09-08T01:20:42.191Z"
   },
   {
     "id": 10000,
     "uid": "tldTqxnmlHMAa9oYNUPHO72AlgB3",
     "email": "davidribeiromuller2009@gmail.com",
-    "nome": "David Ribeiro Müller",
+    "nome": "David Ribeiro Muller",
     "foto_perfil": "https://lh3.googleusercontent.com/a/ACg8ocLBADHr-NaZCSwyxCQNN1iBqMwvhKmnsXZxNWp8wrtPqdyAyLP1=s96-c",
     "provider": "google",
     "role": "Diretor",
     "ativo": true,
     "isAdmin": true,
     "institution": "Escola estadual Helena Wysocki",
-    "lastActiveAt": "2026-08-27T11:18:00.000Z",
+    "lastActiveAt": "2026-09-08T01:33:49.419Z",
     "createdAt": "2026-08-26T11:10:27.391Z",
-    "updatedAt": "2026-08-26T11:13:40.822Z"
+    "updatedAt": "2026-09-08T01:33:49.589Z",
+    "lastLogin": "2026-09-08T01:23:49.258Z"
   }
 ]

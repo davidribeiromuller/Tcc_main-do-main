@@ -20,6 +20,7 @@ import WelcomeScreen from "./components/WelcomeScreen.tsx";
 import { motion, AnimatePresence } from "motion/react";
 import { CheckCircle, AlertCircle, CheckCircle2, Info, X } from "lucide-react";
 import logoImg from "./assets/images/logo.jpg";
+import { resilientFetch, setupNetworkAutoRecovery, safeAppReload } from "./lib/apiResilience.ts";
 
 export default function App() {
   const [activeScreen, setActiveScreen] = useState<string>("splash");
@@ -49,7 +50,19 @@ export default function App() {
       return null;
     }
   });
-  const [events, setEvents] = useState<Event[]>([]);
+  const [events, setEvents] = useState<Event[]>(() => {
+    try {
+      const stored = localStorage.getItem("local_events");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  });
+  const [isLoadingEvents, setIsLoadingEvents] = useState<boolean>(true);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [focusedMapEventId, setFocusedMapEventId] = useState<number | null>(null);
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(() => {
@@ -96,35 +109,45 @@ export default function App() {
     }, 4500);
   };
 
-  // Load events
-  const loadEvents = async () => {
+  // Load events with automatic retry before fallback
+  const loadEvents = async (): Promise<boolean> => {
     try {
-      const res = await fetch("/api/events");
+      const res = await resilientFetch("/api/events", { retries: 2, retryDelay: 600 });
       if (res.ok) {
         const data = await res.json();
-        setEvents(data.events || []);
-        localStorage.setItem("local_events", JSON.stringify(data.events || []));
-        return;
+        const incomingEvents = data.events || [];
+        setEvents(incomingEvents);
+        localStorage.setItem("local_events", JSON.stringify(incomingEvents));
+        setIsLoadingEvents(false);
+        return true;
       }
     } catch (error) {
-      console.log("Servidor backend não atendeu /api/events, usando dados locais.");
+      console.warn("Backend não respondeu /api/events após retentativas, usando cache local seguro:", error);
     }
 
-    // Fallback for static hosting (e.g. GitHub Pages)
+    // Safe fallback from local storage
     try {
       const stored = localStorage.getItem("local_events");
       if (stored) {
-        setEvents(JSON.parse(stored));
-      } else {
-        setEvents(defaultEvents);
-        localStorage.setItem("local_events", JSON.stringify(defaultEvents));
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setEvents(parsed);
+          setIsLoadingEvents(false);
+          return true;
+        }
       }
+      setEvents(defaultEvents);
+      localStorage.setItem("local_events", JSON.stringify(defaultEvents));
+      setIsLoadingEvents(false);
+      return true;
     } catch {
       setEvents(defaultEvents);
+      setIsLoadingEvents(false);
+      return false;
     }
   };
 
-  // Load all users for admin
+  // Load all users for admin with automatic retry before fallback
   const loadAllUsers = async (customToken?: string) => {
     try {
       const token = customToken || (await getAuthToken()) || "";
@@ -132,7 +155,7 @@ export default function App() {
       if (token) {
         headers.Authorization = `Bearer ${token}`;
       }
-      const res = await fetch("/api/users", { headers });
+      const res = await resilientFetch("/api/users", { headers, retries: 2, retryDelay: 600 });
       if (res.ok) {
         const data = await res.json();
         if (data.users && Array.isArray(data.users)) {
@@ -142,10 +165,10 @@ export default function App() {
         }
       }
     } catch (error) {
-      console.log("Servidor backend não atendeu /api/users, usando dados locais.", error);
+      console.warn("Backend não respondeu /api/users após retentativas, usando cache local seguro:", error);
     }
 
-    // Fallback for static hosting
+    // Safe fallback from local storage
     try {
       const stored = localStorage.getItem("local_users_db");
       if (stored) {
@@ -320,11 +343,32 @@ export default function App() {
         // Test backend DB connection
         fetch("/api/db-status").catch(() => {});
       } catch {}
-      await loadEvents();
+      const eventsOk = await loadEvents();
+      if (!eventsOk) {
+        // Se a primeira tentativa falhar, tentar recarregar os dados automaticamente antes de alarmar o usuário
+        console.warn("[App] Primeira leitura falhou. Tentando recarregar dados automaticamente...");
+        const retryOk = await loadEvents();
+        if (!retryOk) {
+          // Se ainda falhar e não houver formulário ativo do usuário, tentar recarregar com segurança
+          const reloaded = safeAppReload("falha de carregamento de dados");
+          if (!reloaded) {
+            showToast("Não foi possível carregar alguns dados da agenda. Toque para tentar novamente.", "warning");
+          }
+        }
+      }
       await loadAllUsers();
     };
 
     syncDatabaseOnEntry();
+
+    // Auto-sync on network reconnection (conecta de novo à internet)
+    const cleanupNetwork = setupNetworkAutoRecovery(() => {
+      loadEvents();
+      if (currentUser?.isAdmin || activeScreen === "admin") {
+        loadAllUsers();
+      }
+      showToast("Conexão restabelecida. Dados da escola atualizados com sucesso.", "success");
+    });
 
     // Auto-sync on window focus (when user switches back to tab)
     const handleFocusSync = () => {
@@ -345,6 +389,7 @@ export default function App() {
 
     return () => {
       unsubscribe();
+      cleanupNetwork();
       window.removeEventListener("focus", handleFocusSync);
       clearInterval(syncInterval);
     };
@@ -495,7 +540,6 @@ export default function App() {
   // Trigger real Google Popup with account selector and auto fallback
   const handleTriggerGooglePopup = async () => {
     if (!auth || !googleAuthProvider) {
-      // Open instant Google account selector modal
       setShowGoogleAuthModal(true);
       return;
     }
@@ -507,9 +551,59 @@ export default function App() {
         prompt: 'select_account'
       });
 
-      await signInWithPopup(auth, googleAuthProvider);
-      setShowGoogleAuthModal(false);
-      showToast("Autenticado com sucesso via Google!", "success");
+      const result = await signInWithPopup(auth, googleAuthProvider);
+      if (result && result.user) {
+        const firebaseUser = result.user;
+        const token = await firebaseUser.getIdToken();
+        
+        let loginRes: Response | null = null;
+        try {
+          loginRes = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              email: firebaseUser.email || "",
+              nome: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Usuário Google",
+              foto_perfil: firebaseUser.photoURL || "",
+              role: "Aluno"
+            })
+          });
+        } catch (e) {
+          loginRes = null;
+        }
+
+        let finalUser: User | null = null;
+        if (loginRes && loginRes.ok) {
+          const data = await loginRes.json();
+          finalUser = data.user;
+        }
+
+        if (!finalUser) {
+          const isDefaultAdmin = (firebaseUser.email || "").toLowerCase().trim() === "diretoria@helenawysocki.com" || (firebaseUser.email || "").toLowerCase().trim() === "davidribeiromuller2009@gmail.com";
+          finalUser = {
+            id: Date.now(),
+            uid: firebaseUser.uid,
+            email: firebaseUser.email || "",
+            nome: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Usuário Google",
+            foto_perfil: firebaseUser.photoURL || "",
+            role: isDefaultAdmin ? "Diretor" : "Aluno",
+            ativo: true,
+            isAdmin: isDefaultAdmin,
+            provider: "google",
+            institution: "Escola estadual Helena Wysocki"
+          };
+        }
+
+        setCurrentUser(finalUser);
+        localStorage.setItem("local_user", JSON.stringify(finalUser));
+        setShowGoogleAuthModal(false);
+        setActiveScreen("feed");
+        showToast(`Bem-vindo(a), ${finalUser.nome}! Conectado via Google.`, "success");
+        return;
+      }
     } catch (error: any) {
       console.warn("Google Auth Result:", error);
       
@@ -519,24 +613,31 @@ export default function App() {
         error?.code === "auth/user-cancelled" ||
         error?.message?.includes("popup-closed-by-user")
       ) {
+        showToast("Login com o Google cancelado.", "info");
+        return;
+      }
+
+      if (error?.code === "auth/popup-blocked") {
+        showToast("Pop-up bloqueado pelo navegador. Por favor, permita pop-ups para abrir o login do Google.", "warning");
         setShowGoogleAuthModal(true);
         return;
       }
 
-      // If unauthorized domain (e.g. preview container), automatically fallback to instant Google login
       if (error?.code === "auth/unauthorized-domain") {
+        showToast("Domínio não autorizado no Firebase Auth. Abrindo opções de acesso.", "warning");
         setShowGoogleAuthModal(true);
         return;
       }
 
-      // Default fallback: show Google accounts selector
+      // Other fallback
+      showToast(error?.message || "Não foi possível abrir o login do Google.", "error");
       setShowGoogleAuthModal(true);
     } finally {
       setIsLoadingAuth(false);
     }
   };
 
-  // Handle Google Login button click - Triggers official Google OAuth API
+  // Handle Google Login button click - Triggers official Google OAuth API directly
   const handleGoogleLogin = async () => {
     await handleTriggerGooglePopup();
   };
@@ -789,23 +890,22 @@ export default function App() {
   // Update own user profile
   const handleUpdateProfile = async (profileData: any) => {
     if (!currentUser) return;
+    const previousUser = { ...currentUser };
 
     try {
       const token = await getAuthToken();
       let res: Response | null = null;
       if (token) {
-        try {
-          res = await fetch("/api/users/profile", {
-            method: "PUT",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify(profileData),
-          });
-        } catch (netErr) {
-          res = null;
-        }
+        res = await resilientFetch("/api/users/profile", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(profileData),
+          retries: 2,
+          retryDelay: 600,
+        });
       }
 
       if (res && res.ok) {
@@ -818,38 +918,21 @@ export default function App() {
         }
         showToast("Perfil atualizado com sucesso!", "success");
         return;
-      } else if (res) {
-        const errData = await res.json().catch(() => ({}));
-        showToast(errData.error || "Não foi possível atualizar o perfil.", "error");
-        return;
       }
 
-      // Local storage fallback
-      const updatedUser: User = {
-        ...currentUser,
-        ...profileData,
-        updatedAt: new Date().toISOString()
-      };
-      setCurrentUser(updatedUser);
-      localStorage.setItem("local_user", JSON.stringify(updatedUser));
-
-      try {
-        const stored = localStorage.getItem("local_users_db");
-        if (stored) {
-          const list: User[] = JSON.parse(stored);
-          const idx = list.findIndex(u => u.id === updatedUser.id || u.email === updatedUser.email);
-          if (idx !== -1) {
-            list[idx] = updatedUser;
-            localStorage.setItem("local_users_db", JSON.stringify(list));
-            setUsersList(list);
-          }
-        }
-      } catch {}
-
-      showToast("Perfil atualizado com sucesso!", "success");
-    } catch (error) {
+      // Se falhou no backend, restaurar o estado anterior imediatamente
+      setCurrentUser(previousUser);
+      localStorage.setItem("local_user", JSON.stringify(previousUser));
+      const errData = res ? await res.json().catch(() => ({})) : null;
+      showToast(errData?.error || "Não foi possível salvar as alterações do perfil. Estado anterior restaurado.", "error");
+      throw new Error(errData?.error || "Falha ao atualizar perfil");
+    } catch (error: any) {
       console.error("Error updating profile:", error);
-      showToast("Falha ao tentar atualizar perfil.", "error");
+      // Garante reversão para manter consistência com o banco
+      setCurrentUser(previousUser);
+      localStorage.setItem("local_user", JSON.stringify(previousUser));
+      showToast("Falha ao salvar perfil. O estado anterior foi restaurado.", "error");
+      throw error;
     }
   };
 
@@ -858,84 +941,55 @@ export default function App() {
     try {
       const token = await getAuthToken();
       let res: Response | null = null;
-      let createdEvent: Event | null = null;
       if (token) {
-        try {
-          res = await fetch("/api/events", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify(eventData),
-          });
-          if (res && res.ok) {
-            const data = await res.json().catch(() => ({}));
-            createdEvent = data.event;
-          }
-        } catch (netErr) {
-          res = null;
-        }
+        res = await resilientFetch("/api/events", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(eventData),
+          retries: 2,
+          retryDelay: 600,
+        });
       }
 
-      if (!createdEvent) {
-        // Fallback creation for offline / immediate sync
-        createdEvent = {
-          id: Date.now(),
-          title: eventData.title,
-          location: eventData.location,
-          day: Number(eventData.day),
-          month: Number(eventData.month),
-          year: Number(eventData.year),
-          time: eventData.time || "14:00",
-          isPaid: !!eventData.isPaid,
-          price: eventData.price || null,
-          requirements: eventData.requirements || null,
-          website: eventData.website || null,
-          image: eventData.image || "https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=600&auto=format&fit=crop",
-          creatorId: currentUser?.id || 9901,
-          createdAt: new Date().toISOString()
-        };
-      }
-
-      // Update state and local storage immediately
-      setEvents((prev) => {
-        const next = [createdEvent!, ...prev.filter((e) => e.id !== createdEvent!.id)];
-        try {
-          localStorage.setItem("local_events", JSON.stringify(next));
-        } catch {}
-        return next;
-      });
-
-      // Background reload from database
-      try {
+      if (res && res.ok) {
+        // Atualizar automaticamente os dados reais do banco de dados após sucesso
         await loadEvents();
-      } catch {}
+        showToast("Evento adicionado à agenda escolar com sucesso!", "success");
+        return;
+      }
 
-      showToast("Evento adicionado à agenda escolar com sucesso!", "success");
-    } catch (error) {
+      // Se o salvamento falhou no servidor: NÃO exibir na interface dados que não foram salvos no banco
+      const detail = res ? await res.json().catch(() => ({})) : null;
+      await loadEvents(); // Re-sincroniza com o banco real
+      showToast(detail?.error || "Não foi possível salvar o evento no banco de dados. O formulário foi mantido para tentar novamente.", "error");
+      throw new Error(detail?.error || "Falha ao cadastrar evento");
+    } catch (error: any) {
       console.error("Error writing event:", error);
-      showToast("Erro ao salvar evento na agenda.", "error");
+      await loadEvents(); // Garante que a lista de eventos corresponda ao banco
+      showToast("Erro de conexão ao salvar evento. Seus dados foram mantidos no formulário para tentar novamente.", "error");
+      throw error;
     }
   };
 
   // Delete event
   const handleDeleteEvent = async (eventId: number) => {
+    const previousEvents = [...events];
     try {
       setIsDeletingEvent(true);
       const token = await getAuthToken();
       let res: Response | null = null;
       if (token) {
-        try {
-          res = await fetch(`/api/events/${eventId}`, {
-            method: "DELETE",
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          });
-        } catch (netErr) {
-          res = null;
-        }
+        res = await resilientFetch(`/api/events/${eventId}`, {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          retries: 2,
+          retryDelay: 600,
+        });
       }
 
       if (res && res.ok) {
@@ -943,21 +997,21 @@ export default function App() {
         showToast("Evento removido com sucesso.", "info");
         setActiveScreen("feed");
         return;
-      } else if (res) {
-        const detail = await res.json().catch(() => ({}));
-        showToast(detail.error || "Não foi possível remover o evento.", "error");
-        return;
       }
 
-      // Local storage fallback
-      const updatedEvts = events.filter(e => e.id !== eventId);
-      setEvents(updatedEvts);
-      localStorage.setItem("local_events", JSON.stringify(updatedEvts));
-      showToast("Evento removido com sucesso.", "info");
-      setActiveScreen("feed");
-    } catch (error) {
+      // Se falhou: manter o evento visível e restaurar lista
+      setEvents(previousEvents);
+      await loadEvents();
+      const detail = res ? await res.json().catch(() => ({})) : null;
+      showToast(detail?.error || "Não foi possível remover o evento no banco de dados. O evento foi mantido.", "error");
+      throw new Error(detail?.error || "Erro ao excluir evento");
+    } catch (error: any) {
       console.error("Error deleting event:", error);
-      showToast("Erro ao excluir evento.", "error");
+      // Reverter estado e manter o evento visível
+      setEvents(previousEvents);
+      await loadEvents();
+      showToast("Falha ao excluir evento. A ação foi revertida e o evento foi mantido.", "error");
+      throw error;
     } finally {
       setIsDeletingEvent(false);
     }
@@ -965,230 +1019,208 @@ export default function App() {
 
   // Update event (Admin / Director / Creator)
   const handleUpdateEvent = async (eventId: number, eventData: Partial<Event>) => {
+    const previousEvents = [...events];
+    const previousSelected = selectedEvent ? { ...selectedEvent } : null;
+
     try {
       const token = await getAuthToken();
       let res: Response | null = null;
       if (token) {
-        try {
-          res = await fetch(`/api/events/${eventId}`, {
-            method: "PUT",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify(eventData),
-          });
-        } catch (netErr) {
-          res = null;
-        }
+        res = await resilientFetch(`/api/events/${eventId}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(eventData),
+          retries: 2,
+          retryDelay: 600,
+        });
       }
 
       if (res && res.ok) {
-        const updatedResponse = await res.json();
-        const updated = updatedResponse.event;
-        if (updated) {
-          setEvents(prev => prev.map(e => e.id === eventId ? { ...e, ...updated } : e));
-          if (selectedEvent && selectedEvent.id === eventId) {
-            setSelectedEvent(prev => prev ? { ...prev, ...updated } : null);
-          }
-        } else {
-          await loadEvents();
+        const data = await res.json().catch(() => ({}));
+        const updatedEvent = data?.event;
+        await loadEvents();
+        if (updatedEvent && selectedEvent && (selectedEvent.id === eventId || selectedEvent.id === updatedEvent.id)) {
+          setSelectedEvent(updatedEvent);
         }
         showToast("Evento atualizado com sucesso no banco de dados!", "success");
         return;
-      } else if (res) {
-        const detail = await res.json().catch(() => ({}));
-        showToast(detail.error || "Não foi possível atualizar o evento.", "error");
-        return;
       }
 
-      // Local storage fallback
-      const updatedEvts = events.map(e => {
-        if (e.id === eventId) {
-          return {
-            ...e,
-            ...eventData,
-            day: eventData.day !== undefined ? Number(eventData.day) : e.day,
-            month: eventData.month !== undefined ? Number(eventData.month) : e.month,
-            year: eventData.year !== undefined ? Number(eventData.year) : e.year,
-            updatedAt: new Date().toISOString()
-          };
-        }
-        return e;
-      });
-      setEvents(updatedEvts);
-      localStorage.setItem("local_events", JSON.stringify(updatedEvts));
-      const updatedItem = updatedEvts.find(e => e.id === eventId);
-      if (updatedItem) {
-        setSelectedEvent(updatedItem);
-      }
-      showToast("Evento atualizado com sucesso!", "success");
-    } catch (error) {
+      // Falha ao salvar: restaurar dados anteriores reais e re-sincronizar com o banco
+      setEvents(previousEvents);
+      setSelectedEvent(previousSelected);
+      await loadEvents();
+      const detail = res ? await res.json().catch(() => ({})) : null;
+      showToast(detail?.error || "Não foi possível salvar alterações. O estado anterior foi restaurado.", "error");
+      throw new Error(detail?.error || "Falha ao salvar evento");
+    } catch (error: any) {
       console.error("Error updating event:", error);
-      showToast("Erro ao salvar alterações do evento.", "error");
+      setEvents(previousEvents);
+      setSelectedEvent(previousSelected);
+      await loadEvents();
+      showToast("Falha na comunicação com o banco. O estado anterior do evento foi restaurado.", "error");
+      throw error;
     }
   };
 
   // Admin: Update another user role/privileges
   const handleAdminUpdateUser = async (userId: number, updateData: any) => {
+    const previousUsers = [...usersList];
+
     try {
       const token = await getAuthToken();
       let res: Response | null = null;
       if (token) {
-        try {
-          res = await fetch(`/api/users/${userId}`, {
-            method: "PUT",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify(updateData),
-          });
-        } catch (netErr) {
-          res = null;
-        }
+        res = await resilientFetch(`/api/users/${userId}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(updateData),
+          retries: 2,
+          retryDelay: 600,
+        });
       }
 
       if (res && res.ok) {
         await loadAllUsers(token || "");
         showToast("Permissões do usuário atualizadas!", "success");
         return;
-      } else if (res) {
-        const detail = await res.json().catch(() => ({}));
-        showToast(detail.error || "Não foi possível atualizar o usuário.", "error");
-        return;
       }
 
-      // Local storage fallback
-      const updatedList = usersList.map(u => {
-        if (u.id === userId) {
-          return { ...u, ...updateData, updatedAt: new Date().toISOString() };
-        }
-        return u;
-      });
-      setUsersList(updatedList);
-      localStorage.setItem("local_users_db", JSON.stringify(updatedList));
-      showToast("Permissões do usuário atualizadas!", "success");
-    } catch (error) {
+      // Falha: reverter estado e consultar dados do banco
+      setUsersList(previousUsers);
+      await loadAllUsers(token || "");
+      const detail = res ? await res.json().catch(() => ({})) : null;
+      showToast(detail?.error || "Não foi possível atualizar o usuário no banco de dados.", "error");
+      throw new Error(detail?.error || "Falha ao atualizar permissões");
+    } catch (error: any) {
       console.error("Admin user modification failed:", error);
-      showToast("Erro ao modificar permissões.", "error");
+      setUsersList(previousUsers);
+      await loadAllUsers();
+      showToast("Erro ao modificar permissões. Estado anterior restaurado.", "error");
+      throw error;
     }
   };
 
   // Admin: Delete user from database (Soft delete / Block)
   const handleAdminDeleteUser = async (userId: number) => {
+    const previousUsers = [...usersList];
+
     try {
       const token = await getAuthToken();
       let res: Response | null = null;
       if (token) {
-        try {
-          res = await fetch(`/api/users/${userId}`, {
-            method: "DELETE",
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          });
-        } catch (netErr) {
-          res = null;
-        }
+        res = await resilientFetch(`/api/users/${userId}`, {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          retries: 2,
+          retryDelay: 600,
+        });
       }
 
       if (res && res.ok) {
         await loadAllUsers(token || "");
         showToast("Conta escolar bloqueada com sucesso.", "info");
         return;
-      } else if (res) {
-        const detail = await res.json().catch(() => ({}));
-        showToast(detail.error || "Não foi possível bloquear este usuário.", "error");
-        return;
       }
 
-      // Local storage fallback
-      const updatedList = usersList.map(u => u.id === userId ? { ...u, ativo: false, updatedAt: new Date().toISOString() } : u);
-      setUsersList(updatedList);
-      localStorage.setItem("local_users_db", JSON.stringify(updatedList));
-      showToast("Conta escolar bloqueada com sucesso.", "info");
-    } catch (error) {
+      // Falha: reverter estado e re-sincronizar com banco
+      setUsersList(previousUsers);
+      await loadAllUsers(token || "");
+      const detail = res ? await res.json().catch(() => ({})) : null;
+      showToast(detail?.error || "Não foi possível bloquear este usuário.", "error");
+      throw new Error(detail?.error || "Falha ao bloquear usuário");
+    } catch (error: any) {
       console.error("Admin deletion failed:", error);
-      showToast("Erro ao bloquear usuário.", "error");
+      setUsersList(previousUsers);
+      await loadAllUsers();
+      showToast("Erro ao bloquear usuário. A ação foi revertida.", "error");
+      throw error;
     }
   };
 
   // Admin: Unblock user
   const handleAdminUnblockUser = async (userId: number) => {
+    const previousUsers = [...usersList];
+
     try {
       const token = await getAuthToken();
       let res: Response | null = null;
       if (token) {
-        try {
-          res = await fetch(`/api/users/${userId}/unblock`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          });
-        } catch (netErr) {
-          res = null;
-        }
+        res = await resilientFetch(`/api/users/${userId}/unblock`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          retries: 2,
+          retryDelay: 600,
+        });
       }
 
       if (res && res.ok) {
         await loadAllUsers(token || "");
         showToast("Conta escolar desbloqueada com sucesso!", "success");
         return;
-      } else if (res) {
-        const detail = await res.json().catch(() => ({}));
-        showToast(detail.error || "Não foi possível desbloquear o usuário.", "error");
-        return;
       }
 
-      // Local storage fallback
-      const updatedList = usersList.map(u => u.id === userId ? { ...u, ativo: true, updatedAt: new Date().toISOString() } : u);
-      setUsersList(updatedList);
-      localStorage.setItem("local_users_db", JSON.stringify(updatedList));
-      showToast("Conta escolar desbloqueada com sucesso!", "success");
-    } catch (error) {
+      // Falha: reverter estado e re-sincronizar com banco
+      setUsersList(previousUsers);
+      await loadAllUsers(token || "");
+      const detail = res ? await res.json().catch(() => ({})) : null;
+      showToast(detail?.error || "Não foi possível desbloquear o usuário.", "error");
+      throw new Error(detail?.error || "Falha ao desbloquear usuário");
+    } catch (error: any) {
       console.error("Admin unblock failed:", error);
-      showToast("Erro ao desbloquear usuário.", "error");
+      setUsersList(previousUsers);
+      await loadAllUsers();
+      showToast("Erro ao desbloquear usuário. A ação foi revertida.", "error");
+      throw error;
     }
   };
 
   // Admin: Permanent Delete user
   const handleAdminPermanentDeleteUser = async (userId: number) => {
+    const previousUsers = [...usersList];
+
     try {
       const token = await getAuthToken();
       let res: Response | null = null;
       if (token) {
-        try {
-          res = await fetch(`/api/users/${userId}/permanent`, {
-            method: "DELETE",
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          });
-        } catch (netErr) {
-          res = null;
-        }
+        res = await resilientFetch(`/api/users/${userId}/permanent`, {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          retries: 2,
+          retryDelay: 600,
+        });
       }
 
       if (res && res.ok) {
         await loadAllUsers(token || "");
         showToast("Conta escolar excluída definitivamente!", "info");
         return;
-      } else if (res) {
-        const detail = await res.json().catch(() => ({}));
-        showToast(detail.error || "Não foi possível excluir o usuário permanentemente.", "error");
-        return;
       }
 
-      // Local storage fallback
-      const updatedList = usersList.filter(u => u.id !== userId);
-      setUsersList(updatedList);
-      localStorage.setItem("local_users_db", JSON.stringify(updatedList));
-      showToast("Conta escolar excluída definitivamente!", "info");
-    } catch (error) {
+      // Falha: manter usuário e restaurar lista
+      setUsersList(previousUsers);
+      await loadAllUsers(token || "");
+      const detail = res ? await res.json().catch(() => ({})) : null;
+      showToast(detail?.error || "Não foi possível excluir o usuário permanentemente.", "error");
+      throw new Error(detail?.error || "Falha ao excluir usuário");
+    } catch (error: any) {
       console.error("Admin permanent deletion failed:", error);
-      showToast("Erro ao excluir usuário definitivamente.", "error");
+      setUsersList(previousUsers);
+      await loadAllUsers();
+      showToast("Erro ao excluir usuário. A ação foi desfeita e o usuário mantido.", "error");
+      throw error;
     }
   };
 
@@ -1338,6 +1370,8 @@ export default function App() {
                   >
                     <Feed
                       events={events}
+                      isLoading={isLoadingEvents}
+                      onReload={loadEvents}
                       onSelectEvent={(event) => {
                         setSelectedEvent(event);
                         setActiveScreen("eventDetail");

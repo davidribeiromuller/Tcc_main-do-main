@@ -130,6 +130,9 @@ export function startHeartbeatMonitor() {
       markDbOffline();
     }
   }, 25000); // Ping every 25 seconds to prevent idle disconnects
+  if (heartbeatInterval && typeof (heartbeatInterval as any).unref === 'function') {
+    (heartbeatInterval as any).unref();
+  }
 }
 
 export function getDbHealthStats() {
@@ -221,6 +224,8 @@ export async function initializeDatabase() {
         await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT;`);
         await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ativo BOOLEAN DEFAULT TRUE;`);
         await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE;`);
+        await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMP DEFAULT NOW();`);
+        await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP DEFAULT NOW();`);
 
         // Dynamically append columns to events table if it already existed
         await client.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS time TEXT DEFAULT '18:00';`);
@@ -288,10 +293,16 @@ export async function initializeDatabase() {
           ON CONFLICT (uid) DO UPDATE SET password = 'senha123', role = 'Cliente', is_admin = false;
         `);
 
-        // Check and seed default school events if events table is empty
+        // Check and seed default school events if events table and eventos table are both empty
+        let hasEventosRecords = false;
+        try {
+          const eventosCountCheck = await client.query("SELECT COUNT(*) as count FROM eventos;");
+          hasEventosRecords = parseInt(eventosCountCheck.rows[0]?.count || '0') > 0;
+        } catch {}
+
         const eventsCountCheck = await client.query('SELECT COUNT(*) as count FROM events;');
         const eventCount = parseInt(eventsCountCheck.rows[0]?.count || '0');
-        if (eventCount === 0) {
+        if (eventCount === 0 && !hasEventosRecords) {
           console.log('[Database] events table is empty. Seeding default school events...');
           
           const adminCheck = await client.query("SELECT id FROM users WHERE uid = 'fallback-admin-uid' LIMIT 1;");

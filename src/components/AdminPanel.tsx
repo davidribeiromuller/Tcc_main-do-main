@@ -163,6 +163,8 @@ export default function AdminPanel({
 
       await onUpdateUser(editingUser.id, payload);
       setEditingUser(null);
+    } catch (err) {
+      console.warn("Failed saving user edit, keeping modal open for retry:", err);
     } finally {
       setIsSaving(false);
     }
@@ -186,6 +188,8 @@ export default function AdminPanel({
       setIsDeleting(true);
       await onDeleteUser(userToDelete.id);
       setUserToDelete(null);
+    } catch (err) {
+      console.warn("Failed deleting user:", err);
     } finally {
       setIsDeleting(false);
     }
@@ -197,6 +201,8 @@ export default function AdminPanel({
       setIsDeleting(true);
       await onUnblockUser(userToUnblock.id);
       setUserToUnblock(null);
+    } catch (err) {
+      console.warn("Failed unblocking user:", err);
     } finally {
       setIsDeleting(false);
     }
@@ -208,6 +214,8 @@ export default function AdminPanel({
       setIsDeleting(true);
       await onPermanentDeleteUser(userToPermanentDelete.id);
       setUserToPermanentDelete(null);
+    } catch (err) {
+      console.warn("Failed permanent deleting user:", err);
     } finally {
       setIsDeleting(false);
     }
@@ -268,6 +276,8 @@ export default function AdminPanel({
         image: eventFormData.image.trim()
       });
       setIsAddingEvent(false);
+    } catch (err) {
+      console.warn("Failed creating event, keeping modal open for retry:", err);
     } finally {
       setIsSaving(false);
     }
@@ -292,6 +302,8 @@ export default function AdminPanel({
         image: eventFormData.image.trim()
       });
       setEditingEvent(null);
+    } catch (err) {
+      console.warn("Failed saving event edit, keeping modal open for retry:", err);
     } finally {
       setIsSaving(false);
     }
@@ -303,6 +315,8 @@ export default function AdminPanel({
       setIsDeleting(true);
       await onDeleteEvent(eventToDelete.id);
       setEventToDelete(null);
+    } catch (err) {
+      console.warn("Failed deleting event:", err);
     } finally {
       setIsDeleting(false);
     }

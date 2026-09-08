@@ -217,8 +217,8 @@ export default function CalendarView({
       setCurrentYear(evtYear);
       setSelectedDay(dayNum);
       setFormOpen(false);
-    } catch {
-      setFormError("Não foi possível cadastrar o evento. Verifique suas permissões.");
+    } catch (err: any) {
+      setFormError(err?.message || "Não foi possível cadastrar o evento no banco de dados. Tente novamente.");
     }
   };
 

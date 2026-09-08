@@ -1,5 +1,5 @@
 import { relations } from 'drizzle-orm';
-import { integer, pgTable, serial, text, timestamp, boolean } from 'drizzle-orm/pg-core';
+import { integer, pgTable, serial, text, timestamp, boolean, numeric } from 'drizzle-orm/pg-core';
 
 // Define the 'users' table
 export const users = pgTable('users', {
@@ -40,6 +40,28 @@ export const events = pgTable('events', {
   image: text('image'),
   creatorId: integer('creator_id').references(() => users.id),
   createdAt: timestamp('created_at').defaultNow(),
+});
+
+// Define the 'eventos' table (Portuguese Supabase table)
+export const eventos = pgTable('eventos', {
+  id: serial('id').primaryKey(),
+  titulo: text('titulo'),
+  descricao: text('descricao'),
+  categoria: text('categoria'),
+  cidade: text('cidade'),
+  local: text('local'),
+  endereco: text('endereco'),
+  dataInicio: timestamp('data_inicio'),
+  dataFim: timestamp('data_fim'),
+  organizador: text('organizador'),
+  publicoAlvo: text('publico_alvo'),
+  precisaPagar: boolean('precisa_pagar').default(false),
+  valor: numeric('valor'),
+  inscricoesAbertas: boolean('inscricoes_abertas').default(true),
+  linkInscricao: text('link_inscricao'),
+  vagas: integer('vagas'),
+  imagem: text('imagem'),
+  criadoEm: timestamp('criado_em').defaultNow(),
 });
 
 // Define relationships for the 'users' table.

@@ -17,6 +17,8 @@ interface FeedProps {
   setSearchTerm?: (term: string) => void;
   onOpenMap?: (eventId?: number) => void;
   onUserCoordsChange?: (coords: { lat: number; lng: number }) => void;
+  isLoading?: boolean;
+  onReload?: () => void;
 }
 
 const normalizeString = (str: string) => {
@@ -38,6 +40,8 @@ export default function Feed({
   setSearchTerm,
   onOpenMap,
   onUserCoordsChange,
+  isLoading,
+  onReload,
 }: FeedProps) {
   const [localSearchOpen, setLocalSearchOpen] = useState(false);
   const [localSearchTerm, setLocalSearchTerm] = useState("");
@@ -202,11 +206,37 @@ export default function Feed({
 
       {/* Events List */}
       <div className="max-w-6xl mx-auto w-full p-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        {filteredEvents.length === 0 ? (
+        {isLoading && filteredEvents.length === 0 ? (
+          // Skeleton loading state
+          Array.from({ length: 4 }).map((_, i) => (
+            <div
+              key={`skeleton-${i}`}
+              className="relative rounded-3xl overflow-hidden bg-white dark:bg-brand-card-dark shadow-sm border border-brand-primary/15 animate-pulse"
+            >
+              <div className="w-full h-44 bg-slate-200 dark:bg-slate-700/50" />
+              <div className="p-4 flex flex-col gap-3">
+                <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded-md w-3/4" />
+                <div className="h-3 bg-slate-100 dark:bg-slate-800 rounded-md w-1/2" />
+                <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <div className="h-2.5 bg-slate-100 dark:bg-slate-800 rounded w-16" />
+                  <div className="h-2.5 bg-slate-100 dark:bg-slate-800 rounded w-12" />
+                </div>
+              </div>
+            </div>
+          ))
+        ) : filteredEvents.length === 0 ? (
           <div className="col-span-full flex flex-col items-center justify-center py-16 text-center text-slate-400">
             <Calendar size={48} className="stroke-1 mb-3 text-slate-300" />
             <p className="text-sm font-medium">Nenhum evento encontrado</p>
-            <p className="text-xs text-slate-500 mt-1">Experimente outro termo de busca ou remova os filtros</p>
+            <p className="text-xs text-slate-500 mt-1">Experimente outro termo de busca ou sincronize os dados escolares</p>
+            {onReload && (
+              <button
+                onClick={onReload}
+                className="mt-4 px-4 py-2 bg-brand-primary text-slate-800 font-semibold text-xs rounded-xl shadow hover:opacity-90 active:scale-95 transition-all cursor-pointer"
+              >
+                Atualizar eventos do banco
+              </button>
+            )}
           </div>
         ) : (
           filteredEvents.map((event) => (

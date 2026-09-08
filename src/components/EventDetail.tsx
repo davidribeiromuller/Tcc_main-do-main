@@ -551,9 +551,13 @@ export default function EventDetail({
 
             {canDelete && (
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (confirm(`Tem certeza de que deseja deletar permanentemente o evento pedagógico "${event.title}"?`)) {
-                    onDeleteEvent(event.id);
+                    try {
+                      await onDeleteEvent(event.id);
+                    } catch {
+                      // Handled in App.tsx (reverts state, keeps event visible, displays feedback)
+                    }
                   }
                 }}
                 disabled={isDeleting}
