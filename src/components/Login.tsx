@@ -20,7 +20,6 @@ interface LoginProps {
   isLoading: boolean;
   loginError?: string | null;
   clearLoginError?: () => void;
-  registeredUsers?: User[];
 }
 
 export default function Login({
@@ -30,7 +29,6 @@ export default function Login({
   isLoading,
   loginError,
   clearLoginError,
-  registeredUsers = []
 }: LoginProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -467,7 +465,7 @@ export default function Login({
                   d="M12 24c3.2 0 6-1.1 8-2.9l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3.1 0-5.8-1.9-6.7-4.7l-3.9 3c1.9 4 5.9 6.7 10 6.7z"
                 />
               </svg>
-              <span>{isLoading ? "Conectando..." : "Entrar com o Google"}</span>
+              <span>{isLoading ? "Conectando..." : "Continuar com Google"}</span>
             </button>
 
             {/* Conectar área do aluno button */}

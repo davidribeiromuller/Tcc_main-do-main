@@ -260,7 +260,10 @@ async function startServer() {
   app.post("/api/auth/google-direct-login", async (req, res) => {
     try {
       const { email, nome, foto_perfil, role } = req.body;
-      const cleanEmail = (email || "davidribeiromuller2009@gmail.com").trim().toLowerCase();
+      if (!email || typeof email !== "string" || !email.trim()) {
+        return res.status(400).json({ error: "O endereço de e-mail é obrigatório para autenticação Google." });
+      }
+      const cleanEmail = email.trim().toLowerCase();
       const userName = nome || (cleanEmail ? cleanEmail.split("@")[0].replace(/[._]/g, " ") : "Usuário Google");
       const userPhoto = foto_perfil || "";
       const userRole = role || "Aluno";
@@ -980,6 +983,47 @@ Diretrizes:
       console.error("Erro na API de Chat AI:", error);
       res.status(500).json({ error: error.message || "Erro ao processar conversa com AI" });
     }
+  });
+
+  // --- OAUTH CALLBACK HANDLER (POPUP & REDIRECT) ---
+  app.get(["/auth/callback", "/auth/callback/"], (req, res) => {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+        <head>
+          <meta charset="utf-8">
+          <title>Autenticação Concluída</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8fafc; color: #1e293b; }
+            .card { background: white; padding: 2rem; border-radius: 1rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); text-align: center; max-width: 380px; }
+            .spinner { width: 32px; height: 32px; border: 3px solid #e2e8f0; border-top-color: #4C6B4C; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 1rem; }
+            @keyframes spin { to { transform: rotate(360deg); } }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="spinner"></div>
+            <h3 style="margin: 0 0 0.5rem 0;">Autenticado com Sucesso!</h3>
+            <p style="margin: 0; font-size: 0.875rem; color: #64748b;">Retornando para o aplicativo eloEscola...</p>
+          </div>
+          <script>
+            try {
+              const hash = window.location.hash;
+              const search = window.location.search;
+              if (window.opener && !window.opener.closed) {
+                window.opener.postMessage({ type: 'GOOGLE_OAUTH_SUCCESS', hash, search }, '*');
+                setTimeout(() => { try { window.close(); } catch(e) {} }, 500);
+              } else {
+                window.location.href = '/';
+              }
+            } catch (e) {
+              window.location.href = '/';
+            }
+          </script>
+        </body>
+      </html>
+    `);
   });
 
   // --- VITE / STATIC SERVING FLOW ---

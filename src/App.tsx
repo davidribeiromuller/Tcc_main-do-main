@@ -21,6 +21,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { CheckCircle, AlertCircle, CheckCircle2, Info, X } from "lucide-react";
 import logoImg from "./assets/images/logo.jpg";
 import { resilientFetch, setupNetworkAutoRecovery, safeAppReload } from "./lib/apiResilience.ts";
+import { getSupabaseClient, isSupabaseConfigured } from "./lib/supabase.ts";
 
 export default function App() {
   const [activeScreen, setActiveScreen] = useState<string>("splash");
@@ -91,6 +92,13 @@ export default function App() {
   const [feedSearchTerm, setFeedSearchTerm] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [showGoogleAuthModal, setShowGoogleAuthModal] = useState(false);
+  const [googleModalError, setGoogleModalError] = useState<{
+    type: "popup_blocked" | "provider_disabled" | "unauthorized_domain" | "general";
+    message: string;
+  }>({
+    type: "general",
+    message: ""
+  });
 
   // Set document title & force light theme
   useEffect(() => {
@@ -361,6 +369,50 @@ export default function App() {
 
     syncDatabaseOnEntry();
 
+    // Listen for Supabase Auth state changes
+    let supabaseSubscription: { unsubscribe: () => void } | null = null;
+    try {
+      if (isSupabaseConfigured()) {
+        const supabase = getSupabaseClient();
+        const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
+          if (session?.user && session.user.email) {
+            handleAuthenticatedGoogleUser({
+              email: session.user.email,
+              displayName: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email.split("@")[0],
+              photoURL: session.user.user_metadata?.avatar_url || "",
+              uid: session.user.id
+            });
+          }
+        });
+        supabaseSubscription = data.subscription;
+      }
+    } catch (sbErr) {
+      console.warn("[App] Supabase auth listener init skipped:", sbErr);
+    }
+
+    // Listen for OAuth completion from popup window
+    const handleOAuthMessage = async (event: MessageEvent) => {
+      if (event.data?.type === "GOOGLE_OAUTH_SUCCESS") {
+        try {
+          if (isSupabaseConfigured()) {
+            const supabase = getSupabaseClient();
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user && session.user.email) {
+              await handleAuthenticatedGoogleUser({
+                email: session.user.email,
+                displayName: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email.split("@")[0],
+                photoURL: session.user.user_metadata?.avatar_url || "",
+                uid: session.user.id
+              });
+            }
+          }
+        } catch (msgErr) {
+          console.error("Error processing OAuth callback message:", msgErr);
+        }
+      }
+    };
+    window.addEventListener("message", handleOAuthMessage);
+
     // Auto-sync on network reconnection (conecta de novo à internet)
     const cleanupNetwork = setupNetworkAutoRecovery(() => {
       loadEvents();
@@ -389,6 +441,8 @@ export default function App() {
 
     return () => {
       unsubscribe();
+      supabaseSubscription?.unsubscribe();
+      window.removeEventListener("message", handleOAuthMessage);
       cleanupNetwork();
       window.removeEventListener("focus", handleFocusSync);
       clearInterval(syncInterval);
@@ -448,31 +502,46 @@ export default function App() {
     return () => clearInterval(interval);
   }, [currentUser?.id, currentUser?.email]);
 
-  // Handle Direct Google Login (Permitted for everyone)
-  const handleDirectGoogleLogin = async (email: string, name?: string, role?: string) => {
+  // Helper: Synchronize authenticated Google user with database
+  const handleAuthenticatedGoogleUser = async (googleUser: {
+    email: string | null;
+    displayName?: string | null;
+    photoURL?: string | null;
+    uid?: string;
+    getIdToken?: () => Promise<string>;
+  }) => {
     try {
       setIsLoadingAuth(true);
       setLoginError(null);
 
-      const cleanEmail = (email || "davidribeiromuller2009@gmail.com").trim().toLowerCase();
-      const isDirector = cleanEmail === "davidribeiromuller2009@gmail.com" || cleanEmail === "diretoria@helenawysocki.com" || cleanEmail.includes("diretor");
-      const userName = name || (cleanEmail ? cleanEmail.split("@")[0].replace(/[._]/g, " ") : "Usuário Google");
-      const userRole = isDirector ? "Diretor" : (role || "Aluno");
+      const userEmail = (googleUser.email || "").trim().toLowerCase();
+      if (!userEmail) {
+        throw new Error("Conta Google sem e-mail associado.");
+      }
 
+      const userName = googleUser.displayName || userEmail.split("@")[0].replace(/[._]/g, " ");
+      const userPhoto = googleUser.photoURL || "";
+      const uid = googleUser.uid || "google-uid-" + Math.floor(Math.random() * 88888 + 10000);
+      const token = googleUser.getIdToken
+        ? await googleUser.getIdToken()
+        : `google-${uid}|Aluno|${encodeURIComponent(userName)}|${encodeURIComponent(userEmail)}`;
+
+      // Query database to identify profile and permissions
       let res: Response | null = null;
       let synchronizedUser: User | null = null;
-      let token = "";
 
       try {
-        res = await fetch("/api/auth/google-direct-login", {
+        res = await fetch("/api/auth/login", {
           method: "POST",
           headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`
           },
           body: JSON.stringify({
-            email: cleanEmail,
+            email: userEmail,
             nome: userName,
-            role: userRole
+            foto_perfil: userPhoto,
+            role: "Aluno"
           })
         });
 
@@ -480,43 +549,29 @@ export default function App() {
           const contentType = res.headers.get("content-type");
           if (contentType && contentType.includes("application/json")) {
             const data = await res.json();
-            synchronizedUser = { ...data.user, provider: "google" };
-            token = data.token || "";
+            synchronizedUser = data.user;
           }
         }
       } catch (e) {
-        res = null;
+        console.warn("[Google Auth] Server lookup fallback:", e);
       }
 
       if (!synchronizedUser) {
-        // Fallback for offline / static preview mode
-        const fallbackUid = "google-uid-" + Math.floor(Math.random() * 88888 + 10000);
+        // Fallback if network issue with backend
+        const isDirector = userEmail === "diretoria@helenawysocki.com" || userEmail.includes("diretor");
         synchronizedUser = {
           id: Date.now(),
-          uid: fallbackUid,
+          uid: uid,
           nome: userName,
-          email: cleanEmail,
+          email: userEmail,
+          foto_perfil: userPhoto,
           ativo: true,
           isAdmin: isDirector,
-          role: userRole,
+          role: isDirector ? "Diretor" : "Aluno",
           provider: "google",
           institution: "Escola estadual Helena Wysocki"
         };
       }
-
-      // Add to local users cache
-      try {
-        let localUsersList: User[] = defaultUsers;
-        const stored = localStorage.getItem("local_users_db");
-        if (stored) localUsersList = JSON.parse(stored);
-        const idx = localUsersList.findIndex(u => u.email.toLowerCase() === cleanEmail);
-        if (idx === -1) {
-          localUsersList.push(synchronizedUser);
-        } else {
-          localUsersList[idx] = { ...localUsersList[idx], ...synchronizedUser };
-        }
-        localStorage.setItem("local_users_db", JSON.stringify(localUsersList));
-      } catch {}
 
       setCurrentUser(synchronizedUser);
       localStorage.setItem("local_user", JSON.stringify(synchronizedUser));
@@ -530,116 +585,124 @@ export default function App() {
       setActiveScreen("feed");
       showToast(`Bem-vindo(a), ${synchronizedUser.nome}! Conectado via Google.`, "success");
     } catch (err: any) {
-      console.error("Direct google login error:", err);
-      showToast("Erro ao conectar conta Google. Tente novamente.", "error");
+      console.error("[Google Auth] Synchronization error:", err);
+      showToast(err?.message || "Erro ao conectar conta Google.", "error");
     } finally {
       setIsLoadingAuth(false);
     }
   };
 
-  // Trigger real Google Popup with account selector and auto fallback
-  const handleTriggerGooglePopup = async () => {
-    if (!auth || !googleAuthProvider) {
-      setShowGoogleAuthModal(true);
-      return;
-    }
+  // Trigger official Google Authentication directly
+  const handleGoogleLogin = async () => {
     try {
       setIsLoadingAuth(true);
       setLoginError(null);
-      
-      googleAuthProvider.setCustomParameters({
-        prompt: 'select_account'
-      });
 
-      const result = await signInWithPopup(auth, googleAuthProvider);
-      if (result && result.user) {
-        const firebaseUser = result.user;
-        const token = await firebaseUser.getIdToken();
-        
-        let loginRes: Response | null = null;
+      // 1. Attempt Supabase Google OAuth
+      if (isSupabaseConfigured()) {
         try {
-          loginRes = await fetch("/api/auth/login", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              email: firebaseUser.email || "",
-              nome: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Usuário Google",
-              foto_perfil: firebaseUser.photoURL || "",
-              role: "Aluno"
-            })
-          });
-        } catch (e) {
-          loginRes = null;
-        }
-
-        let finalUser: User | null = null;
-        if (loginRes && loginRes.ok) {
-          const data = await loginRes.json();
-          finalUser = data.user;
-        }
-
-        if (!finalUser) {
-          const isDefaultAdmin = (firebaseUser.email || "").toLowerCase().trim() === "diretoria@helenawysocki.com" || (firebaseUser.email || "").toLowerCase().trim() === "davidribeiromuller2009@gmail.com";
-          finalUser = {
-            id: Date.now(),
-            uid: firebaseUser.uid,
-            email: firebaseUser.email || "",
-            nome: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Usuário Google",
-            foto_perfil: firebaseUser.photoURL || "",
-            role: isDefaultAdmin ? "Diretor" : "Aluno",
-            ativo: true,
-            isAdmin: isDefaultAdmin,
+          const supabase = getSupabaseClient();
+          const { data, error } = await supabase.auth.signInWithOAuth({
             provider: "google",
-            institution: "Escola estadual Helena Wysocki"
-          };
+            options: {
+              queryParams: {
+                prompt: "select_account",
+                access_type: "offline"
+              },
+              redirectTo: `${window.location.origin}/auth/callback`
+            }
+          });
+
+          if (data?.url) {
+            const popup = window.open(
+              data.url,
+              "google_oauth_popup",
+              "width=540,height=660,left=250,top=100"
+            );
+            if (!popup || popup.closed || typeof popup.closed === "undefined") {
+              showToast("Pop-up bloqueado pelo navegador. Por favor, permita pop-ups para fazer login com o Google.", "warning");
+              setGoogleModalError({
+                type: "popup_blocked",
+                message: "O navegador bloqueou a janela de seleção de conta do Google. Por favor, permita pop-ups para este site."
+              });
+              setShowGoogleAuthModal(true);
+            }
+            return;
+          }
+
+          if (error) {
+            console.warn("[Google Auth] Supabase OAuth returned:", error.message);
+          }
+        } catch (supabaseErr: any) {
+          console.warn("[Google Auth] Supabase OAuth error:", supabaseErr?.message || supabaseErr);
         }
-
-        setCurrentUser(finalUser);
-        localStorage.setItem("local_user", JSON.stringify(finalUser));
-        setShowGoogleAuthModal(false);
-        setActiveScreen("feed");
-        showToast(`Bem-vindo(a), ${finalUser.nome}! Conectado via Google.`, "success");
-        return;
-      }
-    } catch (error: any) {
-      console.warn("Google Auth Result:", error);
-      
-      if (
-        error?.code === "auth/popup-closed-by-user" ||
-        error?.code === "auth/cancelled-popup-request" ||
-        error?.code === "auth/user-cancelled" ||
-        error?.message?.includes("popup-closed-by-user")
-      ) {
-        showToast("Login com o Google cancelado.", "info");
-        return;
       }
 
-      if (error?.code === "auth/popup-blocked") {
-        showToast("Pop-up bloqueado pelo navegador. Por favor, permita pop-ups para abrir o login do Google.", "warning");
-        setShowGoogleAuthModal(true);
-        return;
+      // 2. Attempt Firebase Auth Popup
+      if (auth && googleAuthProvider) {
+        googleAuthProvider.setCustomParameters({
+          prompt: "select_account"
+        });
+
+        try {
+          const result = await signInWithPopup(auth, googleAuthProvider);
+          if (result && result.user) {
+            await handleAuthenticatedGoogleUser(result.user);
+            return;
+          }
+        } catch (error: any) {
+          console.warn("[Google Auth] Firebase popup error:", error);
+
+          if (
+            error?.code === "auth/popup-closed-by-user" ||
+            error?.code === "auth/cancelled-popup-request" ||
+            error?.code === "auth/user-cancelled" ||
+            error?.message?.includes("popup-closed-by-user")
+          ) {
+            showToast("Login com o Google cancelado.", "info");
+            return;
+          }
+
+          if (error?.code === "auth/popup-blocked") {
+            showToast("Pop-up bloqueado pelo navegador. Por favor, permita pop-ups para abrir o login do Google.", "warning");
+            setGoogleModalError({
+              type: "popup_blocked",
+              message: "O navegador bloqueou a janela pop-up do Google. Por favor, ative a permissão de pop-ups para continuar."
+            });
+            setShowGoogleAuthModal(true);
+            return;
+          }
+
+          if (error?.code === "auth/unauthorized-domain") {
+            setGoogleModalError({
+              type: "unauthorized_domain",
+              message: "O domínio do ambiente precisa estar cadastrado na lista de domínios autorizados do Firebase / Google Cloud."
+            });
+            setShowGoogleAuthModal(true);
+            return;
+          }
+
+          setGoogleModalError({
+            type: "general",
+            message: error?.message || "Não foi possível abrir o login do Google no momento."
+          });
+          setShowGoogleAuthModal(true);
+          return;
+        }
       }
 
-      if (error?.code === "auth/unauthorized-domain") {
-        showToast("Domínio não autorizado no Firebase Auth. Abrindo opções de acesso.", "warning");
-        setShowGoogleAuthModal(true);
-        return;
-      }
-
-      // Other fallback
-      showToast(error?.message || "Não foi possível abrir o login do Google.", "error");
+      // 3. Fallback if no provider configured
+      setGoogleModalError({
+        type: "provider_disabled",
+        message: "O provedor Google OAuth precisa ser ativado no painel do Supabase com as credenciais do Google Cloud."
+      });
       setShowGoogleAuthModal(true);
+    } catch (err: any) {
+      console.error("[Google Auth] Critical error:", err);
+      showToast("Erro ao iniciar autenticação com o Google.", "error");
     } finally {
       setIsLoadingAuth(false);
     }
-  };
-
-  // Handle Google Login button click - Triggers official Google OAuth API directly
-  const handleGoogleLogin = async () => {
-    await handleTriggerGooglePopup();
   };
 
   // Helper to generate or fetch token
@@ -1280,7 +1343,6 @@ export default function App() {
               isLoading={isLoadingAuth}
               loginError={loginError}
               clearLoginError={() => setLoginError(null)}
-              registeredUsers={usersList}
             />
           </motion.div>
         )}
@@ -1580,10 +1642,12 @@ export default function App() {
       <GoogleAuthModal
         isOpen={showGoogleAuthModal}
         onClose={() => setShowGoogleAuthModal(false)}
-        onConfirmGoogleLogin={handleDirectGoogleLogin}
-        onTriggerOfficialPopup={handleTriggerGooglePopup}
+        onRetryOfficialLogin={handleGoogleLogin}
+        onNavigateToLocal={() => setActiveScreen("login")}
+        onNavigateToCgm={() => setActiveScreen("login")}
         isLoading={isLoadingAuth}
-        registeredUsers={usersList}
+        errorMessage={googleModalError.message}
+        errorType={googleModalError.type}
       />
     </div>
   );
