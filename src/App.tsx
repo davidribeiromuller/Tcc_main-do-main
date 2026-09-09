@@ -483,11 +483,18 @@ export default function App() {
       setIsLoadingAuth(true);
       setLoginError(null);
 
+      // ESTA URL DEVE SER IDÊNTICA À CADASTRADA NO REDIRECT URIS DO SUPABASE
+      // No GitHub Pages, deve apontar exatamente para o repositório 'https://davidribeiromuller.github.io/Tcc_main-do-main/'
+      const isGitHubPages = typeof window !== "undefined" && window.location.hostname.includes("github.io");
+      const redirectUri = isGitHubPages
+        ? "https://davidribeiromuller.github.io/Tcc_main-do-main/"
+        : `${window.location.origin}/auth/callback`;
+
       const supabase = getSupabaseClient();
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: redirectUri,
           queryParams: {
             prompt: "select_account",
             access_type: "offline"
