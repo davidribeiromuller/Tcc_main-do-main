@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { onAuthStateChanged, signInWithPopup, signOut, User as FirebaseUser } from "firebase/auth";
-import { auth, googleAuthProvider } from "./lib/firebase.ts";
+import { signOut } from "firebase/auth";
+import { auth } from "./lib/firebase.ts";
 import { User, Event } from "./types.ts";
 import { defaultEvents, defaultUsers } from "./data/defaultData.ts";
 import Splash from "./components/Splash.tsx";
@@ -15,7 +15,6 @@ import AdminPanel from "./components/AdminPanel.tsx";
 import MapView from "./components/MapView.tsx";
 import BottomNav from "./components/BottomNav.tsx";
 import DesktopNavbar from "./components/DesktopNavbar.tsx";
-import GoogleAuthModal from "./components/GoogleAuthModal.tsx";
 import WelcomeScreen from "./components/WelcomeScreen.tsx";
 import { motion, AnimatePresence } from "motion/react";
 import { CheckCircle, AlertCircle, CheckCircle2, Info, X } from "lucide-react";
@@ -91,14 +90,6 @@ export default function App() {
   const [feedSearchOpen, setFeedSearchOpen] = useState(false);
   const [feedSearchTerm, setFeedSearchTerm] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
-  const [showGoogleAuthModal, setShowGoogleAuthModal] = useState(false);
-  const [googleModalError, setGoogleModalError] = useState<{
-    type: "popup_blocked" | "provider_disabled" | "unauthorized_domain" | "general";
-    message: string;
-  }>({
-    type: "general",
-    message: ""
-  });
 
   // Set document title & force light theme
   useEffect(() => {
@@ -193,187 +184,72 @@ export default function App() {
     }
   };
 
-  // Synchronize state with Firebase Auth
+  // Synchronize state with Supabase Auth & Local Session
   useEffect(() => {
-    let unsubscribe = () => {};
-
-    if (auth) {
+    // 1. Recover local user session if present
+    const savedUserStr = localStorage.getItem("local_user");
+    if (savedUserStr) {
       try {
-        unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-          if (firebaseUser) {
-            try {
-              setIsLoadingAuth(true);
-              const token = await firebaseUser.getIdToken();
-              
-              // Authenticate with server
-              let loginRes: Response | null = null;
-              try {
-                loginRes = await fetch("/api/auth/login", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                  },
-                  body: JSON.stringify({
-                    email: firebaseUser.email || "",
-                    nome: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Usuário Google",
-                    foto_perfil: firebaseUser.photoURL || "",
-                    role: "Aluno"
-                  })
-                });
-              } catch (e) {
-                loginRes = null;
-              }
-
-              if (loginRes && loginRes.ok) {
-                const contentType = loginRes.headers.get("content-type");
-                if (contentType && contentType.includes("application/json")) {
-                  const data = await loginRes.json();
-                  let finalUser = data.user;
-
-                  // Detect new/existing Google users and automatically register/sync them via /api/users/profile
-                  if (finalUser && finalUser.provider === "google") {
-                    try {
-                      const profileRes = await fetch("/api/users/profile", {
-                        method: "PUT",
-                        headers: {
-                          "Content-Type": "application/json",
-                          Authorization: `Bearer ${token}`,
-                        },
-                        body: JSON.stringify({
-                          nome: finalUser.nome || firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Usuário Google",
-                          foto_perfil: finalUser.foto_perfil || firebaseUser.photoURL || "",
-                          role: finalUser.role || "Aluno",
-                          institution: finalUser.institution || "Escola estadual Helena Wysocki"
-                        }),
-                      });
-
-                      if (profileRes.ok) {
-                        const profType = profileRes.headers.get("content-type");
-                        if (profType && profType.includes("application/json")) {
-                          const profileData = await profileRes.json();
-                          if (profileData.user) {
-                            finalUser = profileData.user;
-                          }
-                        }
-                      }
-                    } catch (profileErr) {
-                      console.error("Auto profile registration failed:", profileErr);
-                    }
-                  }
-
-                  setCurrentUser(finalUser);
-                  if (finalUser) {
-                    localStorage.setItem("local_user", JSON.stringify(finalUser));
-                  }
-                  
-                  setActiveScreen((current) => {
-                    if (["splash", "login", "register", "codeSent"].includes(current)) {
-                      return "feed";
-                    }
-                    return current;
-                  });
-                  
-                  if (finalUser?.isAdmin) {
-                    await loadAllUsers(token);
-                  }
-                  return;
-                }
-              }
-
-              // Client-side fallback when running on GitHub Pages / static hosting with real Firebase Auth
-              const isDefaultAdmin = (firebaseUser.email || "").toLowerCase().trim() === "diretoria@helenawysocki.com";
-              const staticGoogleUser: User = {
-                id: Date.now(),
-                uid: firebaseUser.uid,
-                email: firebaseUser.email || "",
-                nome: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Usuário Google",
-                foto_perfil: firebaseUser.photoURL || "",
-                role: isDefaultAdmin ? "Diretor" : "Aluno",
-                ativo: true,
-                isAdmin: isDefaultAdmin,
-                provider: "google",
-                institution: "Escola estadual Helena Wysocki"
-              };
-              setCurrentUser(staticGoogleUser);
-              localStorage.setItem("local_user", JSON.stringify(staticGoogleUser));
-              setActiveScreen((current) => {
-                if (["splash", "welcome", "login", "register", "codeSent"].includes(current)) {
-                  return "feed";
-                }
-                return current;
-              });
-            } catch (error) {
-              console.error("Failed server synchronization:", error);
-            } finally {
-              setIsLoadingAuth(false);
-            }
-          } else {
-            // Safe check for local simulation login (CGM accounts don't use Firebase Auth)
-            setCurrentUser((currentVal) => {
-              if (currentVal && currentVal.provider === "local") {
-                // Retain local session
-                return currentVal;
-              }
-              
-              // No active auth, bounce to welcome or login
-              setActiveScreen((currentScreen) => {
-                if (currentScreen !== "splash" && currentScreen !== "welcome" && currentScreen !== "register" && currentScreen !== "codeSent") {
-                  return "welcome";
-                }
-                return currentScreen;
-              });
-              return null;
-            });
-          }
-        });
-      } catch (authErr) {
-        console.warn("Firebase Auth listener initialization skipped:", authErr);
-      }
-    } else {
-      setCurrentUser((currentVal) => {
-        if (currentVal && currentVal.provider === "local") {
-          return currentVal;
+        const parsed = JSON.parse(savedUserStr);
+        if (parsed && parsed.email) {
+          setCurrentUser(parsed);
         }
-        setActiveScreen((currentScreen) => {
-          if (currentScreen !== "splash" && currentScreen !== "welcome" && currentScreen !== "register" && currentScreen !== "codeSent") {
-            return "welcome";
-          }
-          return currentScreen;
-        });
-        return currentVal;
-      });
+      } catch (err) {
+        console.warn("[App] Failed parsing stored user:", err);
+      }
     }
 
-    // Proactively connect to backend and sync database events & users on app startup
+    // 2. Proactively connect to backend and sync database events & users on app startup
     const syncDatabaseOnEntry = async () => {
       try {
-        // Test backend DB connection
         fetch("/api/db-status").catch(() => {});
       } catch {}
       const eventsOk = await loadEvents();
       if (!eventsOk) {
-        // Se a primeira tentativa falhar, tentar recarregar os dados automaticamente antes de alarmar o usuário
         console.warn("[App] Primeira leitura falhou. Tentando recarregar dados automaticamente...");
-        const retryOk = await loadEvents();
-        if (!retryOk) {
-          // Se ainda falhar e não houver formulário ativo do usuário, tentar recarregar com segurança
-          const reloaded = safeAppReload("falha de carregamento de dados");
-          if (!reloaded) {
-            showToast("Não foi possível carregar alguns dados da agenda. Toque para tentar novamente.", "warning");
-          }
-        }
+        await loadEvents();
       }
       await loadAllUsers();
     };
 
     syncDatabaseOnEntry();
 
-    // Listen for Supabase Auth state changes
+    // 3. Listen for Supabase Auth state changes and recover active session
     let supabaseSubscription: { unsubscribe: () => void } | null = null;
     try {
       if (isSupabaseConfigured()) {
         const supabase = getSupabaseClient();
+
+        const initSession = async () => {
+          // Exchange code for session if present in URL (top-level redirect flow)
+          const urlParams = new URLSearchParams(window.location.search);
+          const code = urlParams.get("code");
+          if (code) {
+            try {
+              await supabase.auth.exchangeCodeForSession(code);
+              window.history.replaceState({}, document.title, window.location.pathname);
+            } catch (codeErr) {
+              console.warn("[App] code exchange error on mount:", codeErr);
+            }
+          }
+
+          // Check if there is an active session (e.g. from OAuth redirect)
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user && session.user.email) {
+              handleAuthenticatedGoogleUser({
+                email: session.user.email,
+                displayName: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email.split("@")[0],
+                photoURL: session.user.user_metadata?.avatar_url || "",
+                uid: session.user.id
+              });
+            }
+          } catch (err) {
+            console.warn("[App] Supabase getSession error:", err);
+          }
+        };
+        initSession();
+
         const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
           if (session?.user && session.user.email) {
             handleAuthenticatedGoogleUser({
@@ -382,6 +258,10 @@ export default function App() {
               photoURL: session.user.user_metadata?.avatar_url || "",
               uid: session.user.id
             });
+          } else if (event === "SIGNED_OUT") {
+            setCurrentUser(null);
+            localStorage.removeItem("local_user");
+            setActiveScreen((curr) => (curr !== "splash" && curr !== "register" && curr !== "codeSent" ? "welcome" : curr));
           }
         });
         supabaseSubscription = data.subscription;
@@ -390,12 +270,19 @@ export default function App() {
       console.warn("[App] Supabase auth listener init skipped:", sbErr);
     }
 
-    // Listen for OAuth completion from popup window
+    // 4. Listen for OAuth completion from popup/external window
     const handleOAuthMessage = async (event: MessageEvent) => {
       if (event.data?.type === "GOOGLE_OAUTH_SUCCESS") {
         try {
           if (isSupabaseConfigured()) {
             const supabase = getSupabaseClient();
+            if (event.data.search && event.data.search.includes("code=")) {
+              const urlParams = new URLSearchParams(event.data.search);
+              const code = urlParams.get("code");
+              if (code) {
+                await supabase.auth.exchangeCodeForSession(code);
+              }
+            }
             const { data: { session } } = await supabase.auth.getSession();
             if (session?.user && session.user.email) {
               await handleAuthenticatedGoogleUser({
@@ -440,7 +327,6 @@ export default function App() {
     }, 20000);
 
     return () => {
-      unsubscribe();
       supabaseSubscription?.unsubscribe();
       window.removeEventListener("message", handleOAuthMessage);
       cleanupNetwork();
@@ -581,7 +467,6 @@ export default function App() {
       }
 
       await loadEvents();
-      setShowGoogleAuthModal(false);
       setActiveScreen("feed");
       showToast(`Bem-vindo(a), ${synchronizedUser.nome}! Conectado via Google.`, "success");
     } catch (err: any) {
@@ -592,114 +477,40 @@ export default function App() {
     }
   };
 
-  // Trigger official Google Authentication directly
+  // Trigger official Google Authentication directly via Supabase Auth
   const handleGoogleLogin = async () => {
     try {
       setIsLoadingAuth(true);
       setLoginError(null);
 
-      // 1. Attempt Supabase Google OAuth
-      if (isSupabaseConfigured()) {
-        try {
-          const supabase = getSupabaseClient();
-          const { data, error } = await supabase.auth.signInWithOAuth({
-            provider: "google",
-            options: {
-              queryParams: {
-                prompt: "select_account",
-                access_type: "offline"
-              },
-              redirectTo: `${window.location.origin}/auth/callback`
-            }
-          });
-
-          if (data?.url) {
-            const popup = window.open(
-              data.url,
-              "google_oauth_popup",
-              "width=540,height=660,left=250,top=100"
-            );
-            if (!popup || popup.closed || typeof popup.closed === "undefined") {
-              showToast("Pop-up bloqueado pelo navegador. Por favor, permita pop-ups para fazer login com o Google.", "warning");
-              setGoogleModalError({
-                type: "popup_blocked",
-                message: "O navegador bloqueou a janela de seleção de conta do Google. Por favor, permita pop-ups para este site."
-              });
-              setShowGoogleAuthModal(true);
-            }
-            return;
+      const supabase = getSupabaseClient();
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+          queryParams: {
+            prompt: "select_account",
+            access_type: "offline"
           }
-
-          if (error) {
-            console.warn("[Google Auth] Supabase OAuth returned:", error.message);
-          }
-        } catch (supabaseErr: any) {
-          console.warn("[Google Auth] Supabase OAuth error:", supabaseErr?.message || supabaseErr);
         }
-      }
-
-      // 2. Attempt Firebase Auth Popup
-      if (auth && googleAuthProvider) {
-        googleAuthProvider.setCustomParameters({
-          prompt: "select_account"
-        });
-
-        try {
-          const result = await signInWithPopup(auth, googleAuthProvider);
-          if (result && result.user) {
-            await handleAuthenticatedGoogleUser(result.user);
-            return;
-          }
-        } catch (error: any) {
-          console.warn("[Google Auth] Firebase popup error:", error);
-
-          if (
-            error?.code === "auth/popup-closed-by-user" ||
-            error?.code === "auth/cancelled-popup-request" ||
-            error?.code === "auth/user-cancelled" ||
-            error?.message?.includes("popup-closed-by-user")
-          ) {
-            showToast("Login com o Google cancelado.", "info");
-            return;
-          }
-
-          if (error?.code === "auth/popup-blocked") {
-            showToast("Pop-up bloqueado pelo navegador. Por favor, permita pop-ups para abrir o login do Google.", "warning");
-            setGoogleModalError({
-              type: "popup_blocked",
-              message: "O navegador bloqueou a janela pop-up do Google. Por favor, ative a permissão de pop-ups para continuar."
-            });
-            setShowGoogleAuthModal(true);
-            return;
-          }
-
-          if (error?.code === "auth/unauthorized-domain") {
-            setGoogleModalError({
-              type: "unauthorized_domain",
-              message: "O domínio do ambiente precisa estar cadastrado na lista de domínios autorizados do Firebase / Google Cloud."
-            });
-            setShowGoogleAuthModal(true);
-            return;
-          }
-
-          setGoogleModalError({
-            type: "general",
-            message: error?.message || "Não foi possível abrir o login do Google no momento."
-          });
-          setShowGoogleAuthModal(true);
-          return;
-        }
-      }
-
-      // 3. Fallback if no provider configured
-      setGoogleModalError({
-        type: "provider_disabled",
-        message: "O provedor Google OAuth precisa ser ativado no painel do Supabase com as credenciais do Google Cloud."
       });
-      setShowGoogleAuthModal(true);
-    } catch (err: any) {
-      console.error("[Google Auth] Critical error:", err);
-      showToast("Erro ao iniciar autenticação com o Google.", "error");
+
+      if (error) {
+        console.error("Erro ao iniciar login Google:", error);
+        throw error;
+      }
+
+      if (data?.url) {
+        const isInIframe = window.self !== window.top;
+        if (isInIframe) {
+          window.open(data.url, "_blank");
+        } else {
+          window.location.assign(data.url);
+        }
+      }
+    } catch (error: any) {
+      console.error("Falha no login Google:", error);
+      showToast("Não foi possível iniciar o login com Google. Tente novamente.", "error");
     } finally {
       setIsLoadingAuth(false);
     }
@@ -707,6 +518,17 @@ export default function App() {
 
   // Helper to generate or fetch token
   const getAuthToken = async (): Promise<string | null> => {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabaseClient();
+        const { data } = await supabase.auth.getSession();
+        if (data?.session?.access_token) {
+          return data.session.access_token;
+        }
+      } catch (e) {
+        console.warn("Could not get Supabase access_token:", e);
+      }
+    }
     if (auth?.currentUser) {
       try {
         return await auth.currentUser.getIdToken();
@@ -1289,13 +1111,23 @@ export default function App() {
 
   // Sign out
   const handleLogout = async () => {
+    try {
+      if (isSupabaseConfigured()) {
+        const supabase = getSupabaseClient();
+        await supabase.auth.signOut();
+      }
+    } catch (e) {
+      console.warn("Supabase signOut error:", e);
+    }
     const firebaseUser = auth?.currentUser;
     if (firebaseUser && auth) {
-      await signOut(auth);
+      await signOut(auth).catch(() => {});
     }
     localStorage.removeItem("local_user");
+    localStorage.removeItem("impersonator_admin");
     setCurrentUser(null);
     setActiveScreen("welcome");
+    showToast("Sessão encerrada com sucesso.", "info");
   };
 
   return (
@@ -1638,17 +1470,6 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Google Authentication Dialog */}
-      <GoogleAuthModal
-        isOpen={showGoogleAuthModal}
-        onClose={() => setShowGoogleAuthModal(false)}
-        onRetryOfficialLogin={handleGoogleLogin}
-        onNavigateToLocal={() => setActiveScreen("login")}
-        onNavigateToCgm={() => setActiveScreen("login")}
-        isLoading={isLoadingAuth}
-        errorMessage={googleModalError.message}
-        errorType={googleModalError.type}
-      />
     </div>
   );
 }

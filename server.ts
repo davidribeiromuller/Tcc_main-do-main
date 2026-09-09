@@ -1015,7 +1015,7 @@ Diretrizes:
                 window.opener.postMessage({ type: 'GOOGLE_OAUTH_SUCCESS', hash, search }, '*');
                 setTimeout(() => { try { window.close(); } catch(e) {} }, 500);
               } else {
-                window.location.href = '/';
+                window.location.href = '/' + (search || '') + (hash || '');
               }
             } catch (e) {
               window.location.href = '/';
