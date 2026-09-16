@@ -1,11 +1,20 @@
 import express from "express";
 import path from "path";
+import dns from "dns";
 import { createServer as createViteServer } from "vite";
 import * as dotenv from "dotenv";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 
 // Load environment variables
 dotenv.config();
+
+// Ensure verified Supabase credentials are available in environment
+process.env.SUPABASE_URL = process.env.SUPABASE_URL || "https://jaoheenjltzzglfncgfq.supabase.co";
+process.env.SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "sb_publishable_bpCOfPvR2p5aVpbDMOsCqw_D-E0TlcL";
+process.env.SUPABASE_JWKS_URL = process.env.SUPABASE_JWKS_URL || "https://jaoheenjltzzglfncgfq.supabase.co/auth/v1/.well-known/jwks.json";
+if (!process.env.SUPABASE_ANON_KEY) {
+  process.env.SUPABASE_ANON_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
+}
 
 import { requireAuth, AuthRequest } from "./src/middleware/auth.ts";
 import { requireAdmin } from "./src/middleware/admin.ts";
@@ -128,6 +137,76 @@ async function startServer() {
       res.status(500).json({
         configured: false,
         error: error.message || "Internal error in Supabase server wrapper"
+      });
+    }
+  });
+
+  // Comprehensive Supabase Auth & Project Status Diagnostic Endpoint
+  app.get("/api/auth/supabase-status", async (req, res) => {
+    const rawUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+    const rawKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+    const dbUrl = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL || "";
+
+    if (!rawUrl || rawUrl.includes("placeholder") || rawUrl.includes("[ID_DO_SEU_PROJETO]")) {
+      return res.json({
+        configured: false,
+        validDns: false,
+        error: "MISSING_CONFIGURATION",
+        message: "As variáveis SUPABASE_URL e VITE_SUPABASE_URL não foram configuradas com um projeto Supabase real.",
+        url: rawUrl,
+        hasAnonKey: !!rawKey
+      });
+    }
+
+    try {
+      const parsedUrl = new URL(rawUrl);
+      const hostname = parsedUrl.hostname;
+
+      // Extract project ref from subdomain: <ref>.supabase.co
+      const projectRef = hostname.split(".")[0];
+
+      // Perform real DNS lookup
+      const dnsResult = await new Promise<{ ok: boolean; address?: string; error?: string }>((resolve) => {
+        dns.lookup(hostname, (err, address) => {
+          if (err) {
+            resolve({ ok: false, error: err.code });
+          } else {
+            resolve({ ok: true, address });
+          }
+        });
+      });
+
+      if (!dnsResult.ok) {
+        return res.json({
+          configured: true,
+          validDns: false,
+          error: "DNS_PROBE_FINISHED_NXDOMAIN",
+          hostname,
+          projectRef,
+          url: rawUrl,
+          hasAnonKey: !!rawKey,
+          hasDbUrl: !!dbUrl,
+          message: `O domínio '${hostname}' não existe no DNS (NXDOMAIN). Isso ocorre quando o projeto no Supabase foi pausado por inatividade ou excluído. Acesse https://supabase.com/dashboard para restaurar o projeto ou atualize as variáveis com o novo projeto.`
+        });
+      }
+
+      return res.json({
+        configured: true,
+        validDns: true,
+        hostname,
+        projectRef,
+        ipAddress: dnsResult.address,
+        url: rawUrl,
+        hasAnonKey: !!rawKey,
+        hasDbUrl: !!dbUrl,
+        message: `Domínio Supabase '${hostname}' está ativo e respondendo no DNS.`
+      });
+    } catch (err: any) {
+      return res.status(400).json({
+        configured: false,
+        validDns: false,
+        error: "INVALID_URL",
+        message: err.message
       });
     }
   });

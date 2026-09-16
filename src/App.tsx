@@ -20,7 +20,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { CheckCircle, AlertCircle, CheckCircle2, Info, X } from "lucide-react";
 import logoImg from "./assets/images/logo.jpg";
 import { resilientFetch, setupNetworkAutoRecovery, safeAppReload } from "./lib/apiResilience.ts";
-import { getSupabaseClient, isSupabaseConfigured } from "./lib/supabase.ts";
+import { getSupabaseClient, isSupabaseConfigured, getEffectiveSupabaseUrl } from "./lib/supabase.ts";
 
 export default function App() {
   const [activeScreen, setActiveScreen] = useState<string>("splash");
@@ -483,6 +483,39 @@ export default function App() {
       setIsLoadingAuth(true);
       setLoginError(null);
 
+      if (!isSupabaseConfigured()) {
+        const errorMsg = "Configuração do Supabase ausente ou incompleta. Verifique a URL do projeto e a Anon Key.";
+        setLoginError(errorMsg);
+        showToast(errorMsg, "error");
+        setIsLoadingAuth(false);
+        return;
+      }
+
+      const activeUrl = getEffectiveSupabaseUrl();
+
+      // Pré-validação de conectividade com o domínio Supabase antes de redirecionar
+      // Isso impede que o usuário caia na tela de erro do navegador (DNS_PROBE_FINISHED_NXDOMAIN)
+      try {
+        const testController = new AbortController();
+        const testTimeout = setTimeout(() => testController.abort(), 3500);
+        await fetch(`${activeUrl}/auth/v1/health`, {
+          method: "GET",
+          mode: "no-cors",
+          signal: testController.signal,
+        });
+        clearTimeout(testTimeout);
+      } catch (dnsOrNetworkErr: any) {
+        console.error("[Supabase Auth] Erro ao conectar ao domínio Supabase:", dnsOrNetworkErr);
+        const domainMatch = activeUrl.match(/^https?:\/\/([^/?#]+)/i);
+        const hostDomain = domainMatch ? domainMatch[1] : activeUrl;
+        
+        const friendlyMsg = `O servidor de autenticação '${hostDomain}' está inacessível (DNS_PROBE_FINISHED_NXDOMAIN). O projeto no Supabase pode estar pausado por inatividade ou a URL está desatualizada. Restaure o projeto no painel do Supabase (https://supabase.com/dashboard) ou configure a URL correta.`;
+        setLoginError(friendlyMsg);
+        showToast(`Domínio Supabase inacessível: ${hostDomain}`, "error");
+        setIsLoadingAuth(false);
+        return;
+      }
+
       // ESTA URL DEVE SER IDÊNTICA À CADASTRADA NO REDIRECT URIS DO SUPABASE
       // No GitHub Pages, deve apontar exatamente para o repositório 'https://davidribeiromuller.github.io/Tcc_main-do-main/'
       const isGitHubPages = typeof window !== "undefined" && window.location.hostname.includes("github.io");
@@ -517,7 +550,9 @@ export default function App() {
       }
     } catch (error: any) {
       console.error("Falha no login Google:", error);
-      showToast("Não foi possível iniciar o login com Google. Tente novamente.", "error");
+      const msg = error?.message || "Não foi possível iniciar o login com Google. Tente novamente.";
+      setLoginError(msg);
+      showToast(msg, "error");
     } finally {
       setIsLoadingAuth(false);
     }

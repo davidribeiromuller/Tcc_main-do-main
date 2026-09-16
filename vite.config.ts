@@ -9,10 +9,12 @@ export default defineConfig(() => {
     plugins: [react(), tailwindcss()],
     define: {
       'process.env.GOOGLE_MAPS_PLATFORM_KEY': JSON.stringify(process.env.GOOGLE_MAPS_PLATFORM_KEY || ''),
-      'process.env.SUPABASE_URL': JSON.stringify(process.env.SUPABASE_URL || ''),
-      'process.env.SUPABASE_ANON_KEY': JSON.stringify(process.env.SUPABASE_ANON_KEY || ''),
-      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || ''),
-      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || ''),
+      'process.env.SUPABASE_URL': JSON.stringify(process.env.SUPABASE_URL || 'https://jaoheenjltzzglfncgfq.supabase.co'),
+      'process.env.SUPABASE_PUBLISHABLE_KEY': JSON.stringify(process.env.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_bpCOfPvR2p5aVpbDMOsCqw_D-E0TlcL'),
+      'process.env.SUPABASE_ANON_KEY': JSON.stringify(process.env.SUPABASE_ANON_KEY || 'sb_publishable_bpCOfPvR2p5aVpbDMOsCqw_D-E0TlcL'),
+      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://jaoheenjltzzglfncgfq.supabase.co'),
+      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_bpCOfPvR2p5aVpbDMOsCqw_D-E0TlcL'),
+      'import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY': JSON.stringify(process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_bpCOfPvR2p5aVpbDMOsCqw_D-E0TlcL'),
     },
     resolve: {
       alias: {
