@@ -15,6 +15,7 @@ import AdminPanel from "./components/AdminPanel.tsx";
 import MapView from "./components/MapView.tsx";
 import BottomNav from "./components/BottomNav.tsx";
 import DesktopNavbar from "./components/DesktopNavbar.tsx";
+import MobileHeader from "./components/MobileHeader.tsx";
 import WelcomeScreen from "./components/WelcomeScreen.tsx";
 import { motion, AnimatePresence } from "motion/react";
 import { CheckCircle, AlertCircle, CheckCircle2, Info, X } from "lucide-react";
@@ -1307,6 +1308,16 @@ export default function App() {
                 </button>
               </div>
             )}
+
+            <MobileHeader
+              activeScreen={activeScreen}
+              onNavigate={setActiveScreen}
+              currentUser={currentUser}
+              onLogout={handleLogout}
+              theme={theme}
+              onToggleTheme={toggleTheme}
+              canAccessAdmin={canAccessAdminPanel(currentUser)}
+            />
 
             <DesktopNavbar 
               activeScreen={activeScreen} 

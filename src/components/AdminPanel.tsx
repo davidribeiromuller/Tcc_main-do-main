@@ -35,7 +35,10 @@ import {
   Table as TableIcon,
   LayoutGrid,
   Check,
-  RefreshCw
+  RefreshCw,
+  MoreVertical,
+  Filter,
+  CalendarDays
 } from "lucide-react";
 import { User, Event } from "../types";
 import { formatLastActive, formatDateTimeBR } from "../lib/dateUtils";
@@ -81,7 +84,15 @@ export default function AdminPanel({
   const currentAdminRole = getAdminRoleType(currentUser);
 
   const [activeTab, setActiveTab] = useState<"users" | "blocked" | "events">("users");
-  const [viewMode, setViewMode] = useState<"table" | "cards">("table");
+  const [viewMode, setViewMode] = useState<"table" | "cards">(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      return "cards";
+    }
+    return "table";
+  });
+  const [filterRole, setFilterRole] = useState<"all" | "aluno" | "funcionario" | "chefe" | "ativos" | "bloqueados">("all");
+  const [userToViewDetails, setUserToViewDetails] = useState<User | null>(null);
+  const [userForMobileActions, setUserForMobileActions] = useState<User | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [eventSearchTerm, setEventSearchTerm] = useState("");
 
@@ -138,12 +149,30 @@ export default function AdminPanel({
   // Filtered lists
   const filteredUsers = usersList.filter((u) => {
     const term = searchTerm.toLowerCase();
-    return (
+    const matchesTerm =
+      !term ||
       (u.nome && u.nome.toLowerCase().includes(term)) ||
       (u.email && u.email.toLowerCase().includes(term)) ||
       (u.role && u.role.toLowerCase().includes(term)) ||
-      (u.institution && u.institution.toLowerCase().includes(term))
-    );
+      (u.institution && u.institution.toLowerCase().includes(term));
+    if (!matchesTerm) return false;
+
+    if (filterRole === "aluno") {
+      return !isChefeAdmin(u) && !isFuncionarioAdmin(u);
+    }
+    if (filterRole === "funcionario") {
+      return isFuncionarioAdmin(u);
+    }
+    if (filterRole === "chefe") {
+      return isChefeAdmin(u);
+    }
+    if (filterRole === "ativos") {
+      return u.ativo !== false;
+    }
+    if (filterRole === "bloqueados") {
+      return u.ativo === false;
+    }
+    return true;
   });
 
   const activeUsers = filteredUsers.filter((u) => u.ativo !== false);
@@ -516,53 +545,100 @@ export default function AdminPanel({
 
           {/* Search & Secondary Action Bar */}
           {activeTab !== "events" ? (
-            <div className="flex flex-col sm:flex-row items-center gap-3 mt-4">
-              <div className="relative flex-1 w-full">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder={
-                    activeTab === "blocked"
-                      ? "Pesquisar contas bloqueadas por nome ou e-mail..."
-                      : "Pesquisar usuários por nome, e-mail, permissão ou instituição..."
-                  }
-                  className="w-full h-10 pl-10 pr-4 text-xs bg-white dark:bg-brand-card-dark border border-brand-primary/20 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-accent text-brand-text-light dark:text-brand-text-dark placeholder-slate-400 shadow-2xs"
-                />
+            <>
+              <div className="flex flex-col sm:flex-row items-center gap-3 mt-4">
+                <div className="relative flex-1 w-full">
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder={
+                      activeTab === "blocked"
+                        ? "Pesquisar contas bloqueadas por nome ou e-mail..."
+                        : "Pesquisar usuários por nome, e-mail, permissão ou instituição..."
+                    }
+                    className="w-full h-10 pl-10 pr-4 text-xs bg-white dark:bg-brand-card-dark border border-brand-primary/20 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-accent text-brand-text-light dark:text-brand-text-dark placeholder-slate-400 shadow-2xs"
+                  />
+                </div>
+
+                {/* View Switcher (Table vs Cards) */}
+                <div className="flex items-center gap-1 bg-white dark:bg-brand-card-dark p-1 rounded-xl border border-brand-primary/20 dark:border-white/10 shadow-2xs shrink-0 self-end sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("table")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      viewMode === "table"
+                        ? "bg-brand-primary/20 dark:bg-brand-primary/30 text-brand-accent dark:text-brand-primary font-bold shadow-2xs"
+                        : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"
+                    }`}
+                    title="Visualizar em Formato de Tabela"
+                  >
+                    <TableIcon size={14} />
+                    <span>Tabela</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("cards")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      viewMode === "cards"
+                        ? "bg-brand-primary/20 dark:bg-brand-primary/30 text-brand-accent dark:text-brand-primary font-bold shadow-2xs"
+                        : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"
+                    }`}
+                    title="Visualizar em Formato de Cartões"
+                  >
+                    <LayoutGrid size={14} />
+                    <span>Cartões</span>
+                  </button>
+                </div>
               </div>
 
-              {/* View Switcher (Table vs Cards) */}
-              <div className="flex items-center gap-1 bg-white dark:bg-brand-card-dark p-1 rounded-xl border border-brand-primary/20 dark:border-white/10 shadow-2xs shrink-0 self-end sm:self-auto">
-                <button
-                  type="button"
-                  onClick={() => setViewMode("table")}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                    viewMode === "table"
-                      ? "bg-brand-primary/20 dark:bg-brand-primary/30 text-brand-accent dark:text-brand-primary font-bold shadow-2xs"
-                      : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"
-                  }`}
-                  title="Visualizar em Formato de Tabela"
-                >
-                  <TableIcon size={14} />
-                  <span>Tabela</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setViewMode("cards")}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                    viewMode === "cards"
-                      ? "bg-brand-primary/20 dark:bg-brand-primary/30 text-brand-accent dark:text-brand-primary font-bold shadow-2xs"
-                      : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"
-                  }`}
-                  title="Visualizar em Formato de Cartões"
-                >
-                  <LayoutGrid size={14} />
-                  <span>Cartões</span>
-                </button>
+              {/* Mobile & Touch Quick Filter Chips */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-3 scrollbar-none w-full select-none text-xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 shrink-0 mr-1 flex items-center gap-1">
+                  <Filter size={11} /> Filtros:
+                </span>
+                {[
+                  { id: "all", label: "Todos", count: usersList.length },
+                  { id: "aluno", label: "Alunos", count: usersList.filter((u) => !isChefeAdmin(u) && !isFuncionarioAdmin(u)).length },
+                  { id: "funcionario", label: "Funcionários ADM", count: usersList.filter((u) => isFuncionarioAdmin(u)).length },
+                  { id: "chefe", label: "Chefes ADM", count: usersList.filter((u) => isChefeAdmin(u)).length },
+                  { id: "ativos", label: "Ativos", count: usersList.filter((u) => u.ativo !== false).length },
+                  { id: "bloqueados", label: "Bloqueados", count: usersList.filter((u) => u.ativo === false).length },
+                ].map((chip) => {
+                  const isSelected = filterRole === chip.id;
+                  return (
+                    <button
+                      key={chip.id}
+                      type="button"
+                      onClick={() => {
+                        setFilterRole(chip.id as any);
+                        if (chip.id === "bloqueados") {
+                          setActiveTab("blocked");
+                        } else if (activeTab === "blocked" && chip.id !== "bloqueados") {
+                          setActiveTab("users");
+                        }
+                      }}
+                      className={`px-3 py-1.5 rounded-full shrink-0 font-medium transition-all text-xs flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                        isSelected
+                          ? "bg-brand-accent dark:bg-brand-primary text-white dark:text-slate-900 font-bold shadow-2xs"
+                          : "bg-white dark:bg-brand-card-dark text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/5"
+                      }`}
+                    >
+                      <span>{chip.label}</span>
+                      <span
+                        className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                          isSelected ? "bg-black/20 text-white dark:text-slate-900" : "bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400"
+                        }`}
+                      >
+                        {chip.count}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
-            </div>
+            </>
           ) : (
             <div className="flex flex-col sm:flex-row items-center gap-3 mt-4">
               <div className="relative flex-1 w-full">
@@ -831,16 +907,16 @@ export default function AdminPanel({
                   return (
                     <div
                       key={u.id}
-                      className="bg-white dark:bg-brand-card-dark rounded-2xl p-5 border border-brand-primary/15 dark:border-white/10 shadow-sm hover:shadow-md transition-all flex flex-col justify-between gap-3.5 relative overflow-hidden"
+                      className="bg-white dark:bg-brand-card-dark rounded-2xl p-4.5 border border-brand-primary/15 dark:border-white/10 shadow-sm hover:shadow-md transition-all flex flex-col justify-between gap-3 relative overflow-hidden"
                     >
                       {isMe && (
                         <div className="absolute top-0 left-0 right-0 h-1 bg-brand-accent dark:bg-brand-primary" />
                       )}
 
-                      {/* Header info */}
-                      <div className="flex justify-between items-start gap-2">
+                      {/* Header: 👤 Nome & E-mail */}
+                      <div className="flex items-start justify-between gap-2.5">
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-10 h-10 rounded-full bg-brand-primary/20 text-brand-accent dark:text-brand-primary flex items-center justify-center font-bold text-sm uppercase shrink-0 select-none overflow-hidden border border-brand-primary/30">
+                          <div className="w-11 h-11 rounded-2xl bg-brand-primary/20 text-brand-accent dark:text-brand-primary flex items-center justify-center font-bold text-sm uppercase shrink-0 select-none overflow-hidden border border-brand-primary/30">
                             {u.foto_perfil ? (
                               <img
                                 src={u.foto_perfil}
@@ -854,7 +930,7 @@ export default function AdminPanel({
                           </div>
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <h4 className="font-semibold text-xs text-slate-900 dark:text-white truncate">
+                              <h4 className="font-bold text-sm text-slate-900 dark:text-white truncate">
                                 {u.nome || "Usuário Escolar"}
                               </h4>
                               {isMe && (
@@ -863,67 +939,47 @@ export default function AdminPanel({
                                 </span>
                               )}
                             </div>
-                            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono block truncate mt-0.5">
+                            <span className="text-xs text-slate-500 dark:text-slate-400 font-mono block truncate mt-0.5">
                               {u.email}
                             </span>
                           </div>
                         </div>
-
-                        {/* Chefe Actions */}
-                        {isChefe ? (
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenChangeRoleModal(u)}
-                              className="p-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 transition-colors cursor-pointer"
-                              title="Alterar nível de permissão"
-                            >
-                              <Crown size={14} />
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEditModal(u)}
-                              className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
-                              title="Modificar dados completos"
-                            >
-                              <Edit3 size={14} />
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleOpenBlockModal(u)}
-                              disabled={isMe}
-                              className="p-1.5 rounded-xl bg-orange-50 text-orange-600 hover:bg-orange-100 dark:bg-orange-950/40 dark:text-orange-400 disabled:opacity-25 transition-colors cursor-pointer"
-                              title="Bloquear conta"
-                            >
-                              <Lock size={14} />
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium flex items-center gap-1">
-                            <Eye size={12} />
-                            <span>Consulta</span>
-                          </span>
-                        )}
                       </div>
 
-                      {/* Permission Badge & Institution */}
-                      <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-100 dark:border-white/5">
-                        <span className="text-slate-500 dark:text-slate-400 text-[11px]">Nível:</span>
-                        {userIsChefe ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300">
-                            <Crown size={11} /> Chefe Admin
-                          </span>
-                        ) : userIsFuncionario ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300">
-                            <ShieldCheck size={11} /> Funcionário Admin
-                          </span>
-                        ) : (
-                          <span className="text-[11px] text-slate-600 dark:text-slate-300 font-medium">
-                            {u.role || "Aluno"}
-                          </span>
-                        )}
+                      {/* Middle: Tipo / Cargo & Status */}
+                      <div className="space-y-2 py-2 border-y border-slate-100 dark:border-white/5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-slate-500 dark:text-slate-400 text-[11px] font-medium">Cargo:</span>
+                          {userIsChefe ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-xs font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300/40">
+                              <Crown size={12} /> Chefe ADM
+                            </span>
+                          ) : userIsFuncionario ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-xs font-bold bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900/50">
+                              <ShieldCheck size={12} /> Funcionário ADM
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-white/5">
+                              <UserIcon size={12} className="text-slate-400" />
+                              {u.role || "Aluno"}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-slate-500 dark:text-slate-400 text-[11px] font-medium">Status:</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="relative flex h-2 w-2">
+                              {activity.isOnline && (
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                              )}
+                              <span className={`relative inline-flex rounded-full h-2 w-2 ${u.ativo === false ? "bg-rose-500" : "bg-emerald-500"}`} />
+                            </span>
+                            <span className={`text-xs font-bold ${u.ativo === false ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                              {u.ativo === false ? "🔴 Bloqueado" : activity.isOnline ? "🟢 Ativo (Online)" : "🟢 Ativo"}
+                            </span>
+                          </div>
+                        </div>
                       </div>
 
                       {/* Stats Badges */}
@@ -942,40 +998,33 @@ export default function AdminPanel({
                         </span>
                       </div>
 
-                      {/* Last Active */}
-                      <div
-                        className={`px-3 py-2 rounded-xl flex items-center justify-between text-xs border transition-colors ${activity.badgeBg}`}
-                        title={`Último acesso registrado: ${formattedDateStr}`}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="relative flex h-2 w-2 shrink-0">
-                            {activity.isOnline && (
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                            )}
-                            <span className={`relative inline-flex rounded-full h-2 w-2 ${activity.dotColor}`} />
-                          </span>
-                          <span className={`text-[11px] font-semibold truncate ${activity.statusColor}`}>
-                            {activity.text}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500 font-mono shrink-0 ml-1.5">
-                          <Clock size={11} className="opacity-70" />
-                          <span>{formattedDateStr.split(" ")[1] || formattedDateStr}</span>
-                        </div>
-                      </div>
-
-                      {/* Impersonate Button (Chefe only) */}
-                      {isChefe && onImpersonateUser && !isMe && (
+                      {/* Action buttons: [Visualizar] [Ações] */}
+                      <div className="pt-1 flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => onImpersonateUser(u)}
-                          className="w-full h-8 bg-brand-primary/15 hover:bg-brand-primary/25 active:scale-98 text-brand-accent dark:text-brand-primary border border-brand-primary/30 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-2xs"
+                          onClick={() => setUserToViewDetails(u)}
+                          className={`h-10 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 border border-slate-200 dark:border-white/10 bg-slate-50 hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 ${
+                            isChefe ? "flex-1" : "w-full"
+                          }`}
+                          title="Visualizar ficha completa"
                         >
-                          <LogIn size={13} />
-                          <span>Entrar nesta conta</span>
+                          <Eye size={14} />
+                          <span>Visualizar</span>
                         </button>
-                      )}
+
+                        {/* [Ações] Only for Chefe Admin */}
+                        {isChefe && (
+                          <button
+                            type="button"
+                            onClick={() => setUserForMobileActions(u)}
+                            className="flex-1 h-10 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 bg-brand-primary/20 hover:bg-brand-primary/30 text-brand-accent dark:text-brand-primary border border-brand-primary/30 shadow-2xs"
+                            title="Opções de edição, permissões e bloqueio"
+                          >
+                            <MoreVertical size={14} />
+                            <span>Ações</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -2311,6 +2360,358 @@ export default function AdminPanel({
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+        {/* MODAL: Visualizar Detalhes do Usuário (Consulta Read-Only para Chefe e Funcionário) */}
+        {userToViewDetails && (
+          <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-white dark:bg-brand-card-dark rounded-3xl p-5 sm:p-6 w-full max-w-md border border-brand-primary/20 dark:border-white/10 shadow-2xl relative my-auto max-h-[90vh] flex flex-col"
+            >
+              <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-white/10 shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-brand-primary/20 text-brand-accent dark:text-brand-primary">
+                    <UserIcon size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                      Ficha Cadastral
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Informações completas do usuário
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setUserToViewDetails(null)}
+                  className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-white/10 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-4 py-4 overflow-y-auto pr-1">
+                {/* User Avatar + Identity */}
+                <div className="flex items-center gap-3.5 p-3.5 rounded-2xl bg-slate-50 dark:bg-black/30 border border-slate-100 dark:border-white/5">
+                  <div className="w-14 h-14 rounded-2xl bg-brand-primary/20 text-brand-accent dark:text-brand-primary flex items-center justify-center font-bold text-lg uppercase shrink-0 overflow-hidden border border-brand-primary/30">
+                    {userToViewDetails.foto_perfil ? (
+                      <img
+                        src={userToViewDetails.foto_perfil}
+                        alt={userToViewDetails.nome}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      (userToViewDetails.nome || userToViewDetails.email || "U").slice(0, 1)
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <h4 className="font-bold text-base text-slate-900 dark:text-white truncate">
+                      {userToViewDetails.nome || "Usuário Escolar"}
+                    </h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-mono truncate mt-0.5">
+                      {userToViewDetails.email}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      {isChefeAdmin(userToViewDetails) ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300">
+                          <Crown size={11} /> Chefe ADM
+                        </span>
+                      ) : isFuncionarioAdmin(userToViewDetails) ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300">
+                          <ShieldCheck size={11} /> Funcionário ADM
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-200/80 dark:bg-white/10 text-slate-700 dark:text-slate-300">
+                          <UserIcon size={11} /> {userToViewDetails.role || "Aluno"}
+                        </span>
+                      )}
+
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                          userToViewDetails.ativo === false
+                            ? "bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300"
+                            : "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300"
+                        }`}
+                      >
+                        {userToViewDetails.ativo === false ? "🔴 Bloqueado" : "🟢 Ativo"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Profile Fields */}
+                <div className="space-y-2.5 text-xs">
+                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-black/20 border border-slate-100 dark:border-white/5">
+                    <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                      <Building2 size={13} /> Instituição:
+                    </span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200 text-right max-w-[200px] truncate">
+                      {userToViewDetails.institution || "Escola Estadual Helena Wysocki"}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-black/20 border border-slate-100 dark:border-white/5">
+                    <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                      <Phone size={13} /> Telefone:
+                    </span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200 font-mono">
+                      {userToViewDetails.phone || "Não cadastrado"}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-black/20 border border-slate-100 dark:border-white/5">
+                    <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                      <Clock size={13} /> Última Atividade:
+                    </span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200 font-mono">
+                      {formatDateTimeBR(userToViewDetails.lastActiveAt || userToViewDetails.updatedAt || userToViewDetails.createdAt)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Real Usage Stats */}
+                {(() => {
+                  const s = calculateRealUserStats(userToViewDetails.id, events);
+                  return (
+                    <div className="grid grid-cols-3 gap-2 pt-1">
+                      <div className="p-2.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/30 text-center">
+                        <div className="text-base font-bold text-blue-700 dark:text-blue-300 font-mono">
+                          {s.participatedEventsCount}
+                        </div>
+                        <div className="text-[10px] text-blue-600 dark:text-blue-400">Inscrições</div>
+                      </div>
+
+                      <div className="p-2.5 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/30 text-center">
+                        <div className="text-base font-bold text-emerald-700 dark:text-emerald-300 font-mono">
+                          {s.routesCalculatedCount}
+                        </div>
+                        <div className="text-[10px] text-emerald-600 dark:text-emerald-400">Rotas</div>
+                      </div>
+
+                      <div className="p-2.5 rounded-xl bg-purple-50/70 dark:bg-purple-950/30 border border-purple-100 dark:border-purple-900/30 text-center">
+                        <div className="text-base font-bold text-purple-700 dark:text-purple-300 font-mono">
+                          {s.createdEventsCount}
+                        </div>
+                        <div className="text-[10px] text-purple-600 dark:text-purple-400">Criados</div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Footer Buttons */}
+              <div className="pt-3 border-t border-slate-100 dark:border-white/10 flex items-center gap-2 shrink-0">
+                {isChefe && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = userToViewDetails;
+                      setUserToViewDetails(null);
+                      setUserForMobileActions(target);
+                    }}
+                    className="flex-1 h-11 rounded-2xl bg-brand-accent dark:bg-brand-primary text-white dark:text-slate-900 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 shadow-sm"
+                  >
+                    <MoreVertical size={15} />
+                    <span>Ações Administrativas</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setUserToViewDetails(null)}
+                  className={`h-11 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
+                    isChefe ? "px-5" : "w-full"
+                  }`}
+                >
+                  Fechar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* MODAL: Menu de Ações Administrativas Mobile (Exclusivo para CHEFE_ADMIN) */}
+        {userForMobileActions && isChefe && (
+          <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <motion.div
+              initial={{ opacity: 0, y: 50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 50 }}
+              className="bg-white dark:bg-brand-card-dark rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 w-full max-w-md border-t sm:border border-brand-primary/20 dark:border-white/10 shadow-2xl relative"
+            >
+              {/* Header */}
+              <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-white/10">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-brand-primary/20 text-brand-accent dark:text-brand-primary flex items-center justify-center font-bold text-sm uppercase">
+                    {(userForMobileActions.nome || userForMobileActions.email || "U").slice(0, 1)}
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-900 dark:text-white truncate">
+                      {userForMobileActions.nome || "Usuário"}
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-mono truncate">
+                      {userForMobileActions.email}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setUserForMobileActions(null)}
+                  className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-white/10 text-slate-400 cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Action Buttons List */}
+              <div className="space-y-2 py-4">
+                {/* 1. Alterar Administrador / Nível */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const u = userForMobileActions;
+                    setUserForMobileActions(null);
+                    handleOpenChangeRoleModal(u);
+                  }}
+                  className="w-full p-3.5 rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-900 dark:text-amber-200 border border-amber-200 dark:border-amber-800/50 flex items-center gap-3 text-left transition-all cursor-pointer active:scale-98"
+                >
+                  <div className="p-2 rounded-xl bg-amber-200/60 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 shrink-0">
+                    <Crown size={18} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-bold">Alterar Administrador / Cargo</div>
+                    <div className="text-[11px] text-amber-700/80 dark:text-amber-400">
+                      Promover ou rebaixar entre Chefe, Funcionário e Aluno
+                    </div>
+                  </div>
+                </button>
+
+                {/* 2. Editar Dados Cadastrais */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const u = userForMobileActions;
+                    setUserForMobileActions(null);
+                    handleOpenEditModal(u);
+                  }}
+                  className="w-full p-3.5 rounded-2xl bg-slate-50 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-white/10 flex items-center gap-3 text-left transition-all cursor-pointer active:scale-98"
+                >
+                  <div className="p-2 rounded-xl bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400 shrink-0">
+                    <Edit3 size={18} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-bold">Editar Dados Cadastrais</div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Alterar nome, e-mail, telefone ou instituição
+                    </div>
+                  </div>
+                </button>
+
+                {/* 3. Bloquear / Desbloquear Usuário */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const u = userForMobileActions;
+                    setUserForMobileActions(null);
+                    if (u.ativo === false) {
+                      setUserToUnblock(u);
+                    } else {
+                      handleOpenBlockModal(u);
+                    }
+                  }}
+                  disabled={
+                    currentUser?.id === userForMobileActions.id ||
+                    (currentUser?.email &&
+                      userForMobileActions.email &&
+                      currentUser.email.toLowerCase() === userForMobileActions.email.toLowerCase())
+                  }
+                  className="w-full p-3.5 rounded-2xl bg-orange-50/80 dark:bg-orange-950/30 hover:bg-orange-100 dark:hover:bg-orange-900/40 text-orange-900 dark:text-orange-200 border border-orange-200 dark:border-orange-800/50 flex items-center gap-3 text-left transition-all cursor-pointer active:scale-98 disabled:opacity-40"
+                >
+                  <div className="p-2 rounded-xl bg-orange-200/60 dark:bg-orange-900/60 text-orange-700 dark:text-orange-300 shrink-0">
+                    {userForMobileActions.ativo === false ? <Unlock size={18} /> : <Lock size={18} />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-bold">
+                      {userForMobileActions.ativo === false ? "Desbloquear Conta" : "Bloquear Usuário"}
+                    </div>
+                    <div className="text-[11px] text-orange-700/80 dark:text-orange-400">
+                      {userForMobileActions.ativo === false
+                        ? "Restaurar acesso e permissões"
+                        : "Suspender temporariamente o acesso do usuário"}
+                    </div>
+                  </div>
+                </button>
+
+                {/* 4. Excluir Usuário */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const u = userForMobileActions;
+                    setUserForMobileActions(null);
+                    setUserToDelete(u);
+                  }}
+                  disabled={
+                    currentUser?.id === userForMobileActions.id ||
+                    (currentUser?.email &&
+                      userForMobileActions.email &&
+                      currentUser.email.toLowerCase() === userForMobileActions.email.toLowerCase())
+                  }
+                  className="w-full p-3.5 rounded-2xl bg-red-50/80 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-900 dark:text-red-200 border border-red-200 dark:border-red-800/50 flex items-center gap-3 text-left transition-all cursor-pointer active:scale-98 disabled:opacity-40"
+                >
+                  <div className="p-2 rounded-xl bg-red-200/60 dark:bg-red-900/60 text-red-700 dark:text-red-300 shrink-0">
+                    <Trash2 size={18} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-bold">Excluir Usuário</div>
+                    <div className="text-[11px] text-red-700/80 dark:text-red-400">
+                      Remover este usuário do sistema
+                    </div>
+                  </div>
+                </button>
+
+                {/* 5. Impersonate (se configurado) */}
+                {onImpersonateUser &&
+                  currentUser?.id !== userForMobileActions.id &&
+                  currentUser?.email?.toLowerCase() !== userForMobileActions.email?.toLowerCase() && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const u = userForMobileActions;
+                        setUserForMobileActions(null);
+                        onImpersonateUser(u);
+                      }}
+                      className="w-full p-3.5 rounded-2xl bg-brand-primary/15 hover:bg-brand-primary/25 text-brand-accent dark:text-brand-primary border border-brand-primary/30 flex items-center gap-3 text-left transition-all cursor-pointer active:scale-98"
+                    >
+                      <div className="p-2 rounded-xl bg-brand-primary/30 text-brand-accent dark:text-brand-primary shrink-0">
+                        <LogIn size={18} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-bold">Entrar nesta Conta (Impersonar)</div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Navegar no app visualizando exatamente o que este aluno vê
+                        </div>
+                      </div>
+                    </button>
+                  )}
+              </div>
+
+              {/* Cancel Button */}
+              <div className="pt-2 border-t border-slate-100 dark:border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setUserForMobileActions(null)}
+                  className="w-full h-11 rounded-2xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 font-semibold text-xs transition-all cursor-pointer"
+                >
+                  Cancelar
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

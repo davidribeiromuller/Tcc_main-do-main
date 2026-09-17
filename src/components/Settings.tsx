@@ -26,6 +26,7 @@ import {
 import { SCHOOLS_LIST } from "../lib/schools.ts";
 import { Event } from "../types.ts";
 import { calculateRealUserStats } from "../lib/userStats.ts";
+import { isChefeAdmin, isFuncionarioAdmin } from "../lib/permissions.ts";
 
 const ensureDbDateToInputFormat = (dateVal: string): string => {
   if (!dateVal) return "";
@@ -452,8 +453,8 @@ export default function Settings({
               </button>
             </div>
 
-            {/* Supabase / Postgres Database Connection Diagnostics for Employees (Funcionários) only */}
-            {(user?.role === "Professor" || user?.role === "Diretor" || user?.role === "Pedagogo(a)" || user?.role === "Funcionário") && (
+            {/* Supabase / Postgres Database Connection Diagnostics for Administrators & Staff */}
+            {(isChefeAdmin(user) || isFuncionarioAdmin(user) || user?.role === "Professor" || user?.role === "Diretor" || user?.role === "Pedagogo(a)" || user?.role === "Funcionário") && (
               <div className="bg-brand-secondary/30 dark:bg-brand-card-dark rounded-3xl p-5 border border-brand-primary/10 flex flex-col gap-4">
                 <div className="flex justify-between items-center pb-2 border-b border-brand-primary/10">
                   <div className="flex items-center gap-2">
