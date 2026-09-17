@@ -17,7 +17,12 @@ if (!process.env.SUPABASE_ANON_KEY) {
 }
 
 import { requireAuth, AuthRequest } from "./src/middleware/auth.ts";
-import { requireAdmin } from "./src/middleware/admin.ts";
+import {
+  requireChefeAdmin,
+  requireAdminOrStaff,
+  checkIsChefe,
+  checkIsFuncionario
+} from "./src/middleware/admin.ts";
 import {
   getOrCreateUser,
   getUserByUid,
@@ -426,9 +431,21 @@ async function startServer() {
         return res.status(401).json({ error: "Sessão inválida" });
       }
 
-      const dbUser = await getUserByUid(req.user.uid);
+      let dbUser = await getUserByUid(req.user.uid);
+      if (!dbUser && req.user.email) {
+        dbUser = await getUserByEmail(req.user.email);
+      }
+
       if (!dbUser) {
         return res.status(404).json({ error: "Usuário não encontrado no banco" });
+      }
+
+      if (dbUser.ativo === false) {
+        return res.status(403).json({
+          error: "Sua conta foi bloqueada ou desativada pela administração.",
+          blocked: true,
+          user: dbUser
+        });
       }
 
       res.json({ user: dbUser });
@@ -460,8 +477,18 @@ async function startServer() {
       if (birthdate !== undefined) updateData.birthdate = String(birthdate).trim();
       if (gender !== undefined) updateData.gender = String(gender).trim();
       if (institution !== undefined) updateData.institution = String(institution).trim();
-      if (role !== undefined) updateData.role = String(role).trim();
       if (foto_perfil !== undefined) updateData.foto_perfil = String(foto_perfil).trim();
+
+      // Segurança: Apenas o Chefe Administrador pode alterar o próprio papel para admin
+      if (role !== undefined) {
+        const currentUserInDb = await getUserByUid(req.user.uid);
+        const isSelfChefe = checkIsChefe(currentUserInDb, req.user);
+        if (isSelfChefe) {
+          updateData.role = String(role).trim();
+        } else if (role !== "Diretor" && role !== "Chefe Administrador" && role !== "Funcionário") {
+          updateData.role = String(role).trim();
+        }
+      }
       updateData.lastActiveAt = new Date();
 
       const updatedUser = await updateUserByUid(req.user.uid, updateData);
@@ -487,52 +514,51 @@ async function startServer() {
     }
   });
 
-  // Administrativo / Diretório Escolar: Listar todos os usuários
-  app.get("/api/users", async (req: AuthRequest, res) => {
+  // Administrativo / Diretório Escolar: Listar todos os usuários com controle de permissão por nível
+  app.get("/api/users", requireAuth, requireAdminOrStaff, async (req: AuthRequest, res) => {
     try {
       const allUsers = await listAllUsers();
+      const adminRole = (req as any).adminRole || 'funcionario';
 
-      let isAdminCaller = false;
-      const authHeader = req.headers.authorization;
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        const token = authHeader.split('Bearer ')[1];
-        if (
-          token.includes('Diretor') ||
-          token.includes('davidribeiromuller2009@gmail.com') ||
-          token.includes('diretoria@helenawysocki.com') ||
-          token.includes('antoniozinho')
-        ) {
-          isAdminCaller = true;
-        }
+      // 1. CHEFE ADMINISTRADOR: Acesso a todas as informações e colunas detalhadas
+      if (adminRole === 'chefe') {
+        const chefeView = allUsers.map((u: any) => {
+          const { password, ...rest } = u;
+          return {
+            ...rest,
+            ativo: rest.ativo !== false,
+            isAdmin: rest.isAdmin || rest.role === 'Diretor'
+          };
+        });
+        return res.json({ users: chefeView, adminRole: 'chefe' });
       }
 
-      if (isAdminCaller) {
-        return res.json({ users: allUsers });
-      }
-
-      // Diretório escolar seguro: oculta senhas e CPFs para requisições não autenticadas ou alunos
-      const sanitized = allUsers.map(u => ({
+      // 2. FUNCIONÁRIO ADMINISTRADOR: Acesso restrito às informações permitidas:
+      // Nome, Email, Tipo/Função, Status da conta, Instituição, Data de Cadastro / Última atividade
+      const funcionarioView = allUsers.map(u => ({
         id: u.id,
         uid: u.uid,
         nome: u.nome,
         email: u.email,
         foto_perfil: u.foto_perfil,
         role: u.role,
-        ativo: u.ativo,
-        isAdmin: u.isAdmin,
+        ativo: u.ativo !== false,
         institution: u.institution,
-        createdAt: u.createdAt
+        createdAt: u.createdAt,
+        lastActiveAt: u.lastActiveAt,
+        lastLogin: u.lastLogin,
+        isAdmin: u.isAdmin || u.role === 'Diretor'
       }));
 
-      res.json({ users: sanitized });
+      return res.json({ users: funcionarioView, adminRole: 'funcionario' });
     } catch (error: any) {
-      console.error("Erro ao listar usuários dba:", error);
+      console.error("Erro ao listar usuários:", error);
       res.status(500).json({ error: error.message || "Falha ao obter usuários" });
     }
   });
 
-  // Administrativo: Atualizar qualquer dado de outro usuário por ID (Admin ou Diretor)
-  app.put("/api/users/:id", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  // Administrativo: Atualizar dados/permissões de usuário (Exclusivo CHEFE ADMINISTRADOR)
+  app.put("/api/users/:id", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
     try {
       const userId = parseInt(req.params.id);
       if (isNaN(userId)) {
@@ -543,7 +569,7 @@ async function startServer() {
       const updateData: any = {};
       if (nome !== undefined) updateData.nome = String(nome).trim();
       if (email !== undefined) updateData.email = String(email).trim().toLowerCase();
-      if (role !== undefined) updateData.role = String(role);
+      if (role !== undefined) updateData.role = String(role).trim();
       if (isAdmin !== undefined) updateData.isAdmin = Boolean(isAdmin);
       if (ativo !== undefined) updateData.ativo = Boolean(ativo);
       if (password !== undefined && String(password).trim()) updateData.password = String(password).trim();
@@ -554,21 +580,49 @@ async function startServer() {
       if (gender !== undefined) updateData.gender = String(gender).trim();
       if (foto_perfil !== undefined) updateData.foto_perfil = String(foto_perfil).trim();
 
-      const dbUser = await getUserByUid(req.user!.uid);
-      if (dbUser && dbUser.id === userId && isAdmin === false) {
-        return res.status(400).json({ error: "Você não pode remover seus próprios privilégios de administrador" });
+      const callerDbUser = (req as any).dbUser || await getUserByUid(req.user!.uid);
+
+      // Proteção de segurança: O Chefe não pode rebaixar a si próprio nem bloquear sua própria conta
+      if (callerDbUser && callerDbUser.id === userId) {
+        if (isAdmin === false || (role && role !== 'Diretor' && role !== 'Chefe Administrador')) {
+          return res.status(400).json({ error: "Você não pode remover seus próprios privilégios de Chefe Administrador" });
+        }
+        if (ativo === false) {
+          return res.status(400).json({ error: "Você não pode bloquear sua própria conta de Chefe Administrador" });
+        }
       }
 
       const updatedUser = await updateUserById(userId, updateData);
-      res.json({ user: updatedUser });
+      res.json({ success: true, user: updatedUser });
     } catch (error: any) {
       console.error("Erro ao atualizar dados do usuário:", error);
       res.status(500).json({ error: error.message || "Erro ao atualizar permissões e dados do usuário" });
     }
   });
 
-  // Administrativo: Desbloquear / Reativar conta de usuário
-  app.post("/api/users/:id/unblock", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  // Administrativo: Bloquear usuário no banco (Exclusivo CHEFE ADMINISTRADOR)
+  app.post("/api/users/:id/block", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ error: "ID inválido" });
+      }
+
+      const callerDbUser = (req as any).dbUser || await getUserByUid(req.user!.uid);
+      if (callerDbUser && callerDbUser.id === userId) {
+        return res.status(400).json({ error: "Você não pode bloquear sua própria conta de Chefe Administrador" });
+      }
+
+      const blockedUser = await blockUserById(userId);
+      res.json({ success: true, user: blockedUser });
+    } catch (error: any) {
+      console.error("Erro ao bloquear usuário:", error);
+      res.status(500).json({ error: error.message || "Não foi possível bloquear o usuário" });
+    }
+  });
+
+  // Administrativo: Desbloquear / Reativar conta de usuário no banco (Exclusivo CHEFE ADMINISTRADOR)
+  app.post("/api/users/:id/unblock", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
     try {
       const userId = parseInt(req.params.id);
       if (isNaN(userId)) {
@@ -583,8 +637,8 @@ async function startServer() {
     }
   });
 
-  // Administrativo: Excluir definitivamente usuário do database
-  app.delete("/api/users/:id/permanent", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  // Administrativo: Excluir definitivamente usuário do database (Exclusivo CHEFE ADMINISTRADOR)
+  app.delete("/api/users/:id/permanent", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
     try {
       const userId = parseInt(req.params.id);
       if (isNaN(userId)) {
@@ -592,9 +646,9 @@ async function startServer() {
       }
 
       // Evitar deletar a si mesmo
-      const dbUser = await getUserByUid(req.user!.uid);
-      if (dbUser && dbUser.id === userId) {
-        return res.status(400).json({ error: "Você não pode deletar sua própria conta escolar ativa" });
+      const callerDbUser = (req as any).dbUser || await getUserByUid(req.user!.uid);
+      if (callerDbUser && callerDbUser.id === userId) {
+        return res.status(400).json({ error: "Você não pode excluir sua própria conta escolar ativa" });
       }
 
       const deletedUser = await deleteUserPermanentlyById(userId);
@@ -604,7 +658,9 @@ async function startServer() {
       res.status(500).json({ error: error.message || "Não foi possível excluir o usuário" });
     }
   });
-  app.delete("/api/users/:id", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+
+  // Administrativo: Bloqueio suave / soft-delete (Exclusivo CHEFE ADMINISTRADOR)
+  app.delete("/api/users/:id", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
     try {
       const userId = parseInt(req.params.id);
       if (isNaN(userId)) {
@@ -612,16 +668,16 @@ async function startServer() {
       }
 
       // Evitar deletar a si mesmo
-      const dbUser = await getUserByUid(req.user!.uid);
-      if (dbUser && dbUser.id === userId) {
-        return res.status(400).json({ error: "Você não pode deletar sua própria conta escolar ativa" });
+      const callerDbUser = (req as any).dbUser || await getUserByUid(req.user!.uid);
+      if (callerDbUser && callerDbUser.id === userId) {
+        return res.status(400).json({ error: "Você não pode bloquear sua própria conta escolar ativa" });
       }
 
-      const deletedUser = await deleteUserById(userId);
-      res.json({ success: true, user: deletedUser });
+      const blockedUser = await deleteUserById(userId);
+      res.json({ success: true, user: blockedUser });
     } catch (error: any) {
-      console.error("Erro ao excluir usuário:", error);
-      res.status(500).json({ error: error.message || "Não foi possível excluir o usuário" });
+      console.error("Erro ao bloquear usuário:", error);
+      res.status(500).json({ error: error.message || "Não foi possível bloquear o usuário" });
     }
   });
 
@@ -638,7 +694,7 @@ async function startServer() {
     }
   });
 
-  // Criar Novo Evento (Administradores e usuários autenticados)
+  // Criar Novo Evento (Chefe Administrador ou Funcionário Administrador)
   app.post("/api/events", requireAuth, async (req: AuthRequest, res) => {
     try {
       const { title, location, day, month, year, time, isPaid, price, requirements, website, image } = req.body;
@@ -661,6 +717,23 @@ async function startServer() {
           (req.user as any).role || 'Aluno'
         );
       }
+
+      if (dbUser && dbUser.ativo === false) {
+        return res.status(403).json({
+          error: "Sua conta está bloqueada pela administração escolar.",
+          blocked: true
+        });
+      }
+
+      const isChefe = checkIsChefe(dbUser, req.user);
+      const isFuncionario = checkIsFuncionario(dbUser, req.user);
+
+      if (!isChefe && !isFuncionario) {
+        return res.status(403).json({
+          error: "Acesso negado: Apenas Administradores (Chefe ou Funcionário) podem publicar eventos escolares."
+        });
+      }
+
       const creatorId = dbUser ? dbUser.id : null;
 
       const newEvent = await createNewEvent({
@@ -685,7 +758,9 @@ async function startServer() {
     }
   });
 
-  // Atualizar / Editar Evento por ID (Qualquer Administrador ou Criador)
+  // Atualizar / Editar Evento por ID
+  // Chefe Administrador: pode editar qualquer evento
+  // Funcionário Administrador: pode editar apenas eventos criados por ele mesmo
   app.put("/api/events/:id", requireAuth, async (req: AuthRequest, res) => {
     try {
       const eventId = parseInt(req.params.id);
@@ -698,14 +773,15 @@ async function startServer() {
         dbUser = await getUserByEmail(req.user.email);
       }
 
-      const userEmail = (req.user?.email || dbUser?.email || "").toLowerCase().trim();
-      const isDirectorOrAdmin =
-        userEmail === "diretoria@helenawysocki.com" ||
-        userEmail === "davidribeiromuller2009@gmail.com" ||
-        (req.user as any)?.isAdmin === true ||
-        (req.user as any)?.role === "Diretor" ||
-        dbUser?.isAdmin === true ||
-        dbUser?.role === "Diretor";
+      if (dbUser && dbUser.ativo === false) {
+        return res.status(403).json({
+          error: "Sua conta está bloqueada pela administração escolar.",
+          blocked: true
+        });
+      }
+
+      const isChefe = checkIsChefe(dbUser, req.user);
+      const isFuncionario = checkIsFuncionario(dbUser, req.user);
 
       const allEvents = await listAllEvents();
       const targetEvent = allEvents.find(e => e.id === eventId);
@@ -713,8 +789,16 @@ async function startServer() {
         return res.status(404).json({ error: "Evento não encontrado" });
       }
 
-      if (!isDirectorOrAdmin && (!dbUser || targetEvent.creatorId !== dbUser.id)) {
-        return res.status(403).json({ error: "Acesso negado: Requer privilégios de Administrador para editar este evento" });
+      // Regra de permissão: Chefe pode editar qualquer um; Funcionário apenas o seu próprio
+      if (!isChefe) {
+        if (!isFuncionario) {
+          return res.status(403).json({ error: "Acesso negado: Requer privilégios de Administrador para editar eventos." });
+        }
+        if (!dbUser || targetEvent.creatorId !== dbUser.id) {
+          return res.status(403).json({
+            error: "Acesso negado: Como Funcionário Administrador, você só pode editar eventos criados por você mesmo."
+          });
+        }
       }
 
       const { title, location, day, month, year, time, isPaid, price, requirements, website, image } = req.body;
@@ -740,6 +824,8 @@ async function startServer() {
   });
 
   // Excluir Evento por ID
+  // Chefe Administrador: pode excluir qualquer evento
+  // Funcionário Administrador: pode excluir apenas eventos criados por ele mesmo
   app.delete("/api/events/:id", requireAuth, async (req: AuthRequest, res) => {
     try {
       const eventId = parseInt(req.params.id);
@@ -747,36 +833,37 @@ async function startServer() {
         return res.status(400).json({ error: "ID de evento inválido" });
       }
 
-      // Obter usuário do banco
       let dbUser = await getUserByUid(req.user!.uid);
       if (!dbUser && req.user?.email) {
         dbUser = await getUserByEmail(req.user.email);
       }
 
-      const userEmail = (req.user?.email || dbUser?.email || "").toLowerCase().trim();
-      const isDirectorOrAdmin =
-        userEmail === "diretoria@helenawysocki.com" ||
-        userEmail === "davidribeiromuller2009@gmail.com" ||
-        (req.user as any)?.isAdmin === true ||
-        (req.user as any)?.role === "Diretor" ||
-        dbUser?.isAdmin === true ||
-        dbUser?.role === "Diretor";
-
-      // Se for administrador, tem permissão total
-      if (isDirectorOrAdmin) {
-        const deleted = await deleteEventById(eventId);
-        return res.json({ success: true, event: deleted });
+      if (dbUser && dbUser.ativo === false) {
+        return res.status(403).json({
+          error: "Sua conta está bloqueada pela administração escolar.",
+          blocked: true
+        });
       }
 
-      // Consultar se o evento pertence a esse criador
+      const isChefe = checkIsChefe(dbUser, req.user);
+      const isFuncionario = checkIsFuncionario(dbUser, req.user);
+
       const allEvents = await listAllEvents();
       const targetEvent = allEvents.find(e => e.id === eventId);
       if (!targetEvent) {
         return res.status(404).json({ error: "Evento não encontrado" });
       }
 
-      if (!dbUser || targetEvent.creatorId !== dbUser.id) {
-        return res.status(403).json({ error: "Acesso negado: Você não é o criador deste evento" });
+      // Regra de permissão: Chefe pode excluir qualquer um; Funcionário apenas o seu próprio
+      if (!isChefe) {
+        if (!isFuncionario) {
+          return res.status(403).json({ error: "Acesso negado: Requer privilégios de Administrador para excluir eventos." });
+        }
+        if (!dbUser || targetEvent.creatorId !== dbUser.id) {
+          return res.status(403).json({
+            error: "Acesso negado: Como Funcionário Administrador, você só pode excluir eventos criados por você mesmo."
+          });
+        }
       }
 
       const deleted = await deleteEventById(eventId);

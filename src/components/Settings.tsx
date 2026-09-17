@@ -46,6 +46,8 @@ interface SettingsProps {
   onUpdateProfile: (profileData: any) => Promise<void>;
   onNavigate: (screen: string) => void;
   onLogout: () => void;
+  theme?: "light" | "dark";
+  onToggleTheme?: () => void;
 }
 
 export default function Settings({
@@ -53,7 +55,9 @@ export default function Settings({
   events = [],
   onUpdateProfile,
   onNavigate,
-  onLogout
+  onLogout,
+  theme = "light",
+  onToggleTheme
 }: SettingsProps) {
   const [editMode, setEditMode] = useState(false);
   const [nome, setNome] = useState(user?.nome || "");
@@ -360,6 +364,48 @@ export default function Settings({
                 </div>
                 <ChevronRight size={18} className="text-slate-400" />
               </button>
+
+              {/* Modo Escuro / Modo Claro Toggle */}
+              <div className="w-full p-4 rounded-2xl bg-white dark:bg-brand-card-dark border border-brand-primary/10 flex items-center justify-between gap-3 shadow-2xs">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-xl transition-colors ${
+                    theme === "dark" 
+                      ? "bg-indigo-950/50 text-indigo-400" 
+                      : "bg-amber-50 text-amber-600"
+                  }`}>
+                    {theme === "dark" ? <Moon size={18} /> : <Sun size={18} />}
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold leading-tight text-slate-800 dark:text-white">
+                      Modo Escuro
+                    </div>
+                    <div className="text-[11px] text-slate-400 dark:text-slate-400">
+                      {theme === "dark" 
+                        ? "Tema escuro ativado (tons confortáveis)" 
+                        : "Tema claro original ativado"}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={onToggleTheme}
+                  role="switch"
+                  aria-checked={theme === "dark"}
+                  title={theme === "dark" ? "Desativar modo escuro" : "Ativar modo escuro"}
+                  className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    theme === "dark" ? "bg-brand-accent dark:bg-brand-primary" : "bg-slate-200"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out flex items-center justify-center text-[10px] ${
+                      theme === "dark" ? "translate-x-5 text-brand-accent" : "translate-x-0 text-amber-500"
+                    }`}
+                  >
+                    {theme === "dark" ? <Moon size={11} /> : <Sun size={11} />}
+                  </span>
+                </button>
+              </div>
 
               {/* Notification Permission Request Flow */}
               <div className="w-full p-4 rounded-2xl bg-white dark:bg-brand-card-dark border border-brand-primary/10 flex items-center justify-between gap-3">

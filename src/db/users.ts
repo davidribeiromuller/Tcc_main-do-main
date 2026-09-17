@@ -115,15 +115,6 @@ export async function getOrCreateUser(
       .returning();
 
     const user = result[0];
-    if (user && user.role === 'Funcionário' && user.email !== 'funcionario@helenawysocki.com') {
-      const fixedResult = await db.update(users)
-        .set({ role: 'Aluno', isAdmin: false, updatedAt: new Date() })
-        .where(eq(users.uid, uid))
-        .returning();
-      markDbOnline();
-      return fixedResult[0];
-    }
-
     markDbOnline();
     return user;
   } catch (error) {
@@ -172,16 +163,17 @@ export async function updateUserByUid(uid: string, data: any) {
   try {
     const updatedData = { ...data };
     if (data.role !== undefined) {
-      const user = await getUserByUid(uid);
-      if (data.role === 'Funcionário' && user && user.email !== 'funcionario@helenawysocki.com') {
-        updatedData.role = 'Aluno';
-      }
-      if (data.isAdmin === undefined) {
-        if (updatedData.role === 'Diretor') {
-          updatedData.isAdmin = true;
-        } else if (user) {
-          updatedData.isAdmin = user.isAdmin;
-        }
+      const cleanRole = String(data.role).trim();
+      const lower = cleanRole.toLowerCase();
+      if (lower === 'diretor' || lower === 'chefe administrador' || lower === 'chefe admin') {
+        updatedData.role = 'Diretor';
+        if (data.isAdmin === undefined) updatedData.isAdmin = true;
+      } else if (lower === 'funcionário' || lower === 'funcionario' || lower === 'funcionário administrador' || lower === 'funcionario administrador') {
+        updatedData.role = 'Funcionário';
+        if (data.isAdmin === undefined) updatedData.isAdmin = false;
+      } else {
+        updatedData.role = cleanRole;
+        if (data.isAdmin === undefined) updatedData.isAdmin = false;
       }
     }
     const result = await db.update(users)
@@ -207,17 +199,17 @@ export async function updateUserById(id: number, data: any) {
   try {
     const updatedData = { ...data };
     if (data.role !== undefined) {
-      const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
-      const user = result[0];
-      if (data.role === 'Funcionário' && user && user.email !== 'funcionario@helenawysocki.com') {
-        updatedData.role = 'Aluno';
-      }
-      if (data.isAdmin === undefined) {
-        if (updatedData.role === 'Diretor') {
-          updatedData.isAdmin = true;
-        } else if (user) {
-          updatedData.isAdmin = user.isAdmin;
-        }
+      const cleanRole = String(data.role).trim();
+      const lower = cleanRole.toLowerCase();
+      if (lower === 'diretor' || lower === 'chefe administrador' || lower === 'chefe admin') {
+        updatedData.role = 'Diretor';
+        if (data.isAdmin === undefined) updatedData.isAdmin = true;
+      } else if (lower === 'funcionário' || lower === 'funcionario' || lower === 'funcionário administrador' || lower === 'funcionario administrador') {
+        updatedData.role = 'Funcionário';
+        if (data.isAdmin === undefined) updatedData.isAdmin = false;
+      } else {
+        updatedData.role = cleanRole;
+        if (data.isAdmin === undefined) updatedData.isAdmin = false;
       }
     }
     const result = await db.update(users)

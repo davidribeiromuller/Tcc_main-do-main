@@ -29,11 +29,23 @@ import {
   Unlock,
   Ticket,
   Route as RouteIcon,
-  AlertTriangle
+  AlertTriangle,
+  Crown,
+  Eye,
+  Table as TableIcon,
+  LayoutGrid,
+  Check,
+  RefreshCw
 } from "lucide-react";
 import { User, Event } from "../types";
 import { formatLastActive, formatDateTimeBR } from "../lib/dateUtils";
-import { calculateRealUserStats } from "../lib/userStats.ts";
+import { calculateRealUserStats } from "../lib/userStats";
+import {
+  isChefeAdmin,
+  isFuncionarioAdmin,
+  getRoleBadgeLabel,
+  getAdminRoleType
+} from "../lib/permissions";
 
 interface AdminPanelProps {
   usersList: User[];
@@ -64,15 +76,22 @@ export default function AdminPanel({
   onSelectEvent,
   currentUser
 }: AdminPanelProps) {
+  const isChefe = isChefeAdmin(currentUser);
+  const isFuncionario = isFuncionarioAdmin(currentUser);
+  const currentAdminRole = getAdminRoleType(currentUser);
+
   const [activeTab, setActiveTab] = useState<"users" | "blocked" | "events">("users");
+  const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const [searchTerm, setSearchTerm] = useState("");
   const [eventSearchTerm, setEventSearchTerm] = useState("");
-  
-  // User modals state
+
+  // Role modification modal state
+  const [userToChangeRole, setUserToChangeRole] = useState<User | null>(null);
+  const [selectedRoleOption, setSelectedRoleOption] = useState<"chefe" | "funcionario" | "user">("user");
+  const [isSavingRole, setIsSavingRole] = useState(false);
+
+  // User edit modal state
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [userToDelete, setUserToDelete] = useState<User | null>(null);
-  const [userToUnblock, setUserToUnblock] = useState<User | null>(null);
-  const [userToPermanentDelete, setUserToPermanentDelete] = useState<User | null>(null);
   const [editFormData, setEditFormData] = useState({
     nome: "",
     email: "",
@@ -82,29 +101,41 @@ export default function AdminPanel({
     isAdmin: false,
     ativo: true
   });
-  const [isSaving, setIsSaving] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [isSavingUser, setIsSavingUser] = useState(false);
 
-  // Event modals state
+  // User block/unblock/delete modal states
+  const [userToBlock, setUserToBlock] = useState<User | null>(null);
+  const [isBlocking, setIsBlocking] = useState(false);
+  const [userToUnblock, setUserToUnblock] = useState<User | null>(null);
+  const [isUnblocking, setIsUnblocking] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [isDeletingUser, setIsDeletingUser] = useState(false);
+  const [userToPermanentDelete, setUserToPermanentDelete] = useState<User | null>(null);
+  const [isPermanentDeleting, setIsPermanentDeleting] = useState(false);
+
+  // Event modal states
   const [isAddingEvent, setIsAddingEvent] = useState(false);
   const [editingEvent, setEditingEvent] = useState<Event | null>(null);
   const [eventToDelete, setEventToDelete] = useState<Event | null>(null);
+  const [isSavingEvent, setIsSavingEvent] = useState(false);
+  const [isDeletingEvent, setIsDeletingEvent] = useState(false);
   const [eventFilter, setEventFilter] = useState<"all" | "free" | "paid">("all");
-  
+
   const [eventFormData, setEventFormData] = useState({
     title: "",
-    location: "Escola Estadual Helena Wysocki",
+    location: "Escola Estadual Helena Wysocki - Pátio Principal",
     day: new Date().getDate(),
     month: new Date().getMonth(),
     year: new Date().getFullYear(),
-    time: "18:00",
+    time: "14:00",
     isPaid: false,
     price: "",
-    requirements: "",
+    requirements: "Aberto para todos os alunos e comunidade escolar",
     website: "",
     image: "https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=600&auto=format&fit=crop"
   });
 
+  // Filtered lists
   const filteredUsers = usersList.filter((u) => {
     const term = searchTerm.toLowerCase();
     return (
@@ -115,23 +146,78 @@ export default function AdminPanel({
     );
   });
 
-  const activeUsers = filteredUsers.filter(u => u.ativo !== false);
-  const blockedUsers = filteredUsers.filter(u => u.ativo === false);
+  const activeUsers = filteredUsers.filter((u) => u.ativo !== false);
+  const blockedUsers = filteredUsers.filter((u) => u.ativo === false);
 
   const filteredEvents = events.filter((ev) => {
     const term = eventSearchTerm.toLowerCase();
-    const matchesTerm = (
+    const matchesTerm =
       ev.title.toLowerCase().includes(term) ||
       ev.location.toLowerCase().includes(term) ||
-      (ev.requirements && ev.requirements.toLowerCase().includes(term))
-    );
+      (ev.requirements && ev.requirements.toLowerCase().includes(term));
     if (!matchesTerm) return false;
     if (eventFilter === "free") return !ev.isPaid;
     if (eventFilter === "paid") return !!ev.isPaid;
     return true;
   });
 
-  // User Actions
+  // ================= ACTION HANDLERS =================
+
+  // Open Change Role Modal
+  const handleOpenChangeRoleModal = (u: User) => {
+    setUserToChangeRole(u);
+    if (isChefeAdmin(u)) {
+      setSelectedRoleOption("chefe");
+    } else if (isFuncionarioAdmin(u)) {
+      setSelectedRoleOption("funcionario");
+    } else {
+      setSelectedRoleOption("user");
+    }
+  };
+
+  // Confirm Change Role
+  const handleConfirmChangeRole = async () => {
+    if (!userToChangeRole) return;
+    const isTargetMe =
+      currentUser?.id === userToChangeRole.id ||
+      (currentUser?.email &&
+        userToChangeRole.email &&
+        currentUser.email.toLowerCase() === userToChangeRole.email.toLowerCase());
+
+    if (isTargetMe && selectedRoleOption !== "chefe") {
+      alert("Você não pode rebaixar seu próprio acesso de Chefe Administrador.");
+      return;
+    }
+
+    try {
+      setIsSavingRole(true);
+      let payloadRole = "Aluno";
+      let payloadIsAdmin = false;
+
+      if (selectedRoleOption === "chefe") {
+        payloadRole = "Diretor";
+        payloadIsAdmin = true;
+      } else if (selectedRoleOption === "funcionario") {
+        payloadRole = "Funcionário";
+        payloadIsAdmin = false;
+      } else {
+        payloadRole = "Aluno";
+        payloadIsAdmin = false;
+      }
+
+      await onUpdateUser(userToChangeRole.id, {
+        role: payloadRole,
+        isAdmin: payloadIsAdmin
+      });
+      setUserToChangeRole(null);
+    } catch (err) {
+      console.error("Falha ao atualizar permissões do usuário:", err);
+    } finally {
+      setIsSavingRole(false);
+    }
+  };
+
+  // Open Edit Profile Modal
   const handleOpenEditModal = (u: User) => {
     setEditingUser(u);
     setEditFormData({
@@ -145,12 +231,13 @@ export default function AdminPanel({
     });
   };
 
+  // Save Edit Profile
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
 
     try {
-      setIsSaving(true);
+      setIsSavingUser(true);
       const payload: any = {
         nome: editFormData.nome.trim(),
         email: editFormData.email.trim().toLowerCase(),
@@ -164,64 +251,83 @@ export default function AdminPanel({
       await onUpdateUser(editingUser.id, payload);
       setEditingUser(null);
     } catch (err) {
-      console.warn("Failed saving user edit, keeping modal open for retry:", err);
+      console.warn("Falha ao salvar edição do usuário:", err);
     } finally {
-      setIsSaving(false);
+      setIsSavingUser(false);
     }
   };
 
-  const handleQuickAdminToggle = async (userId: number, currVal: boolean) => {
-    if (currentUser?.id === userId && currVal) {
-      alert("Você não pode remover seu próprio acesso administrativo!");
+  // Block Account Handler
+  const handleOpenBlockModal = (u: User) => {
+    const isTargetMe =
+      currentUser?.id === u.id ||
+      (currentUser?.email &&
+        u.email &&
+        currentUser.email.toLowerCase() === u.email.toLowerCase());
+
+    if (isTargetMe) {
+      alert("Você não pode bloquear sua própria conta ativa.");
       return;
     }
-    const newIsAdmin = !currVal;
-    await onUpdateUser(userId, { 
-      isAdmin: newIsAdmin,
-      role: newIsAdmin ? "Diretor" : "Aluno"
-    });
+    setUserToBlock(u);
   };
 
-  const confirmDeleteUser = async () => {
-    if (!userToDelete) return;
+  const confirmBlockUser = async () => {
+    if (!userToBlock) return;
     try {
-      setIsDeleting(true);
-      await onDeleteUser(userToDelete.id);
-      setUserToDelete(null);
+      setIsBlocking(true);
+      await onDeleteUser(userToBlock.id);
+      setUserToBlock(null);
     } catch (err) {
-      console.warn("Failed deleting user:", err);
+      console.error("Falha ao bloquear conta do usuário:", err);
     } finally {
-      setIsDeleting(false);
+      setIsBlocking(false);
     }
   };
 
+  // Unblock Account Handler
   const confirmUnblockUser = async () => {
     if (!userToUnblock || !onUnblockUser) return;
     try {
-      setIsDeleting(true);
+      setIsUnblocking(true);
       await onUnblockUser(userToUnblock.id);
       setUserToUnblock(null);
     } catch (err) {
-      console.warn("Failed unblocking user:", err);
+      console.error("Falha ao desbloquear conta do usuário:", err);
     } finally {
-      setIsDeleting(false);
+      setIsUnblocking(false);
     }
   };
 
+  // Delete User Handler (soft delete / suspend)
+  const confirmDeleteUser = async () => {
+    if (!userToDelete) return;
+    try {
+      setIsDeletingUser(true);
+      await onDeleteUser(userToDelete.id);
+      setUserToDelete(null);
+    } catch (err) {
+      console.error("Falha ao excluir usuário:", err);
+    } finally {
+      setIsDeletingUser(false);
+    }
+  };
+
+  // Permanent Delete User Handler (DB removal)
   const confirmPermanentDeleteUser = async () => {
     if (!userToPermanentDelete || !onPermanentDeleteUser) return;
     try {
-      setIsDeleting(true);
+      setIsPermanentDeleting(true);
       await onPermanentDeleteUser(userToPermanentDelete.id);
       setUserToPermanentDelete(null);
     } catch (err) {
-      console.warn("Failed permanent deleting user:", err);
+      console.error("Falha ao excluir definitivamente o usuário:", err);
     } finally {
-      setIsDeleting(false);
+      setIsPermanentDeleting(false);
     }
   };
 
-  // Event Actions
+  // Event Handlers
   const handleOpenAddEventModal = () => {
     const today = new Date();
     setEventFormData({
@@ -261,7 +367,7 @@ export default function AdminPanel({
     e.preventDefault();
     if (!onAddEvent) return;
     try {
-      setIsSaving(true);
+      setIsSavingEvent(true);
       await onAddEvent({
         title: eventFormData.title.trim(),
         location: eventFormData.location.trim(),
@@ -277,9 +383,9 @@ export default function AdminPanel({
       });
       setIsAddingEvent(false);
     } catch (err) {
-      console.warn("Failed creating event, keeping modal open for retry:", err);
+      console.error("Erro ao criar novo evento:", err);
     } finally {
-      setIsSaving(false);
+      setIsSavingEvent(false);
     }
   };
 
@@ -287,7 +393,7 @@ export default function AdminPanel({
     e.preventDefault();
     if (!editingEvent || !onUpdateEvent) return;
     try {
-      setIsSaving(true);
+      setIsSavingEvent(true);
       await onUpdateEvent(editingEvent.id, {
         title: eventFormData.title.trim(),
         location: eventFormData.location.trim(),
@@ -303,22 +409,22 @@ export default function AdminPanel({
       });
       setEditingEvent(null);
     } catch (err) {
-      console.warn("Failed saving event edit, keeping modal open for retry:", err);
+      console.error("Erro ao atualizar evento:", err);
     } finally {
-      setIsSaving(false);
+      setIsSavingEvent(false);
     }
   };
 
   const confirmDeleteEvent = async () => {
     if (!eventToDelete || !onDeleteEvent) return;
     try {
-      setIsDeleting(true);
+      setIsDeletingEvent(true);
       await onDeleteEvent(eventToDelete.id);
       setEventToDelete(null);
     } catch (err) {
-      console.warn("Failed deleting event:", err);
+      console.error("Erro ao excluir evento:", err);
     } finally {
-      setIsDeleting(false);
+      setIsDeletingEvent(false);
     }
   };
 
@@ -331,31 +437,49 @@ export default function AdminPanel({
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="flex flex-col h-full overflow-y-auto pb-24 text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark"
+      className="flex flex-col h-full overflow-y-auto pb-28 text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark transition-colors"
     >
-      {/* Header */}
-      <div className="border-b border-brand-primary/10 bg-brand-bg-light/80 dark:bg-brand-bg-dark/80 backdrop-blur-md sticky top-0 z-30">
-        <div className="max-w-6xl mx-auto w-full p-6">
+      {/* Top Bar / Header */}
+      <div className="border-b border-brand-primary/10 dark:border-white/10 bg-brand-bg-light/90 dark:bg-brand-bg-dark/90 backdrop-blur-md sticky top-0 z-30 transition-colors">
+        <div className="max-w-6xl mx-auto w-full p-4 sm:p-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-display font-medium tracking-tight flex items-center gap-2">
-                <ShieldCheck className="text-brand-accent dark:text-brand-primary shrink-0" />
-                Painel da Diretoria & Administração
-              </h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Controle integral de usuários, eventos da agenda escolar e permissões de acesso
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-xl sm:text-2xl font-display font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+                  <ShieldCheck className="text-brand-accent dark:text-brand-primary shrink-0" size={24} />
+                  Painel de Controle Escolar
+                </h1>
+
+                {/* Role Badge Indicator */}
+                {isChefe ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700/80 shadow-2xs">
+                    <Crown size={13} className="text-amber-600 dark:text-amber-400" />
+                    <span>Chefe Administrador (Controle Total)</span>
+                  </span>
+                ) : isFuncionario ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-700/80 shadow-2xs">
+                    <ShieldCheck size={13} className="text-blue-600 dark:text-blue-400" />
+                    <span>Funcionário Administrador (Gestão de Eventos)</span>
+                  </span>
+                ) : null}
+              </div>
+
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                {isChefe
+                  ? "Acesso irrestrito: você pode gerenciar contas, alterar níveis de permissão, bloquear/desbloquear e editar todos os eventos."
+                  : "Acesso administrativo restrito: você pode consultar todo o diretório escolar e cadastrar novos eventos na agenda."}
               </p>
             </div>
 
-            {/* Quick Stats Tabs */}
-            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl border border-slate-200 dark:border-slate-700 flex-wrap">
+            {/* Main Tabs (Ativos, Bloqueados, Eventos) */}
+            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-black/30 p-1 rounded-2xl border border-slate-200 dark:border-white/10 shrink-0">
               <button
                 type="button"
                 onClick={() => setActiveTab("users")}
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
                   activeTab === "users"
                     ? "bg-white dark:bg-brand-card-dark text-brand-accent dark:text-brand-primary shadow-xs"
-                    : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
+                    : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
                 }`}
               >
                 <Users size={14} />
@@ -381,7 +505,7 @@ export default function AdminPanel({
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
                   activeTab === "events"
                     ? "bg-white dark:bg-brand-card-dark text-brand-accent dark:text-brand-primary shadow-xs"
-                    : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
+                    : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
                 }`}
               >
                 <Calendar size={14} />
@@ -390,17 +514,54 @@ export default function AdminPanel({
             </div>
           </div>
 
-          {/* Search & Action Bar */}
+          {/* Search & Secondary Action Bar */}
           {activeTab !== "events" ? (
-            <div className="relative mt-4">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder={activeTab === "blocked" ? "Pesquisar contas bloqueadas..." : "Pesquisar usuários por nome, e-mail ou instituição..."}
-                className="w-full h-11 pl-10 pr-4 text-xs bg-white dark:bg-brand-card-dark border border-brand-primary/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-accent text-brand-text-light dark:text-brand-text-dark placeholder-slate-400 shadow-xs"
-              />
+            <div className="flex flex-col sm:flex-row items-center gap-3 mt-4">
+              <div className="relative flex-1 w-full">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder={
+                    activeTab === "blocked"
+                      ? "Pesquisar contas bloqueadas por nome ou e-mail..."
+                      : "Pesquisar usuários por nome, e-mail, permissão ou instituição..."
+                  }
+                  className="w-full h-10 pl-10 pr-4 text-xs bg-white dark:bg-brand-card-dark border border-brand-primary/20 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-accent text-brand-text-light dark:text-brand-text-dark placeholder-slate-400 shadow-2xs"
+                />
+              </div>
+
+              {/* View Switcher (Table vs Cards) */}
+              <div className="flex items-center gap-1 bg-white dark:bg-brand-card-dark p-1 rounded-xl border border-brand-primary/20 dark:border-white/10 shadow-2xs shrink-0 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("table")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                    viewMode === "table"
+                      ? "bg-brand-primary/20 dark:bg-brand-primary/30 text-brand-accent dark:text-brand-primary font-bold shadow-2xs"
+                      : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"
+                  }`}
+                  title="Visualizar em Formato de Tabela"
+                >
+                  <TableIcon size={14} />
+                  <span>Tabela</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setViewMode("cards")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                    viewMode === "cards"
+                      ? "bg-brand-primary/20 dark:bg-brand-primary/30 text-brand-accent dark:text-brand-primary font-bold shadow-2xs"
+                      : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"
+                  }`}
+                  title="Visualizar em Formato de Cartões"
+                >
+                  <LayoutGrid size={14} />
+                  <span>Cartões</span>
+                </button>
+              </div>
             </div>
           ) : (
             <div className="flex flex-col sm:flex-row items-center gap-3 mt-4">
@@ -411,7 +572,7 @@ export default function AdminPanel({
                   value={eventSearchTerm}
                   onChange={(e) => setEventSearchTerm(e.target.value)}
                   placeholder="Pesquisar eventos por título, local ou detalhes..."
-                  className="w-full h-11 pl-10 pr-4 text-xs bg-white dark:bg-brand-card-dark border border-brand-primary/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-accent text-brand-text-light dark:text-brand-text-dark placeholder-slate-400 shadow-xs"
+                  className="w-full h-10 pl-10 pr-4 text-xs bg-white dark:bg-brand-card-dark border border-brand-primary/20 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-accent text-brand-text-light dark:text-brand-text-dark placeholder-slate-400 shadow-2xs"
                 />
               </div>
 
@@ -419,7 +580,7 @@ export default function AdminPanel({
                 <select
                   value={eventFilter}
                   onChange={(e: any) => setEventFilter(e.target.value)}
-                  className="h-11 px-3 text-xs bg-white dark:bg-brand-card-dark border border-brand-primary/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-accent text-brand-text-light dark:text-brand-text-dark"
+                  className="h-10 px-3 text-xs bg-white dark:bg-brand-card-dark border border-brand-primary/20 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-accent text-brand-text-light dark:text-brand-text-dark"
                 >
                   <option value="all">Todos os Eventos</option>
                   <option value="free">Apenas Gratuitos</option>
@@ -429,7 +590,7 @@ export default function AdminPanel({
                 <button
                   type="button"
                   onClick={handleOpenAddEventModal}
-                  className="h-11 px-4 bg-brand-accent text-white rounded-xl text-xs font-semibold flex items-center gap-2 hover:opacity-95 active:scale-98 transition-all shadow-xs cursor-pointer shrink-0"
+                  className="h-10 px-4 bg-brand-accent hover:bg-brand-accent/90 dark:bg-brand-primary dark:text-slate-900 text-white rounded-xl text-xs font-semibold flex items-center gap-2 active:scale-98 transition-all shadow-xs cursor-pointer shrink-0"
                 >
                   <Plus size={16} />
                   <span>Cadastrar Novo Evento</span>
@@ -441,44 +602,239 @@ export default function AdminPanel({
       </div>
 
       {/* Main Content Area */}
-      <div className="max-w-6xl mx-auto w-full p-6 flex flex-col gap-4">
-        
-        {/* ================= USERS TAB ================= */}
+      <div className="max-w-6xl mx-auto w-full p-4 sm:p-6 flex flex-col gap-4">
+        {/* ================= ACTIVE USERS TAB ================= */}
         {activeTab === "users" && (
           <>
-            <div className="bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 p-4 rounded-2xl flex items-start gap-3 shadow-xs">
+            {/* Info notice banner */}
+            <div className="bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 p-4 rounded-2xl flex items-start gap-3 shadow-2xs">
               <CheckCircle2 className="text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" size={18} />
-              <div className="text-xs text-emerald-800 dark:text-emerald-300 leading-relaxed">
-                <p className="font-semibold">Gerenciamento Escolar & Atividade de Usuários Ativos:</p>
+              <div className="text-xs text-emerald-900 dark:text-emerald-200 leading-relaxed">
+                <p className="font-semibold">Diretório de Usuários Ativos da Escola Helena Wysocki:</p>
                 <p className="text-[11px] opacity-90 mt-0.5">
-                  Acompanhe a <strong>última vez que cada usuário entrou no aplicativo</strong>, acesse contas com 1 clique, ative <strong>Privilégios de Administrador</strong>, modifique dados cadastrais e gerencie acessos com segurança.
+                  {isChefe
+                    ? "Como Chefe Administrador, você possui permissão total para alterar permissões, editar dados cadastrais, suspender ou excluir contas."
+                    : "Como Funcionário Administrador, você tem acesso de consulta ao diretório completo para suporte escolar aos estudantes e responsáveis."}
                 </p>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {activeUsers.length === 0 ? (
-                <div className="col-span-full flex flex-col items-center justify-center py-16 text-center text-slate-400">
-                  <Users size={40} className="text-slate-300 dark:text-slate-600 mb-2" />
-                  <p className="text-sm font-medium">Nenhum usuário ativo encontrado.</p>
-                  <p className="text-xs text-slate-400 mt-1">Verifique o termo de pesquisa ou a aba de bloqueados.</p>
+            {activeUsers.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center text-slate-400 bg-white dark:bg-brand-card-dark rounded-3xl border border-dashed border-slate-300 dark:border-white/10 p-8">
+                <Users size={40} className="text-slate-300 dark:text-slate-600 mb-2" />
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                  Nenhum usuário ativo encontrado.
+                </p>
+                <p className="text-xs text-slate-400 mt-1">
+                  Verifique o termo digitado na barra de pesquisa acima.
+                </p>
+              </div>
+            ) : viewMode === "table" ? (
+              /* ================= TABLE VIEW ================= */
+              <div className="bg-white dark:bg-brand-card-dark rounded-2xl border border-brand-primary/20 dark:border-white/10 shadow-sm overflow-hidden transition-colors">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50/90 dark:bg-black/25 border-b border-slate-100 dark:border-white/10 text-slate-600 dark:text-slate-300 font-semibold select-none">
+                        <th className="py-3.5 px-4">Nome & Identificação</th>
+                        <th className="py-3.5 px-4">E-mail</th>
+                        <th className="py-3.5 px-4">Tipo / Permissão</th>
+                        <th className="py-3.5 px-4 text-center">Status</th>
+                        <th className="py-3.5 px-4">Última Atividade</th>
+                        <th className="py-3.5 px-4 text-right">
+                          {isChefe ? "Ações Administrativas" : "Permissão"}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                      {activeUsers.map((u) => {
+                        const isMe =
+                          currentUser?.id === u.id ||
+                          (currentUser?.email &&
+                            u.email &&
+                            currentUser.email.toLowerCase() === u.email.toLowerCase());
+                        const activityDate = u.lastActiveAt || u.updatedAt || u.createdAt;
+                        const activity = formatLastActive(activityDate);
+                        const formattedDateStr = formatDateTimeBR(activityDate);
+                        const userIsChefe = isChefeAdmin(u);
+                        const userIsFuncionario = isFuncionarioAdmin(u);
+
+                        return (
+                          <tr
+                            key={u.id}
+                            className={`hover:bg-slate-50/80 dark:hover:bg-white/5 transition-colors ${
+                              isMe ? "bg-brand-primary/5 dark:bg-brand-primary/10" : ""
+                            }`}
+                          >
+                            {/* Nome */}
+                            <td className="py-3 px-4">
+                              <div className="flex items-center gap-3 min-w-[180px]">
+                                <div className="w-9 h-9 rounded-full bg-brand-primary/20 text-brand-accent dark:text-brand-primary flex items-center justify-center font-bold text-xs uppercase shrink-0 select-none overflow-hidden border border-brand-primary/30">
+                                  {u.foto_perfil ? (
+                                    <img
+                                      src={u.foto_perfil}
+                                      alt={u.nome}
+                                      referrerPolicy="no-referrer"
+                                      className="w-full h-full object-cover"
+                                    />
+                                  ) : (
+                                    (u.nome || u.email || "U").slice(0, 1)
+                                  )}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-semibold text-slate-900 dark:text-white truncate">
+                                      {u.nome || "Usuário Escolar"}
+                                    </span>
+                                    {isMe && (
+                                      <span className="text-[10px] bg-brand-primary/30 text-brand-accent dark:text-brand-primary px-1.5 py-0.2 rounded font-bold">
+                                        Você
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-[11px] text-slate-400 dark:text-slate-400 block truncate">
+                                    {u.institution || "C.E. Helena Wysocki"}
+                                  </span>
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* E-mail */}
+                            <td className="py-3 px-4 font-mono text-[11px] text-slate-600 dark:text-slate-300 min-w-[180px]">
+                              {u.email}
+                            </td>
+
+                            {/* Tipo / Permissão */}
+                            <td className="py-3 px-4 min-w-[160px]">
+                              {userIsChefe ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700/80 shadow-2xs">
+                                  <Crown size={12} className="text-amber-600 dark:text-amber-400" />
+                                  <span>Chefe Administrador</span>
+                                </span>
+                              ) : userIsFuncionario ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60 shadow-2xs">
+                                  <ShieldCheck size={12} className="text-blue-600 dark:text-blue-400" />
+                                  <span>Funcionário Administrador</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                                  <UserIcon size={12} className="text-slate-400" />
+                                  <span>{u.role || "Aluno / Usuário"}</span>
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Status */}
+                            <td className="py-3 px-4 text-center min-w-[100px]">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                <span>Ativo</span>
+                              </span>
+                            </td>
+
+                            {/* Última Atividade */}
+                            <td className="py-3 px-4 min-w-[160px]">
+                              <div className="flex flex-col text-[11px]">
+                                <span className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1">
+                                  <Clock size={11} className="text-slate-400" />
+                                  <span>{activity.text}</span>
+                                </span>
+                                <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
+                                  {formattedDateStr}
+                                </span>
+                              </div>
+                            </td>
+
+                            {/* Ações */}
+                            <td className="py-3 px-4 text-right min-w-[180px]">
+                              {isChefe ? (
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {/* Alterar Permissão */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenChangeRoleModal(u)}
+                                    className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/50 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 text-[11px] font-semibold border border-amber-200 dark:border-amber-800/60 transition-colors flex items-center gap-1 cursor-pointer"
+                                    title="Alterar permissão entre Chefe, Funcionário ou Aluno"
+                                  >
+                                    <Crown size={12} />
+                                    <span>Permissão</span>
+                                  </button>
+
+                                  {/* Editar Dados */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditModal(u)}
+                                    className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] transition-colors cursor-pointer"
+                                    title="Editar dados cadastrais"
+                                  >
+                                    <Edit3 size={13} />
+                                  </button>
+
+                                  {/* Bloquear Conta */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenBlockModal(u)}
+                                    disabled={isMe}
+                                    className="p-1.5 rounded-lg bg-orange-50 hover:bg-orange-100 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400 disabled:opacity-30 transition-colors cursor-pointer"
+                                    title={isMe ? "Você não pode bloquear sua própria conta" : "Bloquear acesso desta conta"}
+                                  >
+                                    <Lock size={13} />
+                                  </button>
+
+                                  {/* Excluir Conta */}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (isMe) {
+                                        alert("Você não pode excluir sua própria conta ativa.");
+                                        return;
+                                      }
+                                      setUserToDelete(u);
+                                    }}
+                                    disabled={isMe}
+                                    className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 dark:bg-red-950/40 text-red-600 dark:text-red-400 disabled:opacity-30 transition-colors cursor-pointer"
+                                    title={isMe ? "Você não pode excluir sua própria conta" : "Excluir conta escolar"}
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="inline-flex items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500 font-medium">
+                                  <Eye size={13} />
+                                  <span>Somente leitura</span>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
-              ) : (
-                activeUsers.map((u) => {
-                  const isMe = currentUser?.id === u.id || (currentUser?.email && u.email && currentUser.email.toLowerCase() === u.email.toLowerCase());
+              </div>
+            ) : (
+              /* ================= CARDS VIEW ================= */
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {activeUsers.map((u) => {
+                  const isMe =
+                    currentUser?.id === u.id ||
+                    (currentUser?.email &&
+                      u.email &&
+                      currentUser.email.toLowerCase() === u.email.toLowerCase());
                   const activityDate = u.lastActiveAt || u.updatedAt || u.createdAt;
                   const activity = formatLastActive(activityDate);
                   const formattedDateStr = formatDateTimeBR(activityDate);
                   const uStats = calculateRealUserStats(u.id, events);
+                  const userIsChefe = isChefeAdmin(u);
+                  const userIsFuncionario = isFuncionarioAdmin(u);
 
                   return (
                     <div
                       key={u.id}
-                      className="bg-white dark:bg-brand-card-dark rounded-2xl p-5 border border-brand-primary/15 dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between gap-3.5 relative overflow-hidden"
+                      className="bg-white dark:bg-brand-card-dark rounded-2xl p-5 border border-brand-primary/15 dark:border-white/10 shadow-sm hover:shadow-md transition-all flex flex-col justify-between gap-3.5 relative overflow-hidden"
                     >
-                      {/* Top Bar Indicator */}
                       {isMe && (
-                        <div className="absolute top-0 left-0 right-0 h-1 bg-brand-accent" />
+                        <div className="absolute top-0 left-0 right-0 h-1 bg-brand-accent dark:bg-brand-primary" />
                       )}
 
                       {/* Header info */}
@@ -486,7 +842,12 @@ export default function AdminPanel({
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="w-10 h-10 rounded-full bg-brand-primary/20 text-brand-accent dark:text-brand-primary flex items-center justify-center font-bold text-sm uppercase shrink-0 select-none overflow-hidden border border-brand-primary/30">
                             {u.foto_perfil ? (
-                              <img src={u.foto_perfil} alt={u.nome} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                              <img
+                                src={u.foto_perfil}
+                                alt={u.nome}
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover"
+                              />
                             ) : (
                               (u.nome || u.email || "U").slice(0, 1)
                             )}
@@ -508,52 +869,81 @@ export default function AdminPanel({
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditModal(u)}
-                            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
-                            title="Modificar dados completos do usuário"
-                          >
-                            <Edit3 size={14} />
-                          </button>
+                        {/* Chefe Actions */}
+                        {isChefe ? (
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenChangeRoleModal(u)}
+                              className="p-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 transition-colors cursor-pointer"
+                              title="Alterar nível de permissão"
+                            >
+                              <Crown size={14} />
+                            </button>
 
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (isMe) {
-                                alert("Você não pode deletar sua própria conta ativa.");
-                                return;
-                              }
-                              setUserToDelete(u);
-                            }}
-                            disabled={isMe}
-                            className="p-2 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-400 disabled:opacity-25 transition-colors cursor-pointer"
-                            title="Bloquear/Suspender conta escolar"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditModal(u)}
+                              className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
+                              title="Modificar dados completos"
+                            >
+                              <Edit3 size={14} />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleOpenBlockModal(u)}
+                              disabled={isMe}
+                              className="p-1.5 rounded-xl bg-orange-50 text-orange-600 hover:bg-orange-100 dark:bg-orange-950/40 dark:text-orange-400 disabled:opacity-25 transition-colors cursor-pointer"
+                              title="Bloquear conta"
+                            >
+                              <Lock size={14} />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium flex items-center gap-1">
+                            <Eye size={12} />
+                            <span>Consulta</span>
+                          </span>
+                        )}
                       </div>
 
-                      {/* Real User Stats Badges */}
+                      {/* Permission Badge & Institution */}
+                      <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-100 dark:border-white/5">
+                        <span className="text-slate-500 dark:text-slate-400 text-[11px]">Nível:</span>
+                        {userIsChefe ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300">
+                            <Crown size={11} /> Chefe Admin
+                          </span>
+                        ) : userIsFuncionario ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300">
+                            <ShieldCheck size={11} /> Funcionário Admin
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-slate-600 dark:text-slate-300 font-medium">
+                            {u.role || "Aluno"}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Stats Badges */}
                       <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-slate-500 dark:text-slate-400">
-                        <span className="bg-slate-100 dark:bg-slate-800/90 px-2 py-0.5 rounded-md font-mono flex items-center gap-1">
+                        <span className="bg-slate-100 dark:bg-black/30 px-2 py-0.5 rounded-md font-mono flex items-center gap-1">
                           <Ticket size={11} className="text-blue-500" />
                           <span>{uStats.participatedEventsCount} inscr.</span>
                         </span>
-                        <span className="bg-slate-100 dark:bg-slate-800/90 px-2 py-0.5 rounded-md font-mono flex items-center gap-1">
+                        <span className="bg-slate-100 dark:bg-black/30 px-2 py-0.5 rounded-md font-mono flex items-center gap-1">
                           <RouteIcon size={11} className="text-emerald-500" />
                           <span>{uStats.routesCalculatedCount} rotas</span>
                         </span>
-                        <span className="bg-slate-100 dark:bg-slate-800/90 px-2 py-0.5 rounded-md font-mono flex items-center gap-1">
+                        <span className="bg-slate-100 dark:bg-black/30 px-2 py-0.5 rounded-md font-mono flex items-center gap-1">
                           <Calendar size={11} className="text-purple-500" />
                           <span>{uStats.createdEventsCount} criados</span>
                         </span>
                       </div>
 
-                      {/* Última Atividade */}
-                      <div 
+                      {/* Last Active */}
+                      <div
                         className={`px-3 py-2 rounded-xl flex items-center justify-between text-xs border transition-colors ${activity.badgeBg}`}
                         title={`Último acesso registrado: ${formattedDateStr}`}
                       >
@@ -571,55 +961,26 @@ export default function AdminPanel({
 
                         <div className="flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500 font-mono shrink-0 ml-1.5">
                           <Clock size={11} className="opacity-70" />
-                          <span>{formattedDateStr.split(' ')[1] || formattedDateStr}</span>
+                          <span>{formattedDateStr.split(" ")[1] || formattedDateStr}</span>
                         </div>
                       </div>
 
-                      {/* Privilégios & Status */}
-                      <div className="flex flex-col gap-2.5 pt-2.5 border-t border-slate-100 dark:border-slate-800/80">
-                        <div className="flex items-center justify-between">
-                          <label className="flex items-center gap-2 cursor-pointer select-none text-xs font-semibold text-slate-800 dark:text-slate-200">
-                            <input
-                              type="checkbox"
-                              checked={!!u.isAdmin}
-                              disabled={isMe}
-                              onChange={() => handleQuickAdminToggle(u.id, !!u.isAdmin)}
-                              className="w-4 h-4 rounded accent-brand-accent cursor-pointer"
-                            />
-                            <span className="flex items-center gap-1">
-                              <ShieldCheck size={14} className={u.isAdmin ? "text-amber-500" : "text-slate-400"} />
-                              <span>Privilégios de Administrador</span>
-                            </span>
-                          </label>
-
-                          {u.isAdmin ? (
-                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-900/50">
-                              Admin Ativo
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
-                              Padrão
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Impersonate Button */}
-                        {onImpersonateUser && !isMe && (
-                          <button
-                            type="button"
-                            onClick={() => onImpersonateUser(u)}
-                            className="w-full h-9 bg-brand-primary/15 hover:bg-brand-primary/25 active:scale-98 text-brand-accent dark:text-brand-primary border border-brand-primary/30 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-2xs"
-                          >
-                            <LogIn size={13} />
-                            <span>Entrar nesta conta</span>
-                          </button>
-                        )}
-                      </div>
+                      {/* Impersonate Button (Chefe only) */}
+                      {isChefe && onImpersonateUser && !isMe && (
+                        <button
+                          type="button"
+                          onClick={() => onImpersonateUser(u)}
+                          className="w-full h-8 bg-brand-primary/15 hover:bg-brand-primary/25 active:scale-98 text-brand-accent dark:text-brand-primary border border-brand-primary/30 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-2xs"
+                        >
+                          <LogIn size={13} />
+                          <span>Entrar nesta conta</span>
+                        </button>
+                      )}
                     </div>
                   );
-                })
-              )}
-            </div>
+                })}
+              </div>
+            )}
           </>
         )}
 
@@ -631,35 +992,137 @@ export default function AdminPanel({
               <div className="text-xs text-red-900 dark:text-red-200 leading-relaxed">
                 <p className="font-semibold">Gerenciamento de Contas Bloqueadas & Suspensas:</p>
                 <p className="text-[11px] opacity-90 mt-0.5">
-                  Estas contas estão <strong>impedidas de acessar o portal escolar</strong>. Você pode restabelecer o acesso com 1 clique ("Desbloquear") ou remover permanentemente o registro do banco de dados ("Excluir Definitivamente").
+                  Estas contas estão impedidas de autenticar no portal escolar.{" "}
+                  {isChefe
+                    ? "Você pode restabelecer o acesso imediatamente com 1 clique ou excluir permanentemente o registro do banco de dados."
+                    : "Somente o Chefe Administrador possui permissão para desbloquear ou excluir contas."}
                 </p>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {blockedUsers.length === 0 ? (
-                <div className="col-span-full flex flex-col items-center justify-center py-16 text-center text-slate-400 bg-white dark:bg-brand-card-dark rounded-3xl border border-dashed border-slate-300 dark:border-slate-700 p-8">
-                  <Unlock size={44} className="text-emerald-500 mb-2 opacity-80" />
-                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-                    Nenhuma conta bloqueada no momento!
-                  </p>
-                  <p className="text-xs text-slate-400 mt-1 max-w-sm">
-                    Todos os usuários cadastrados estão com acesso ativo e regular às funcionalidades do portal escolar.
-                  </p>
+            {blockedUsers.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center text-slate-400 bg-white dark:bg-brand-card-dark rounded-3xl border border-dashed border-slate-300 dark:border-white/10 p-8">
+                <Unlock size={44} className="text-emerald-500 mb-2 opacity-80" />
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                  Nenhuma conta bloqueada no momento!
+                </p>
+                <p className="text-xs text-slate-400 mt-1 max-w-sm">
+                  Todos os usuários cadastrados estão com acesso regular às funcionalidades do portal escolar.
+                </p>
+              </div>
+            ) : viewMode === "table" ? (
+              /* Blocked users Table */
+              <div className="bg-white dark:bg-brand-card-dark rounded-2xl border border-red-200 dark:border-red-900/40 shadow-sm overflow-hidden transition-colors">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-red-50/70 dark:bg-red-950/25 border-b border-red-100 dark:border-red-900/40 text-red-900 dark:text-red-200 font-semibold select-none">
+                        <th className="py-3.5 px-4">Nome & Identificação</th>
+                        <th className="py-3.5 px-4">E-mail</th>
+                        <th className="py-3.5 px-4">Função Original</th>
+                        <th className="py-3.5 px-4 text-center">Status</th>
+                        <th className="py-3.5 px-4">Último Acesso</th>
+                        <th className="py-3.5 px-4 text-right">
+                          {isChefe ? "Ações de Desbloqueio" : "Permissão"}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                      {blockedUsers.map((u) => {
+                        const activityDate = u.lastActiveAt || u.updatedAt || u.createdAt;
+                        const formattedDateStr = formatDateTimeBR(activityDate);
+
+                        return (
+                          <tr
+                            key={u.id}
+                            className="hover:bg-red-50/30 dark:hover:bg-red-950/20 transition-colors"
+                          >
+                            <td className="py-3 px-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-full bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center font-bold text-xs uppercase shrink-0 border border-red-200 dark:border-red-850">
+                                  <Lock size={14} />
+                                </div>
+                                <div className="min-w-0">
+                                  <span className="font-semibold text-slate-900 dark:text-white block truncate">
+                                    {u.nome || "Usuário Bloqueado"}
+                                  </span>
+                                  <span className="text-[11px] text-slate-400 block truncate">
+                                    {u.institution || "C.E. Helena Wysocki"}
+                                  </span>
+                                </div>
+                              </div>
+                            </td>
+
+                            <td className="py-3 px-4 font-mono text-[11px] text-slate-600 dark:text-slate-300">
+                              {u.email}
+                            </td>
+
+                            <td className="py-3 px-4 text-slate-600 dark:text-slate-300">
+                              {u.role || "Aluno"}
+                            </td>
+
+                            <td className="py-3 px-4 text-center">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-100 dark:bg-red-950/80 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
+                                <Lock size={10} /> Bloqueado
+                              </span>
+                            </td>
+
+                            <td className="py-3 px-4 font-mono text-[11px] text-slate-500">
+                              {formattedDateStr}
+                            </td>
+
+                            <td className="py-3 px-4 text-right">
+                              {isChefe ? (
+                                <div className="flex items-center justify-end gap-2">
+                                  {onUnblockUser && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setUserToUnblock(u)}
+                                      className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                    >
+                                      <Unlock size={12} />
+                                      <span>Desbloquear</span>
+                                    </button>
+                                  )}
+
+                                  {onPermanentDeleteUser && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setUserToPermanentDelete(u)}
+                                      className="p-1.5 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 text-red-600 dark:text-red-300 rounded-lg text-[11px] transition-all cursor-pointer border border-red-200 dark:border-red-800"
+                                      title="Excluir Definitivamente do Banco"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">
+                                  Somente leitura
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
-              ) : (
-                blockedUsers.map((u) => {
+              </div>
+            ) : (
+              /* Blocked Users Cards */
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {blockedUsers.map((u) => {
                   const activityDate = u.lastActiveAt || u.updatedAt || u.createdAt;
                   const formattedDateStr = formatDateTimeBR(activityDate);
 
                   return (
                     <div
                       key={u.id}
-                      className="bg-white dark:bg-brand-card-dark rounded-2xl p-5 border-2 border-red-200 dark:border-red-900/50 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between gap-3.5 relative overflow-hidden"
+                      className="bg-white dark:bg-brand-card-dark rounded-2xl p-5 border-2 border-red-200 dark:border-red-900/50 shadow-sm flex flex-col justify-between gap-3.5 relative overflow-hidden"
                     >
                       <div className="absolute top-0 left-0 right-0 h-1 bg-red-500" />
 
-                      {/* Header info */}
                       <div className="flex justify-between items-start gap-2 pt-1">
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center font-bold text-sm uppercase shrink-0 border border-red-200 dark:border-red-800">
@@ -681,46 +1144,215 @@ export default function AdminPanel({
                         </div>
                       </div>
 
-                      {/* School and Role */}
-                      <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-100 dark:border-slate-800 text-xs flex flex-col gap-1">
+                      <div className="p-3 bg-slate-50 dark:bg-black/30 rounded-xl border border-slate-100 dark:border-white/10 text-xs flex flex-col gap-1">
                         <div className="flex justify-between items-center text-[11px]">
                           <span className="text-slate-500">Função:</span>
-                          <span className="font-semibold text-slate-700 dark:text-slate-300">{u.role || "Aluno"}</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-300">
+                            {u.role || "Aluno"}
+                          </span>
                         </div>
                         <div className="flex justify-between items-center text-[11px]">
                           <span className="text-slate-500">Instituição:</span>
-                          <span className="font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[150px]">{u.institution || "Escola Helena Wysocki"}</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[150px]">
+                            {u.institution || "Escola Helena Wysocki"}
+                          </span>
                         </div>
-                        <div className="flex justify-between items-center text-[11px] pt-1 border-t border-slate-200/50 dark:border-slate-800">
+                        <div className="flex justify-between items-center text-[11px] pt-1 border-t border-slate-200/50 dark:border-white/10">
                           <span className="text-slate-500">Último Acesso:</span>
-                          <span className="font-mono text-slate-600 dark:text-slate-400">{formattedDateStr}</span>
+                          <span className="font-mono text-slate-600 dark:text-slate-400">
+                            {formattedDateStr}
+                          </span>
                         </div>
                       </div>
 
                       {/* Action Buttons for Blocked Accounts */}
-                      <div className="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                        {onUnblockUser && (
-                          <button
-                            type="button"
-                            onClick={() => setUserToUnblock(u)}
-                            className="flex-1 h-9 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                      {isChefe ? (
+                        <div className="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-white/10">
+                          {onUnblockUser && (
+                            <button
+                              type="button"
+                              onClick={() => setUserToUnblock(u)}
+                              className="flex-1 h-9 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                            >
+                              <Unlock size={14} />
+                              <span>Desbloquear</span>
+                            </button>
+                          )}
+
+                          {onPermanentDeleteUser && (
+                            <button
+                              type="button"
+                              onClick={() => setUserToPermanentDelete(u)}
+                              className="h-9 px-3 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/50 text-red-600 dark:text-red-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-red-200 dark:border-red-800"
+                              title="Excluir Definitivamente do Banco de Dados"
+                            >
+                              <Trash2 size={14} />
+                              <span>Excluir</span>
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-center text-[11px] text-slate-400 py-1 font-medium">
+                          Apenas o Chefe Administrador pode desbloquear contas.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ================= EVENTS TAB (FOR BOTH ADMINS) ================= */}
+        {activeTab === "events" && (
+          <>
+            <div className="bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 p-4 rounded-2xl flex items-start gap-3 shadow-xs">
+              <Calendar className="text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" size={18} />
+              <div className="text-xs text-blue-900 dark:text-blue-200 leading-relaxed">
+                <p className="font-semibold">Gestão de Eventos da Escola Helena Wysocki:</p>
+                <p className="text-[11px] opacity-90 mt-0.5">
+                  {isChefe
+                    ? "Como Chefe Administrador, você pode criar novos eventos, editar ou excluir qualquer evento existente na agenda."
+                    : "Como Funcionário Administrador, você pode cadastrar novos eventos e editar/excluir apenas os eventos criados por você mesmo."}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredEvents.length === 0 ? (
+                <div className="col-span-full flex flex-col items-center justify-center py-16 text-center text-slate-400 bg-white dark:bg-brand-card-dark rounded-3xl border border-dashed border-slate-300 dark:border-white/10 p-8">
+                  <Calendar size={48} className="text-slate-300 dark:text-slate-600 mb-3" />
+                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                    Nenhum evento encontrado na agenda.
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1 max-w-sm">
+                    Clique no botão abaixo para criar um novo evento e publicá-lo para todos os estudantes.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleOpenAddEventModal}
+                    className="mt-4 px-4 py-2 bg-brand-accent dark:bg-brand-primary dark:text-slate-900 text-white rounded-xl text-xs font-semibold flex items-center gap-2 hover:opacity-90 transition-all cursor-pointer shadow-sm"
+                  >
+                    <Plus size={15} />
+                    <span>Cadastrar Novo Evento Agora</span>
+                  </button>
+                </div>
+              ) : (
+                filteredEvents.map((ev) => {
+                  // Permission check for modifying this event
+                  const isMyEvent =
+                    ev.creatorId && currentUser?.id ? ev.creatorId === currentUser.id : false;
+                  const canModifyThisEvent = isChefe || (isFuncionario && isMyEvent);
+
+                  return (
+                    <div
+                      key={ev.id}
+                      className="bg-white dark:bg-brand-card-dark rounded-2xl border border-brand-primary/15 dark:border-white/10 shadow-sm hover:shadow-md transition-all flex flex-col justify-between overflow-hidden group"
+                    >
+                      {/* Event Image */}
+                      <div className="relative h-36 w-full bg-slate-100 dark:bg-black/30 overflow-hidden">
+                        <img
+                          src={
+                            ev.image ||
+                            "https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=600&auto=format&fit=crop"
+                          }
+                          alt={ev.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+
+                        {/* Price Badge */}
+                        <div className="absolute top-2.5 left-2.5">
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-md shadow-xs ${
+                              ev.isPaid ? "bg-amber-500 text-white" : "bg-emerald-600 text-white"
+                            }`}
                           >
-                            <Unlock size={14} />
-                            <span>Desbloquear</span>
-                          </button>
+                            {ev.isPaid ? (ev.price ? `R$ ${ev.price}` : "Pago") : "Gratuito"}
+                          </span>
+                        </div>
+
+                        {/* Creator tag if employee */}
+                        {isMyEvent && (
+                          <div className="absolute top-2.5 right-2.5">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-600/90 text-white shadow-xs">
+                              Seu Evento
+                            </span>
+                          </div>
                         )}
 
-                        {onPermanentDeleteUser && (
-                          <button
-                            type="button"
-                            onClick={() => setUserToPermanentDelete(u)}
-                            className="h-9 px-3 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/50 text-red-600 dark:text-red-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-red-200 dark:border-red-800"
-                            title="Excluir Definitivamente do Banco de Dados"
-                          >
-                            <Trash2 size={14} />
-                            <span>Excluir</span>
-                          </button>
-                        )}
+                        {/* Date Badge */}
+                        <div className="absolute bottom-2.5 left-2.5 text-white">
+                          <div className="flex items-center gap-1.5 text-xs font-bold drop-shadow-md">
+                            <Calendar size={13} />
+                            <span>
+                              {ev.day} de {monthNames[ev.month] || "Mês"} de {ev.year} •{" "}
+                              {ev.time || "14:00"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Event Body */}
+                      <div className="p-4 flex-1 flex flex-col justify-between gap-3">
+                        <div>
+                          <h4 className="font-bold text-sm text-slate-900 dark:text-white line-clamp-1">
+                            {ev.title}
+                          </h4>
+
+                          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                            <MapPin size={13} className="text-brand-accent dark:text-brand-primary shrink-0" />
+                            <span className="truncate">{ev.location}</span>
+                          </div>
+
+                          {ev.requirements && (
+                            <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-2 line-clamp-2 bg-slate-50 dark:bg-black/20 p-2 rounded-lg border border-slate-100 dark:border-white/5">
+                              {ev.requirements}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100 dark:border-white/10">
+                          {onSelectEvent && (
+                            <button
+                              type="button"
+                              onClick={() => onSelectEvent(ev)}
+                              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/15 text-slate-700 dark:text-slate-200 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1"
+                            >
+                              <Info size={13} />
+                              <span>Ver</span>
+                            </button>
+                          )}
+
+                          {canModifyThisEvent ? (
+                            <div className="flex items-center gap-1.5 ml-auto">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditEventModal(ev)}
+                                className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/50 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1 border border-blue-200 dark:border-blue-800/60"
+                              >
+                                <Edit3 size={13} />
+                                <span>Editar</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setEventToDelete(ev)}
+                                className="p-1.5 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 text-red-600 dark:text-red-400 rounded-lg text-[11px] transition-colors cursor-pointer"
+                                title="Excluir evento"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium ml-auto flex items-center gap-1">
+                              <Lock size={11} />
+                              <span>Criado por outro admin</span>
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -729,178 +1361,163 @@ export default function AdminPanel({
             </div>
           </>
         )}
-
-        {/* ================= EVENTS TAB (FOR ADMINS) ================= */}
-        {activeTab === "events" && (
-          <>
-            <div className="bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 p-4 rounded-2xl flex items-start gap-3 shadow-xs">
-              <Calendar className="text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" size={18} />
-              <div className="text-xs text-blue-900 dark:text-blue-200 leading-relaxed">
-                <p className="font-semibold">Gestão Direta de Eventos da Escola Helena Wysocki:</p>
-                <p className="text-[11px] opacity-90 mt-0.5">
-                  Todos os eventos adicionados pela administração aparecem <strong>imediatamente aqui no painel administrativo, na aba de Feed e no Calendário Escolar</strong> para todos os alunos e professores.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredEvents.length === 0 ? (
-                <div className="col-span-full flex flex-col items-center justify-center py-16 text-center text-slate-400 bg-white dark:bg-brand-card-dark rounded-3xl border border-dashed border-slate-300 dark:border-slate-700 p-8">
-                  <Calendar size={48} className="text-slate-300 dark:text-slate-600 mb-3" />
-                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-                    Nenhum evento encontrado na agenda.
-                  </p>
-                  <p className="text-xs text-slate-400 mt-1 max-w-sm">
-                    Clique no botão abaixo para criar o primeiro evento e publicá-lo para todos os estudantes.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleOpenAddEventModal}
-                    className="mt-4 px-4 py-2 bg-brand-accent text-white rounded-xl text-xs font-semibold flex items-center gap-2 hover:opacity-90 transition-all cursor-pointer shadow-sm"
-                  >
-                    <Plus size={15} />
-                    <span>Cadastrar Novo Evento Agora</span>
-                  </button>
-                </div>
-              ) : (
-                filteredEvents.map((ev) => (
-                  <div
-                    key={ev.id}
-                    className="bg-white dark:bg-brand-card-dark rounded-2xl border border-brand-primary/15 dark:border-slate-800 shadow-sm hover:shadow-md transition-all flex flex-col justify-between overflow-hidden group"
-                  >
-                    {/* Event Image */}
-                    <div className="relative h-36 w-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                      <img
-                        src={ev.image || "https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=600&auto=format&fit=crop"}
-                        alt={ev.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-                      
-                      {/* Price Badge */}
-                      <div className="absolute top-2.5 left-2.5">
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-md shadow-xs ${
-                            ev.isPaid
-                              ? "bg-amber-500 text-white"
-                              : "bg-emerald-600 text-white"
-                          }`}
-                        >
-                          {ev.isPaid ? (ev.price ? `R$ ${ev.price}` : "Pago") : "Gratuito"}
-                        </span>
-                      </div>
-
-                      {/* Date Badge */}
-                      <div className="absolute bottom-2.5 left-2.5 text-white">
-                        <div className="flex items-center gap-1.5 text-xs font-bold drop-shadow-md">
-                          <Calendar size={13} />
-                          <span>{ev.day} de {monthNames[ev.month] || "Mês"} de {ev.year} • {ev.time || "14:00"}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Event Body */}
-                    <div className="p-4 flex-1 flex flex-col justify-between gap-3">
-                      <div>
-                        <h4 className="font-bold text-sm text-slate-900 dark:text-white line-clamp-1">
-                          {ev.title}
-                        </h4>
-                        
-                        <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                          <MapPin size={13} className="text-brand-accent shrink-0" />
-                          <span className="truncate">{ev.location}</span>
-                        </div>
-
-                        {ev.requirements && (
-                          <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-2 line-clamp-2 bg-slate-50 dark:bg-slate-850 p-2 rounded-lg border border-slate-100 dark:border-slate-800">
-                            {ev.requirements}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Action Buttons for Admin */}
-                      <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-                        {onSelectEvent && (
-                          <button
-                            type="button"
-                            onClick={() => onSelectEvent(ev)}
-                            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1"
-                          >
-                            <Info size={13} />
-                            <span>Ver</span>
-                          </button>
-                        )}
-
-                        <div className="flex items-center gap-1.5 ml-auto">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditEventModal(ev)}
-                            className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/50 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1 border border-blue-200 dark:border-blue-800/60"
-                          >
-                            <Edit3 size={13} />
-                            <span>Editar</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => setEventToDelete(ev)}
-                            className="p-1.5 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 text-red-600 dark:text-red-400 rounded-lg text-[11px] transition-colors cursor-pointer"
-                            title="Excluir evento"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </>
-        )}
-
       </div>
 
       {/* ================= MODALS ================= */}
 
-      {/* Delete User Modal */}
+      {/* MODAL 1: Alterar Nível de Permissão (Chefe Admin Only) */}
       <AnimatePresence>
-        {userToDelete && (
+        {userToChangeRole && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-slate-900 rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center"
+              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100 flex flex-col gap-4"
             >
-              <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-950/50 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto">
-                <Trash2 size={24} />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                  Excluir Conta Escolar?
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                  Tem certeza que deseja excluir permanentemente a conta de <strong>{userToDelete.nome || userToDelete.email}</strong>? Esta ação não pode ser desfeita.
-                </p>
-              </div>
-              <div className="flex items-center gap-2 pt-2">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-white/10">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 flex items-center justify-center">
+                    <Crown size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                      Alterar Nível de Permissão
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {userToChangeRole.nome || userToChangeRole.email}
+                    </p>
+                  </div>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setUserToDelete(null)}
-                  disabled={isDeleting}
-                  className="flex-1 h-10 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                  onClick={() => !isSavingRole && setUserToChangeRole(null)}
+                  disabled={isSavingRole}
+                  className="p-1 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                Selecione o nível de privilégio que deseja atribuir a este usuário no banco escolar:
+              </div>
+
+              {/* Role Selection Options */}
+              <div className="flex flex-col gap-2.5">
+                {/* Option 1: Chefe Administrador */}
+                <label
+                  onClick={() => setSelectedRoleOption("chefe")}
+                  className={`p-3.5 rounded-2xl border flex items-start gap-3 cursor-pointer transition-all ${
+                    selectedRoleOption === "chefe"
+                      ? "border-amber-500 bg-amber-50/80 dark:bg-amber-950/40 shadow-xs ring-1 ring-amber-500"
+                      : "border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/5"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="roleOption"
+                    value="chefe"
+                    checked={selectedRoleOption === "chefe"}
+                    onChange={() => setSelectedRoleOption("chefe")}
+                    className="mt-1 accent-amber-500"
+                  />
+                  <div>
+                    <div className="flex items-center gap-1.5 font-bold text-xs text-amber-900 dark:text-amber-200">
+                      <Crown size={14} className="text-amber-500" />
+                      <span>Chefe Administrador</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Controle total: pode gerenciar usuários, alterar permissões, bloquear contas e editar/excluir todos os eventos.
+                    </p>
+                  </div>
+                </label>
+
+                {/* Option 2: Funcionário Administrador */}
+                <label
+                  onClick={() => setSelectedRoleOption("funcionario")}
+                  className={`p-3.5 rounded-2xl border flex items-start gap-3 cursor-pointer transition-all ${
+                    selectedRoleOption === "funcionario"
+                      ? "border-blue-500 bg-blue-50/80 dark:bg-blue-950/40 shadow-xs ring-1 ring-blue-500"
+                      : "border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/5"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="roleOption"
+                    value="funcionario"
+                    checked={selectedRoleOption === "funcionario"}
+                    onChange={() => setSelectedRoleOption("funcionario")}
+                    className="mt-1 accent-blue-500"
+                  />
+                  <div>
+                    <div className="flex items-center gap-1.5 font-bold text-xs text-blue-900 dark:text-blue-200">
+                      <ShieldCheck size={14} className="text-blue-500" />
+                      <span>Funcionário Administrador</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Acesso intermediário: visualiza o diretório escolar completo e cadastra/gerencia seus próprios eventos.
+                    </p>
+                  </div>
+                </label>
+
+                {/* Option 3: Usuário Comum / Aluno */}
+                <label
+                  onClick={() => setSelectedRoleOption("user")}
+                  className={`p-3.5 rounded-2xl border flex items-start gap-3 cursor-pointer transition-all ${
+                    selectedRoleOption === "user"
+                      ? "border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/40 shadow-xs ring-1 ring-emerald-500"
+                      : "border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/5"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="roleOption"
+                    value="user"
+                    checked={selectedRoleOption === "user"}
+                    onChange={() => setSelectedRoleOption("user")}
+                    className="mt-1 accent-emerald-500"
+                  />
+                  <div>
+                    <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800 dark:text-slate-200">
+                      <UserIcon size={14} className="text-slate-500" />
+                      <span>Usuário Comum (Aluno / Responsável)</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Acesso padrão ao feed e calendário de eventos sem privilégios administrativos.
+                    </p>
+                  </div>
+                </label>
+              </div>
+
+              {/* Actions with Anti-Double-Click debounce state */}
+              <div className="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setUserToChangeRole(null)}
+                  disabled={isSavingRole}
+                  className="flex-1 h-10 rounded-xl border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer disabled:opacity-50"
                 >
                   Cancelar
                 </button>
+
                 <button
                   type="button"
-                  onClick={confirmDeleteUser}
-                  disabled={isDeleting}
-                  className="flex-1 h-10 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+                  onClick={handleConfirmChangeRole}
+                  disabled={isSavingRole}
+                  className="flex-1 h-10 rounded-xl bg-brand-accent hover:bg-brand-accent/90 dark:bg-brand-primary dark:text-slate-900 text-white text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
                 >
-                  <Lock size={14} />
-                  <span>{isDeleting ? "Bloqueando..." : "Sim, Bloquear"}</span>
+                  {isSavingRole ? (
+                    <>
+                      <RefreshCw size={14} className="animate-spin" />
+                      <span>Salvando no Banco...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save size={14} />
+                      <span>Salvar Permissão</span>
+                    </>
+                  )}
                 </button>
               </div>
             </motion.div>
@@ -908,7 +1525,65 @@ export default function AdminPanel({
         )}
       </AnimatePresence>
 
-      {/* Unblock User Modal */}
+      {/* MODAL 2: Bloquear Conta de Usuário */}
+      <AnimatePresence>
+        {userToBlock && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-orange-100 dark:bg-orange-950/50 text-orange-600 dark:text-orange-400 flex items-center justify-center mx-auto">
+                <Lock size={24} />
+              </div>
+
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Bloquear Acesso Escolar?
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                  Tem certeza que deseja bloquear a conta de{" "}
+                  <strong>{userToBlock.nome || userToBlock.email}</strong>? O usuário será impedido de entrar no sistema até ser desbloqueado por um Chefe Administrador.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setUserToBlock(null)}
+                  disabled={isBlocking}
+                  className="flex-1 h-10 rounded-xl border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="button"
+                  onClick={confirmBlockUser}
+                  disabled={isBlocking}
+                  className="flex-1 h-10 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+                >
+                  {isBlocking ? (
+                    <>
+                      <RefreshCw size={14} className="animate-spin" />
+                      <span>Bloqueando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Lock size={14} />
+                      <span>Sim, Bloquear</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL 3: Desbloquear Conta */}
       <AnimatePresence>
         {userToUnblock && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -916,36 +1591,49 @@ export default function AdminPanel({
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-slate-900 rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center"
+              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center"
             >
               <div className="w-12 h-12 rounded-2xl bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
                 <Unlock size={24} />
               </div>
+
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">
                   Desbloquear Acesso Escolar?
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                  Deseja restabelecer o acesso do usuário <strong>{userToUnblock.nome || userToUnblock.email}</strong>? Ele poderá entrar novamente e utilizar todas as funções do portal escolar.
+                  Deseja restabelecer o acesso de{" "}
+                  <strong>{userToUnblock.nome || userToUnblock.email}</strong>? Ele poderá entrar novamente no portal escolar imediatamente.
                 </p>
               </div>
+
               <div className="flex items-center gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setUserToUnblock(null)}
-                  disabled={isDeleting}
-                  className="flex-1 h-10 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                  disabled={isUnblocking}
+                  className="flex-1 h-10 rounded-xl border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer disabled:opacity-50"
                 >
                   Cancelar
                 </button>
+
                 <button
                   type="button"
                   onClick={confirmUnblockUser}
-                  disabled={isDeleting}
+                  disabled={isUnblocking}
                   className="flex-1 h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
                 >
-                  <Unlock size={14} />
-                  <span>{isDeleting ? "Desbloqueando..." : "Sim, Desbloquear"}</span>
+                  {isUnblocking ? (
+                    <>
+                      <RefreshCw size={14} className="animate-spin" />
+                      <span>Desbloqueando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Unlock size={14} />
+                      <span>Sim, Desbloquear</span>
+                    </>
+                  )}
                 </button>
               </div>
             </motion.div>
@@ -953,7 +1641,65 @@ export default function AdminPanel({
         )}
       </AnimatePresence>
 
-      {/* Permanent Delete User Modal */}
+      {/* MODAL 4: Excluir Usuário (Soft Delete) */}
+      <AnimatePresence>
+        {userToDelete && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-950/50 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto">
+                <Trash2 size={24} />
+              </div>
+
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Excluir / Suspender Conta?
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                  Tem certeza que deseja desativar a conta de{" "}
+                  <strong>{userToDelete.nome || userToDelete.email}</strong>? A conta será movida para a aba de contas suspensas.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setUserToDelete(null)}
+                  disabled={isDeletingUser}
+                  className="flex-1 h-10 rounded-xl border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="button"
+                  onClick={confirmDeleteUser}
+                  disabled={isDeletingUser}
+                  className="flex-1 h-10 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+                >
+                  {isDeletingUser ? (
+                    <>
+                      <RefreshCw size={14} className="animate-spin" />
+                      <span>Excluindo...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={14} />
+                      <span>Sim, Excluir</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL 5: Exclusão Definitiva (Permanent Delete from DB) */}
       <AnimatePresence>
         {userToPermanentDelete && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -961,36 +1707,50 @@ export default function AdminPanel({
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-slate-900 rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-red-200 dark:border-red-900/50 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center"
+              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-red-200 dark:border-red-900/50 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center"
             >
               <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto border border-red-200 dark:border-red-800">
                 <Trash2 size={24} />
               </div>
+
               <div>
                 <h3 className="text-base font-bold text-red-600 dark:text-red-400">
                   Excluir Definitivamente?
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                  ATENÇÃO: A conta de <strong>{userToPermanentDelete.nome || userToPermanentDelete.email}</strong> será <strong>apagada permanentemente</strong> do banco de dados (Supabase / local). Esta ação é irreversível!
+                  ATENÇÃO: A conta de{" "}
+                  <strong>{userToPermanentDelete.nome || userToPermanentDelete.email}</strong> será{" "}
+                  <strong>removida permanentemente</strong> do banco de dados (Supabase / local). Esta ação não pode ser desfeita!
                 </p>
               </div>
+
               <div className="flex items-center gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setUserToPermanentDelete(null)}
-                  disabled={isDeleting}
-                  className="flex-1 h-10 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                  disabled={isPermanentDeleting}
+                  className="flex-1 h-10 rounded-xl border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer disabled:opacity-50"
                 >
                   Cancelar
                 </button>
+
                 <button
                   type="button"
                   onClick={confirmPermanentDeleteUser}
-                  disabled={isDeleting}
+                  disabled={isPermanentDeleting}
                   className="flex-1 h-10 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
                 >
-                  <Trash2 size={14} />
-                  <span>{isDeleting ? "Excluindo..." : "Excluir Definitivo"}</span>
+                  {isPermanentDeleting ? (
+                    <>
+                      <RefreshCw size={14} className="animate-spin" />
+                      <span>Excluindo...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={14} />
+                      <span>Excluir Definitivo</span>
+                    </>
+                  )}
                 </button>
               </div>
             </motion.div>
@@ -998,7 +1758,7 @@ export default function AdminPanel({
         )}
       </AnimatePresence>
 
-      {/* Delete Event Modal */}
+      {/* MODAL 6: Excluir Evento */}
       <AnimatePresence>
         {eventToDelete && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -1006,36 +1766,48 @@ export default function AdminPanel({
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-slate-900 rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center"
+              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center"
             >
               <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-950/50 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto">
                 <Trash2 size={24} />
               </div>
+
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                  Excluir Evento Escolar?
+                  Excluir Evento da Agenda?
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
                   Tem certeza que deseja remover o evento <strong>"{eventToDelete.title}"</strong> da agenda da escola?
                 </p>
               </div>
+
               <div className="flex items-center gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setEventToDelete(null)}
-                  disabled={isDeleting}
-                  className="flex-1 h-10 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                  disabled={isDeletingEvent}
+                  className="flex-1 h-10 rounded-xl border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer disabled:opacity-50"
                 >
                   Cancelar
                 </button>
+
                 <button
                   type="button"
                   onClick={confirmDeleteEvent}
-                  disabled={isDeleting}
+                  disabled={isDeletingEvent}
                   className="flex-1 h-10 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
                 >
-                  <Trash2 size={14} />
-                  <span>{isDeleting ? "Excluindo..." : "Sim, Excluir"}</span>
+                  {isDeletingEvent ? (
+                    <>
+                      <RefreshCw size={14} className="animate-spin" />
+                      <span>Excluindo...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={14} />
+                      <span>Sim, Excluir</span>
+                    </>
+                  )}
                 </button>
               </div>
             </motion.div>
@@ -1043,7 +1815,7 @@ export default function AdminPanel({
         )}
       </AnimatePresence>
 
-      {/* Edit User Modal Dialog */}
+      {/* MODAL 7: Editar Usuário Completo */}
       <AnimatePresence>
         {editingUser && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -1051,16 +1823,16 @@ export default function AdminPanel({
               initial={{ opacity: 0, scale: 0.96, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96, y: 15 }}
-              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 relative text-slate-800 dark:text-slate-100 overflow-hidden"
+              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 relative text-slate-800 dark:text-slate-100 overflow-hidden"
             >
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-white/10">
                 <div className="flex items-center gap-2.5">
                   <div className="w-9 h-9 rounded-xl bg-brand-primary/20 text-brand-accent dark:text-brand-primary flex items-center justify-center font-bold">
                     <Edit3 size={18} />
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                      Modificar Dados do Usuário
+                      Modificar Dados Cadastrais
                     </h3>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
                       ID: {editingUser.id} • {editingUser.email}
@@ -1069,8 +1841,9 @@ export default function AdminPanel({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setEditingUser(null)}
-                  className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                  onClick={() => !isSavingUser && setEditingUser(null)}
+                  disabled={isSavingUser}
+                  className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
                 >
                   <X size={18} />
                 </button>
@@ -1086,7 +1859,7 @@ export default function AdminPanel({
                     required
                     value={editFormData.nome}
                     onChange={(e) => setEditFormData({ ...editFormData, nome: e.target.value })}
-                    className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
+                    className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
                   />
                 </div>
 
@@ -1099,7 +1872,7 @@ export default function AdminPanel({
                     required
                     value={editFormData.email}
                     onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
-                    className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
+                    className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
                   />
                 </div>
 
@@ -1112,7 +1885,7 @@ export default function AdminPanel({
                       type="text"
                       value={editFormData.institution}
                       onChange={(e) => setEditFormData({ ...editFormData, institution: e.target.value })}
-                      className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
+                      className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
                     />
                   </div>
 
@@ -1123,7 +1896,7 @@ export default function AdminPanel({
                     <select
                       value={editFormData.role}
                       onChange={(e) => setEditFormData({ ...editFormData, role: e.target.value })}
-                      className="w-full h-10 px-2 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
+                      className="w-full h-10 px-2 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
                     >
                       <option value="Aluno">Aluno</option>
                       <option value="Professor">Professor</option>
@@ -1133,7 +1906,7 @@ export default function AdminPanel({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-6 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-6 pt-2 border-t border-slate-100 dark:border-white/10">
                   <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300 select-none">
                     <input
                       type="checkbox"
@@ -1155,21 +1928,32 @@ export default function AdminPanel({
                   </label>
                 </div>
 
-                <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex items-center justify-end gap-2 mt-4 pt-4 border-t border-slate-100 dark:border-white/10">
                   <button
                     type="button"
                     onClick={() => setEditingUser(null)}
-                    className="h-10 px-4 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                    disabled={isSavingUser}
+                    className="px-4 h-10 rounded-xl border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer disabled:opacity-50"
                   >
                     Cancelar
                   </button>
+
                   <button
                     type="submit"
-                    disabled={isSaving}
-                    className="h-10 px-5 bg-brand-accent text-white rounded-xl text-xs font-semibold flex items-center gap-2 hover:opacity-90 active:scale-98 transition-all cursor-pointer shadow-sm disabled:opacity-50"
+                    disabled={isSavingUser}
+                    className="px-5 h-10 rounded-xl bg-brand-accent hover:bg-brand-accent/90 dark:bg-brand-primary dark:text-slate-900 text-white text-xs font-semibold flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
                   >
-                    <Save size={14} />
-                    <span>{isSaving ? "Salvando..." : "Salvar Alterações"}</span>
+                    {isSavingUser ? (
+                      <>
+                        <RefreshCw size={14} className="animate-spin" />
+                        <span>Salvando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save size={14} />
+                        <span>Salvar Modificações</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </form>
@@ -1178,92 +1962,72 @@ export default function AdminPanel({
         )}
       </AnimatePresence>
 
-      {/* Add / Edit Event Modal Dialog */}
+      {/* MODAL 8: Cadastrar Novo Evento */}
       <AnimatePresence>
-        {(isAddingEvent || editingEvent) && (
+        {isAddingEvent && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.96, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96, y: 15 }}
-              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 relative text-slate-800 dark:text-slate-100 max-h-[90vh] overflow-y-auto"
+              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 relative text-slate-800 dark:text-slate-100 overflow-hidden"
             >
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-white/10">
                 <div className="flex items-center gap-2.5">
                   <div className="w-9 h-9 rounded-xl bg-brand-accent text-white flex items-center justify-center font-bold">
                     <Calendar size={18} />
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                      {isAddingEvent ? "Cadastrar Novo Evento Escolar" : "Editar Evento da Agenda"}
+                      Cadastrar Novo Evento
                     </h3>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      O evento ficará visível no calendário e no feed de todos os usuários
+                      O evento será publicado no Feed e no Calendário Escolar
                     </p>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsAddingEvent(false);
-                    setEditingEvent(null);
-                  }}
-                  className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                  onClick={() => !isSavingEvent && setIsAddingEvent(false)}
+                  disabled={isSavingEvent}
+                  className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
                 >
                   <X size={18} />
                 </button>
               </div>
 
-              <form onSubmit={isAddingEvent ? handleSaveNewEvent : handleSaveEditEvent} className="flex flex-col gap-3.5 mt-4">
+              <form onSubmit={handleSaveNewEvent} className="flex flex-col gap-3 mt-4">
                 <div className="flex flex-col gap-1">
-                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    Título do Evento*
+                  <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Título do Evento *
                   </label>
                   <input
                     type="text"
                     required
                     value={eventFormData.title}
                     onChange={(e) => setEventFormData({ ...eventFormData, title: e.target.value })}
-                    placeholder="Ex: Feira de Ciências 2025, Reunião de Pais..."
-                    className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
+                    placeholder="Ex: Feira de Ciências 2026, Festa Junina..."
+                    className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
                   />
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      Local*
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={eventFormData.location}
-                      onChange={(e) => setEventFormData({ ...eventFormData, location: e.target.value })}
-                      placeholder="Ex: Pátio Principal, Quadra..."
-                      className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      Horário*
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={eventFormData.time}
-                      onChange={(e) => setEventFormData({ ...eventFormData, time: e.target.value })}
-                      placeholder="Ex: 14:00, 08:30..."
-                      className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
-                    />
-                  </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Localização / Endereço *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={eventFormData.location}
+                    onChange={(e) => setEventFormData({ ...eventFormData, location: e.target.value })}
+                    className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
+                  />
                 </div>
 
-                {/* Date Fields */}
                 <div className="grid grid-cols-3 gap-2">
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      Dia (1-31)*
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      Dia
                     </label>
                     <input
                       type="number"
@@ -1272,109 +2036,102 @@ export default function AdminPanel({
                       required
                       value={eventFormData.day}
                       onChange={(e) => setEventFormData({ ...eventFormData, day: Number(e.target.value) })}
-                      className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
+                      className="w-full h-10 px-2 text-xs text-center bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
                     />
                   </div>
 
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      Mês*
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      Mês
                     </label>
                     <select
                       value={eventFormData.month}
                       onChange={(e) => setEventFormData({ ...eventFormData, month: Number(e.target.value) })}
-                      className="w-full h-10 px-2 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
+                      className="w-full h-10 px-2 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
                     >
-                      {monthNames.map((name, idx) => (
-                        <option key={name} value={idx}>{name}</option>
+                      {monthNames.map((m, idx) => (
+                        <option key={idx} value={idx}>
+                          {m}
+                        </option>
                       ))}
                     </select>
                   </div>
 
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      Ano*
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      Horário
                     </label>
                     <input
-                      type="number"
+                      type="text"
                       required
-                      value={eventFormData.year}
-                      onChange={(e) => setEventFormData({ ...eventFormData, year: Number(e.target.value) })}
-                      className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
+                      value={eventFormData.time}
+                      onChange={(e) => setEventFormData({ ...eventFormData, time: e.target.value })}
+                      placeholder="14:00"
+                      className="w-full h-10 px-2 text-xs text-center bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
                     />
                   </div>
                 </div>
 
-                {/* Paid Toggle & Price */}
-                <div className="p-3 bg-slate-50 dark:bg-black/20 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col gap-2.5">
-                  <label className="flex items-center gap-2 cursor-pointer select-none text-xs font-semibold text-slate-800 dark:text-slate-200">
+                <div className="flex items-center gap-3 pt-1">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300 select-none">
                     <input
                       type="checkbox"
                       checked={eventFormData.isPaid}
                       onChange={(e) => setEventFormData({ ...eventFormData, isPaid: e.target.checked })}
                       className="w-4 h-4 rounded accent-brand-accent"
                     />
-                    <span>Evento com taxa de inscrição ou ingresso pago</span>
+                    <span>Evento Pago</span>
                   </label>
 
                   {eventFormData.isPaid && (
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs font-bold text-slate-600 dark:text-slate-400">R$</span>
-                      <input
-                        type="text"
-                        value={eventFormData.price}
-                        onChange={(e) => setEventFormData({ ...eventFormData, price: e.target.value })}
-                        placeholder="Ex: 15,00"
-                        className="w-32 h-9 px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-brand-accent focus:outline-none"
-                      />
-                    </div>
+                    <input
+                      type="text"
+                      placeholder="Valor (ex: 15,00)"
+                      value={eventFormData.price}
+                      onChange={(e) => setEventFormData({ ...eventFormData, price: e.target.value })}
+                      className="flex-1 h-9 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:outline-none"
+                    />
                   )}
                 </div>
 
                 <div className="flex flex-col gap-1">
-                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    Requisitos / Descrição do Evento
+                  <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Descrição & Requisitos
                   </label>
                   <textarea
                     rows={2}
                     value={eventFormData.requirements}
                     onChange={(e) => setEventFormData({ ...eventFormData, requirements: e.target.value })}
-                    placeholder="Ex: Trazer uniforme escolar, aberto à comunidade..."
-                    className="w-full p-2.5 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none resize-none"
+                    className="w-full p-2.5 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none resize-none"
                   />
                 </div>
 
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    URL da Imagem de Capa
-                  </label>
-                  <input
-                    type="url"
-                    value={eventFormData.image}
-                    onChange={(e) => setEventFormData({ ...eventFormData, image: e.target.value })}
-                    placeholder="https://images.unsplash.com/..."
-                    className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none font-mono"
-                  />
-                </div>
-
-                <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex items-center justify-end gap-2 mt-2 pt-3 border-t border-slate-100 dark:border-white/10">
                   <button
                     type="button"
-                    onClick={() => {
-                      setIsAddingEvent(false);
-                      setEditingEvent(null);
-                    }}
-                    className="h-10 px-4 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                    onClick={() => setIsAddingEvent(false)}
+                    disabled={isSavingEvent}
+                    className="px-4 h-10 rounded-xl border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer disabled:opacity-50"
                   >
                     Cancelar
                   </button>
+
                   <button
                     type="submit"
-                    disabled={isSaving || !eventFormData.title.trim()}
-                    className="h-10 px-5 bg-brand-accent text-white rounded-xl text-xs font-semibold flex items-center gap-2 hover:opacity-90 active:scale-98 transition-all cursor-pointer shadow-sm disabled:opacity-50"
+                    disabled={isSavingEvent}
+                    className="px-5 h-10 rounded-xl bg-brand-accent hover:bg-brand-accent/90 dark:bg-brand-primary dark:text-slate-900 text-white text-xs font-semibold flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
                   >
-                    <Save size={14} />
-                    <span>{isSaving ? "Salvando..." : (isAddingEvent ? "Publicar Evento" : "Salvar Alterações")}</span>
+                    {isSavingEvent ? (
+                      <>
+                        <RefreshCw size={14} className="animate-spin" />
+                        <span>Publicando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save size={14} />
+                        <span>Publicar Evento</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </form>
@@ -1383,6 +2140,181 @@ export default function AdminPanel({
         )}
       </AnimatePresence>
 
+      {/* MODAL 9: Editar Evento */}
+      <AnimatePresence>
+        {editingEvent && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 15 }}
+              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 relative text-slate-800 dark:text-slate-100 overflow-hidden"
+            >
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-white/10">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold">
+                    <Edit3 size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                      Editar Evento Escolar
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      ID: {editingEvent.id} • {editingEvent.title}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => !isSavingEvent && setEditingEvent(null)}
+                  disabled={isSavingEvent}
+                  className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveEditEvent} className="flex flex-col gap-3 mt-4">
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Título do Evento *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={eventFormData.title}
+                    onChange={(e) => setEventFormData({ ...eventFormData, title: e.target.value })}
+                    className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Localização *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={eventFormData.location}
+                    onChange={(e) => setEventFormData({ ...eventFormData, location: e.target.value })}
+                    className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      Dia
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={31}
+                      required
+                      value={eventFormData.day}
+                      onChange={(e) => setEventFormData({ ...eventFormData, day: Number(e.target.value) })}
+                      className="w-full h-10 px-2 text-xs text-center bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      Mês
+                    </label>
+                    <select
+                      value={eventFormData.month}
+                      onChange={(e) => setEventFormData({ ...eventFormData, month: Number(e.target.value) })}
+                      className="w-full h-10 px-2 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
+                    >
+                      {monthNames.map((m, idx) => (
+                        <option key={idx} value={idx}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      Horário
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={eventFormData.time}
+                      onChange={(e) => setEventFormData({ ...eventFormData, time: e.target.value })}
+                      className="w-full h-10 px-2 text-xs text-center bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 pt-1">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300 select-none">
+                    <input
+                      type="checkbox"
+                      checked={eventFormData.isPaid}
+                      onChange={(e) => setEventFormData({ ...eventFormData, isPaid: e.target.checked })}
+                      className="w-4 h-4 rounded accent-brand-accent"
+                    />
+                    <span>Evento Pago</span>
+                  </label>
+
+                  {eventFormData.isPaid && (
+                    <input
+                      type="text"
+                      placeholder="Valor"
+                      value={eventFormData.price}
+                      onChange={(e) => setEventFormData({ ...eventFormData, price: e.target.value })}
+                      className="flex-1 h-9 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:outline-none"
+                    />
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Descrição & Requisitos
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={eventFormData.requirements}
+                    onChange={(e) => setEventFormData({ ...eventFormData, requirements: e.target.value })}
+                    className="w-full p-2.5 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none resize-none"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 mt-2 pt-3 border-t border-slate-100 dark:border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => setEditingEvent(null)}
+                    disabled={isSavingEvent}
+                    className="px-4 h-10 rounded-xl border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={isSavingEvent}
+                    className="px-5 h-10 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
+                  >
+                    {isSavingEvent ? (
+                      <>
+                        <RefreshCw size={14} className="animate-spin" />
+                        <span>Salvando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save size={14} />
+                        <span>Salvar Modificações</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

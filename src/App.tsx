@@ -21,6 +21,7 @@ import { CheckCircle, AlertCircle, CheckCircle2, Info, X } from "lucide-react";
 import logoImg from "./assets/images/logo.jpg";
 import { resilientFetch, setupNetworkAutoRecovery, safeAppReload } from "./lib/apiResilience.ts";
 import { getSupabaseClient, isSupabaseConfigured, getEffectiveSupabaseUrl } from "./lib/supabase.ts";
+import { canAccessAdminPanel } from "./lib/permissions.ts";
 
 export default function App() {
   const [activeScreen, setActiveScreen] = useState<string>("splash");
@@ -91,12 +92,36 @@ export default function App() {
   const [feedSearchTerm, setFeedSearchTerm] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
 
-  // Set document title & force light theme
+  // Dark mode theme state & persistence
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    try {
+      const savedTheme = localStorage.getItem("theme_mode");
+      if (savedTheme === "dark" || savedTheme === "light") {
+        return savedTheme;
+      }
+      if (typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+        return "dark";
+      }
+      return "light";
+    } catch {
+      return "light";
+    }
+  });
+
   useEffect(() => {
     document.title = "Página eloEscola";
-    document.documentElement.classList.remove("dark");
-    localStorage.removeItem("theme_mode");
-  }, []);
+    if (theme === "dark") {
+      document.documentElement.classList.add("dark");
+      localStorage.setItem("theme_mode", "dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+      localStorage.setItem("theme_mode", "light");
+    }
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+  };
 
   // Toast notification system
   const [toast, setToast] = useState<{ message: string; type: "error" | "success" | "warning" | "info" } | null>(null);
@@ -1288,6 +1313,9 @@ export default function App() {
               onNavigate={setActiveScreen} 
               currentUser={currentUser} 
               onLogout={handleLogout} 
+              canAccessAdmin={canAccessAdminPanel(currentUser)}
+              theme={theme}
+              onToggleTheme={toggleTheme}
               onSearchClick={() => {
                 setActiveScreen("feed");
                 setFeedSearchOpen((prev) => !prev);
@@ -1415,6 +1443,8 @@ export default function App() {
                       onUpdateProfile={handleUpdateProfile}
                       onNavigate={setActiveScreen}
                       onLogout={handleLogout}
+                      theme={theme}
+                      onToggleTheme={toggleTheme}
                     />
                   </motion.div>
                 )}
@@ -1463,7 +1493,7 @@ export default function App() {
               <BottomNav
                 activeTab={activeScreen}
                 onTabChange={setActiveScreen}
-                isAdmin={currentUser?.isAdmin || false}
+                isAdmin={canAccessAdminPanel(currentUser)}
               />
             )}
           </div>

@@ -351,16 +351,17 @@ export function updateUserByUidFallback(uid: string, data: any): User {
   }
   const updatedData = { ...data };
   if (data.role !== undefined) {
-    const user = fallbackUsers[index];
-    if (data.role === 'Funcionário' && user.email !== 'funcionario@helenawysocki.com') {
-      updatedData.role = 'Aluno';
-    }
-    if (data.isAdmin === undefined) {
-      if (updatedData.role === 'Diretor') {
-        updatedData.isAdmin = true;
-      } else if (user) {
-        updatedData.isAdmin = user.isAdmin;
-      }
+    const cleanRole = String(data.role).trim();
+    const lower = cleanRole.toLowerCase();
+    if (lower === 'diretor' || lower === 'chefe administrador' || lower === 'chefe admin') {
+      updatedData.role = 'Diretor';
+      if (data.isAdmin === undefined) updatedData.isAdmin = true;
+    } else if (lower === 'funcionário' || lower === 'funcionario' || lower === 'funcionário administrador' || lower === 'funcionario administrador') {
+      updatedData.role = 'Funcionário';
+      if (data.isAdmin === undefined) updatedData.isAdmin = false;
+    } else {
+      updatedData.role = cleanRole;
+      if (data.isAdmin === undefined) updatedData.isAdmin = false;
     }
   }
   const updatedUser = {
@@ -380,16 +381,17 @@ export function updateUserByIdFallback(id: number, data: any): User {
   }
   const updatedData = { ...data };
   if (data.role !== undefined) {
-    const user = fallbackUsers[index];
-    if (data.role === 'Funcionário' && user.email !== 'funcionario@helenawysocki.com') {
-      updatedData.role = 'Aluno';
-    }
-    if (data.isAdmin === undefined) {
-      if (updatedData.role === 'Diretor') {
-        updatedData.isAdmin = true;
-      } else if (user) {
-        updatedData.isAdmin = user.isAdmin;
-      }
+    const cleanRole = String(data.role).trim();
+    const lower = cleanRole.toLowerCase();
+    if (lower === 'diretor' || lower === 'chefe administrador' || lower === 'chefe admin') {
+      updatedData.role = 'Diretor';
+      if (data.isAdmin === undefined) updatedData.isAdmin = true;
+    } else if (lower === 'funcionário' || lower === 'funcionario' || lower === 'funcionário administrador' || lower === 'funcionario administrador') {
+      updatedData.role = 'Funcionário';
+      if (data.isAdmin === undefined) updatedData.isAdmin = false;
+    } else {
+      updatedData.role = cleanRole;
+      if (data.isAdmin === undefined) updatedData.isAdmin = false;
     }
   }
   const updatedUser = {
