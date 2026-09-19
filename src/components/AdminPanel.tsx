@@ -713,16 +713,16 @@ export default function AdminPanel({
             ) : viewMode === "table" ? (
               /* ================= TABLE VIEW ================= */
               <div className="bg-white dark:bg-brand-card-dark rounded-2xl border border-brand-primary/20 dark:border-white/10 shadow-sm overflow-hidden transition-colors">
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto max-h-[600px] overflow-y-auto admin-scrollable">
                   <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-slate-50/90 dark:bg-black/25 border-b border-slate-100 dark:border-white/10 text-slate-600 dark:text-slate-300 font-semibold select-none">
-                        <th className="py-3.5 px-4">Nome & Identificação</th>
-                        <th className="py-3.5 px-4">E-mail</th>
-                        <th className="py-3.5 px-4">Tipo / Permissão</th>
-                        <th className="py-3.5 px-4 text-center">Status</th>
-                        <th className="py-3.5 px-4">Última Atividade</th>
-                        <th className="py-3.5 px-4 text-right">
+                    <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-900 shadow-2xs">
+                      <tr className="border-b border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 font-semibold select-none">
+                        <th className="py-3.5 px-4 bg-slate-100 dark:bg-slate-900">Nome & Identificação</th>
+                        <th className="py-3.5 px-4 bg-slate-100 dark:bg-slate-900">E-mail</th>
+                        <th className="py-3.5 px-4 bg-slate-100 dark:bg-slate-900">Tipo / Permissão</th>
+                        <th className="py-3.5 px-4 bg-slate-100 dark:bg-slate-900 text-center">Status</th>
+                        <th className="py-3.5 px-4 bg-slate-100 dark:bg-slate-900">Última Atividade</th>
+                        <th className="py-3.5 px-4 bg-slate-100 dark:bg-slate-900 text-right">
                           {isChefe ? "Ações Administrativas" : "Permissão"}
                         </th>
                       </tr>
@@ -895,8 +895,9 @@ export default function AdminPanel({
               </div>
             ) : (
               /* ================= CARDS VIEW ================= */
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {activeUsers.map((u) => {
+              <div className="max-h-[620px] overflow-y-auto admin-scrollable pr-1 pb-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {activeUsers.map((u) => {
                   const isMe =
                     currentUser?.id === u.id ||
                     (currentUser?.email &&
@@ -1033,6 +1034,7 @@ export default function AdminPanel({
                     </div>
                   );
                 })}
+                </div>
               </div>
             )}
           </>
@@ -1067,16 +1069,16 @@ export default function AdminPanel({
             ) : viewMode === "table" ? (
               /* Blocked users Table */
               <div className="bg-white dark:bg-brand-card-dark rounded-2xl border border-red-200 dark:border-red-900/40 shadow-sm overflow-hidden transition-colors">
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto max-h-[600px] overflow-y-auto admin-scrollable">
                   <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-red-50/70 dark:bg-red-950/25 border-b border-red-100 dark:border-red-900/40 text-red-900 dark:text-red-200 font-semibold select-none">
-                        <th className="py-3.5 px-4">Nome & Identificação</th>
-                        <th className="py-3.5 px-4">E-mail</th>
-                        <th className="py-3.5 px-4">Função Original</th>
-                        <th className="py-3.5 px-4 text-center">Status</th>
-                        <th className="py-3.5 px-4">Último Acesso</th>
-                        <th className="py-3.5 px-4 text-right">
+                    <thead className="sticky top-0 z-10 bg-red-100 dark:bg-red-950/90 shadow-2xs">
+                      <tr className="border-b border-red-200 dark:border-red-900/40 text-red-900 dark:text-red-200 font-semibold select-none">
+                        <th className="py-3.5 px-4 bg-red-100 dark:bg-red-950/90">Nome & Identificação</th>
+                        <th className="py-3.5 px-4 bg-red-100 dark:bg-red-950/90">E-mail</th>
+                        <th className="py-3.5 px-4 bg-red-100 dark:bg-red-950/90">Função Original</th>
+                        <th className="py-3.5 px-4 bg-red-100 dark:bg-red-950/90 text-center">Status</th>
+                        <th className="py-3.5 px-4 bg-red-100 dark:bg-red-950/90">Último Acesso</th>
+                        <th className="py-3.5 px-4 bg-red-100 dark:bg-red-950/90 text-right">
                           {isChefe ? "Ações de Desbloqueio" : "Permissão"}
                         </th>
                       </tr>
@@ -1165,8 +1167,9 @@ export default function AdminPanel({
               </div>
             ) : (
               /* Blocked Users Cards */
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {blockedUsers.map((u) => {
+              <div className="max-h-[620px] overflow-y-auto admin-scrollable pr-1 pb-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {blockedUsers.map((u) => {
                   const activityDate = u.lastActiveAt || u.updatedAt || u.createdAt;
                   const formattedDateStr = formatDateTimeBR(activityDate);
 
@@ -1253,6 +1256,7 @@ export default function AdminPanel({
                     </div>
                   );
                 })}
+                </div>
               </div>
             )}
           </>
