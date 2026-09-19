@@ -130,3 +130,42 @@ html.dark .app-viewport {
   width: 0;
   height: 0;
 }
+
+/* Explicit custom scrollbar for Admin Panel and tables */
+.admin-scrollable {
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(76, 107, 76, 0.4) transparent !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+
+.admin-scrollable::-webkit-scrollbar {
+  display: block !important;
+  width: 6px !important;
+  height: 6px !important;
+}
+
+.admin-scrollable::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+.admin-scrollable::-webkit-scrollbar-thumb {
+  background: rgba(76, 107, 76, 0.35) !important;
+  border-radius: 9999px !important;
+}
+
+.admin-scrollable::-webkit-scrollbar-thumb:hover {
+  background: rgba(76, 107, 76, 0.6) !important;
+}
+
+html.dark .admin-scrollable {
+  scrollbar-color: rgba(163, 198, 157, 0.4) transparent !important;
+}
+
+html.dark .admin-scrollable::-webkit-scrollbar-thumb {
+  background: rgba(163, 198, 157, 0.3) !important;
+}
+
+html.dark .admin-scrollable::-webkit-scrollbar-thumb:hover {
+  background: rgba(163, 198, 157, 0.5) !important;
+}

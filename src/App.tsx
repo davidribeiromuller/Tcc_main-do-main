@@ -22,6 +22,23 @@ import { CheckCircle, AlertCircle, CheckCircle2, Info, X } from "lucide-react";
 import logoImg from "./assets/images/logo.jpg";
 import { resilientFetch, setupNetworkAutoRecovery, safeAppReload } from "./lib/apiResilience.ts";
 import { getSupabaseClient, isSupabaseConfigured, getEffectiveSupabaseUrl } from "./lib/supabase.ts";
+import {
+  fetchEventsDirectFromSupabase,
+  createEventDirectInSupabase,
+  updateEventDirectInSupabase,
+  deleteEventDirectInSupabase,
+} from "./lib/eventsService.ts";
+import {
+  fetchUsersDirectFromSupabase,
+  updateUserDirectInSupabase,
+  softDeleteUserDirectInSupabase,
+  unblockUserDirectInSupabase,
+  permanentDeleteUserDirectInSupabase,
+  authenticateUserDirectInSupabase,
+  registerUserDirectInSupabase,
+  syncOAuthUserDirectInSupabase,
+  heartbeatUserDirectInSupabase,
+} from "./lib/usersService.ts";
 import { canAccessAdminPanel } from "./lib/permissions.ts";
 
 export default function App() {
@@ -134,23 +151,41 @@ export default function App() {
     }, 4500);
   };
 
-  // Load events with automatic retry before fallback
+  // Load events directly from backend and Supabase
   const loadEvents = async (): Promise<boolean> => {
+    setIsLoadingEvents(true);
+
+    // 1. Tentar primeiro via endpoint backend /api/events (que consulta o Postgres do Supabase)
     try {
-      const res = await resilientFetch("/api/events", { retries: 2, retryDelay: 600 });
+      const res = await resilientFetch("/api/events", { retries: 2, retryDelay: 500 });
       if (res.ok) {
         const data = await res.json();
         const incomingEvents = data.events || [];
-        setEvents(incomingEvents);
-        localStorage.setItem("local_events", JSON.stringify(incomingEvents));
+        if (Array.isArray(incomingEvents) && incomingEvents.length > 0) {
+          setEvents(incomingEvents);
+          localStorage.setItem("local_events", JSON.stringify(incomingEvents));
+          setIsLoadingEvents(false);
+          return true;
+        }
+      }
+    } catch (error) {
+      console.warn("[loadEvents] Backend /api/events falhou ou demorou:", error);
+    }
+
+    // 2. Consulta direta via cliente Supabase (REST/PostgREST)
+    try {
+      const { events: directEvents, error: directErr } = await fetchEventsDirectFromSupabase();
+      if (!directErr && Array.isArray(directEvents) && directEvents.length > 0) {
+        setEvents(directEvents);
+        localStorage.setItem("local_events", JSON.stringify(directEvents));
         setIsLoadingEvents(false);
         return true;
       }
-    } catch (error) {
-      console.warn("Backend não respondeu /api/events após retentativas, usando cache local seguro:", error);
+    } catch (supabaseErr) {
+      console.warn("[loadEvents] Consulta direta ao Supabase falhou:", supabaseErr);
     }
 
-    // Safe fallback from local storage
+    // 3. Fallback de cache local prévio se houver
     try {
       const stored = localStorage.getItem("local_events");
       if (stored) {
@@ -161,39 +196,51 @@ export default function App() {
           return true;
         }
       }
-      setEvents(defaultEvents);
-      localStorage.setItem("local_events", JSON.stringify(defaultEvents));
-      setIsLoadingEvents(false);
-      return true;
-    } catch {
-      setEvents(defaultEvents);
-      setIsLoadingEvents(false);
-      return false;
+    } catch (e) {
+      console.warn("[loadEvents] Erro ao carregar cache local:", e);
     }
+
+    setIsLoadingEvents(false);
+    return false;
   };
 
-  // Load all users for admin with automatic retry before fallback
+  // Load all users for admin: prioritiza consulta direta ao banco de dados Supabase
   const loadAllUsers = async (customToken?: string) => {
+    // 1. Tentar carregar TODOS os usuários diretamente do banco Supabase
+    try {
+      if (isSupabaseConfigured()) {
+        const { users: dbUsers, error: dbError } = await fetchUsersDirectFromSupabase();
+        if (!dbError && Array.isArray(dbUsers) && dbUsers.length > 0) {
+          setUsersList(dbUsers);
+          localStorage.setItem("local_users_db", JSON.stringify(dbUsers));
+          return;
+        }
+      }
+    } catch (directErr) {
+      console.warn("[loadAllUsers] Consulta direta ao Supabase falhou:", directErr);
+    }
+
+    // 2. Se falhar ou estiver com backend Express disponível (ambiente local)
     try {
       const token = customToken || (await getAuthToken()) || "";
       const headers: Record<string, string> = {};
       if (token) {
         headers.Authorization = `Bearer ${token}`;
       }
-      const res = await resilientFetch("/api/users", { headers, retries: 2, retryDelay: 600 });
+      const res = await resilientFetch("/api/users", { headers, retries: 1, retryDelay: 400 });
       if (res.ok) {
         const data = await res.json();
-        if (data.users && Array.isArray(data.users)) {
+        if (data.users && Array.isArray(data.users) && data.users.length > 0) {
           setUsersList(data.users);
           localStorage.setItem("local_users_db", JSON.stringify(data.users));
           return;
         }
       }
     } catch (error) {
-      console.warn("Backend não respondeu /api/users após retentativas, usando cache local seguro:", error);
+      console.warn("Backend não respondeu /api/users, usando cache seguro:", error);
     }
 
-    // Safe fallback from local storage
+    // 3. Safe fallback from local storage
     try {
       const stored = localStorage.getItem("local_users_db");
       if (stored) {
@@ -391,7 +438,10 @@ export default function App() {
         prevList.map((u) => (u.id === currentUser.id || u.email === currentUser.email ? { ...u, lastActiveAt: nowIso } : u))
       );
 
-      // Ping server heartbeat
+      // Ping server heartbeat & Supabase direct heartbeat
+      if (isSupabaseConfigured()) {
+        heartbeatUserDirectInSupabase(currentUser.id || currentUser.email).catch(() => {});
+      }
       try {
         const token = (await getAuthToken()) || "";
         const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -442,30 +492,50 @@ export default function App() {
       let res: Response | null = null;
       let synchronizedUser: User | null = null;
 
-      try {
-        res = await fetch("/api/auth/login", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify({
+      // 1. Tentar sincronizar diretamente com o Supabase (garante dados reais no GitHub Pages)
+      if (isSupabaseConfigured()) {
+        try {
+          const { user: directSyncedUser } = await syncOAuthUserDirectInSupabase({
             email: userEmail,
             nome: userName,
             foto_perfil: userPhoto,
-            role: "Aluno"
-          })
-        });
-
-        if (res && res.ok) {
-          const contentType = res.headers.get("content-type");
-          if (contentType && contentType.includes("application/json")) {
-            const data = await res.json();
-            synchronizedUser = data.user;
+            uid: uid
+          });
+          if (directSyncedUser) {
+            synchronizedUser = directSyncedUser;
           }
+        } catch (sbSyncErr) {
+          console.warn("[Google Auth] Erro ao sincronizar diretamente com o Supabase:", sbSyncErr);
         }
-      } catch (e) {
-        console.warn("[Google Auth] Server lookup fallback:", e);
+      }
+
+      // 2. Se backend local responder, sincroniza também com o backend
+      if (!synchronizedUser) {
+        try {
+          res = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              email: userEmail,
+              nome: userName,
+              foto_perfil: userPhoto,
+              role: "Aluno"
+            })
+          });
+
+          if (res && res.ok) {
+            const contentType = res.headers.get("content-type");
+            if (contentType && contentType.includes("application/json")) {
+              const data = await res.json();
+              synchronizedUser = data.user;
+            }
+          }
+        } catch (e) {
+          console.warn("[Google Auth] Server lookup fallback:", e);
+        }
       }
 
       if (!synchronizedUser) {
@@ -689,7 +759,27 @@ export default function App() {
         }
       }
 
-      // Local storage fallback for GitHub Pages / static hosting
+      // 2. Autenticação direta no banco Supabase (Ambiente GitHub Pages / Produção)
+      if (isSupabaseConfigured()) {
+        const { user: authUser, error: authErr } = await authenticateUserDirectInSupabase(email, password);
+        if (authUser) {
+          setCurrentUser(authUser);
+          localStorage.setItem("local_user", JSON.stringify(authUser));
+          if (authUser.isAdmin) {
+            await loadAllUsers();
+          }
+          await loadEvents();
+          showToast(`Bem-vindo(a) de volta, ${authUser.nome}!`, "success");
+          setActiveScreen("feed");
+          return;
+        } else if (authErr) {
+          setLoginError(authErr);
+          showToast(authErr, "error");
+          return;
+        }
+      }
+
+      // 3. Fallback de cache local seguro se offline
       const cleanEmail = email.trim().toLowerCase();
       let localUsersList: User[] = defaultUsers;
       try {
@@ -722,12 +812,6 @@ export default function App() {
         };
         localUsersList.push(found);
         localStorage.setItem("local_users_db", JSON.stringify(localUsersList));
-      } else {
-        const isDirector = cleanEmail === "diretoria@helenawysocki.com";
-        if (!isDirector && (found.isAdmin || found.role === "Diretor")) {
-          found.isAdmin = false;
-          found.role = "Aluno";
-        }
       }
 
       setCurrentUser(found);
@@ -778,6 +862,8 @@ export default function App() {
         const synchronizedUser = resData.user;
         setCurrentUser(synchronizedUser);
         localStorage.setItem("local_user", JSON.stringify(synchronizedUser));
+        await loadAllUsers();
+        await loadEvents();
         showToast("Conta escolar criada com sucesso!", "success");
         setActiveScreen("feed");
         return;
@@ -787,6 +873,24 @@ export default function App() {
         setLoginError(errorMsg);
         showToast(errorMsg, "error");
         return;
+      }
+
+      // 2. Gravação direta no Supabase (GitHub Pages)
+      if (isSupabaseConfigured()) {
+        const { user: newUser, error: regError } = await registerUserDirectInSupabase(data);
+        if (newUser) {
+          setCurrentUser(newUser);
+          localStorage.setItem("local_user", JSON.stringify(newUser));
+          await loadEvents();
+          await loadAllUsers();
+          showToast("Conta escolar criada com sucesso no banco de dados!", "success");
+          setActiveScreen("feed");
+          return;
+        } else if (regError) {
+          setLoginError(regError);
+          showToast(regError, "error");
+          return;
+        }
       }
 
       // Local storage fallback for GitHub Pages / static hosting
@@ -892,6 +996,18 @@ export default function App() {
   // Add event
   const handleAddEvent = async (eventData: any) => {
     try {
+      // 1. Tentar salvar diretamente no Supabase (GitHub Pages / Produção)
+      if (isSupabaseConfigured()) {
+        const { success, error: sbErr } = await createEventDirectInSupabase(eventData);
+        if (success) {
+          await loadEvents();
+          showToast("Evento adicionado à agenda escolar com sucesso!", "success");
+          return;
+        }
+        if (sbErr) console.warn("[handleAddEvent] Supabase direto avisou:", sbErr);
+      }
+
+      // 2. Tentar via backend local se disponível
       const token = await getAuthToken();
       let res: Response | null = null;
       if (token) {
@@ -902,27 +1018,22 @@ export default function App() {
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify(eventData),
-          retries: 2,
-          retryDelay: 600,
+          retries: 1,
+          retryDelay: 400,
         });
       }
 
       if (res && res.ok) {
-        // Atualizar automaticamente os dados reais do banco de dados após sucesso
         await loadEvents();
         showToast("Evento adicionado à agenda escolar com sucesso!", "success");
         return;
       }
 
-      // Se o salvamento falhou no servidor: NÃO exibir na interface dados que não foram salvos no banco
-      const detail = res ? await res.json().catch(() => ({})) : null;
-      await loadEvents(); // Re-sincroniza com o banco real
-      showToast(detail?.error || "Não foi possível salvar o evento no banco de dados. O formulário foi mantido para tentar novamente.", "error");
-      throw new Error(detail?.error || "Falha ao cadastrar evento");
+      throw new Error("Não foi possível salvar o evento no banco de dados.");
     } catch (error: any) {
       console.error("Error writing event:", error);
-      await loadEvents(); // Garante que a lista de eventos corresponda ao banco
-      showToast("Erro de conexão ao salvar evento. Seus dados foram mantidos no formulário para tentar novamente.", "error");
+      await loadEvents();
+      showToast("Erro ao salvar evento no banco de dados. Tente novamente.", "error");
       throw error;
     }
   };
@@ -932,6 +1043,19 @@ export default function App() {
     const previousEvents = [...events];
     try {
       setIsDeletingEvent(true);
+
+      // 1. Tentar remover diretamente no Supabase
+      if (isSupabaseConfigured()) {
+        const { success } = await deleteEventDirectInSupabase(eventId);
+        if (success) {
+          await loadEvents();
+          showToast("Evento removido com sucesso.", "info");
+          setActiveScreen("feed");
+          return;
+        }
+      }
+
+      // 2. Tentar via backend
       const token = await getAuthToken();
       let res: Response | null = null;
       if (token) {
@@ -940,8 +1064,8 @@ export default function App() {
           headers: {
             Authorization: `Bearer ${token}`,
           },
-          retries: 2,
-          retryDelay: 600,
+          retries: 1,
+          retryDelay: 400,
         });
       }
 
@@ -955,12 +1079,10 @@ export default function App() {
       // Se falhou: manter o evento visível e restaurar lista
       setEvents(previousEvents);
       await loadEvents();
-      const detail = res ? await res.json().catch(() => ({})) : null;
-      showToast(detail?.error || "Não foi possível remover o evento no banco de dados. O evento foi mantido.", "error");
-      throw new Error(detail?.error || "Erro ao excluir evento");
+      showToast("Não foi possível remover o evento no banco de dados.", "error");
+      throw new Error("Erro ao excluir evento");
     } catch (error: any) {
       console.error("Error deleting event:", error);
-      // Reverter estado e manter o evento visível
       setEvents(previousEvents);
       await loadEvents();
       showToast("Falha ao excluir evento. A ação foi revertida e o evento foi mantido.", "error");
@@ -976,6 +1098,20 @@ export default function App() {
     const previousSelected = selectedEvent ? { ...selectedEvent } : null;
 
     try {
+      // 1. Tentar atualizar diretamente no Supabase
+      if (isSupabaseConfigured()) {
+        const { success } = await updateEventDirectInSupabase(eventId, eventData);
+        if (success) {
+          await loadEvents();
+          if (selectedEvent && selectedEvent.id === eventId) {
+            setSelectedEvent((prev) => (prev ? { ...prev, ...eventData } : null));
+          }
+          showToast("Evento atualizado com sucesso no banco de dados!", "success");
+          return;
+        }
+      }
+
+      // 2. Tentar via backend
       const token = await getAuthToken();
       let res: Response | null = null;
       if (token) {
@@ -986,8 +1122,8 @@ export default function App() {
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify(eventData),
-          retries: 2,
-          retryDelay: 600,
+          retries: 1,
+          retryDelay: 400,
         });
       }
 
@@ -1006,9 +1142,8 @@ export default function App() {
       setEvents(previousEvents);
       setSelectedEvent(previousSelected);
       await loadEvents();
-      const detail = res ? await res.json().catch(() => ({})) : null;
-      showToast(detail?.error || "Não foi possível salvar alterações. O estado anterior foi restaurado.", "error");
-      throw new Error(detail?.error || "Falha ao salvar evento");
+      showToast("Não foi possível salvar alterações no evento.", "error");
+      throw new Error("Falha ao salvar evento");
     } catch (error: any) {
       console.error("Error updating event:", error);
       setEvents(previousEvents);
@@ -1022,8 +1157,42 @@ export default function App() {
   // Admin: Update another user role/privileges
   const handleAdminUpdateUser = async (userId: number, updateData: any) => {
     const previousUsers = [...usersList];
+    const targetUser = usersList.find(u => u.id === userId);
+    const enrichedData = {
+      ...updateData,
+      email: updateData.email || targetUser?.email,
+      uid: updateData.uid || targetUser?.uid,
+      nome: updateData.nome || targetUser?.nome,
+    };
+
+    // Atualização otimista imediata na interface
+    setUsersList(prev =>
+      prev.map(u => {
+        if (u.id === userId || (enrichedData.email && (u.email || '').toLowerCase() === enrichedData.email.toLowerCase())) {
+          return { ...u, ...enrichedData };
+        }
+        return u;
+      })
+    );
 
     try {
+      // 1. Salvar diretamente no Supabase (GitHub Pages / Produção)
+      if (isSupabaseConfigured()) {
+        const { user: updatedUser, error: sbError } = await updateUserDirectInSupabase(userId, enrichedData);
+        if (!sbError && updatedUser) {
+          setUsersList(prev => {
+            const updated = prev.map(u => (u.id === userId || u.id === updatedUser.id ? { ...u, ...updatedUser } : u));
+            try { localStorage.setItem("local_users_db", JSON.stringify(updated)); } catch {}
+            return updated;
+          });
+          await loadAllUsers();
+          showToast("Cargo e permissões do usuário atualizados com sucesso no banco!", "success");
+          return;
+        }
+        if (sbError) console.warn("[handleAdminUpdateUser] Supabase direto avisou:", sbError);
+      }
+
+      // 2. Tentar via backend local
       const token = await getAuthToken();
       let res: Response | null = null;
       if (token) {
@@ -1033,29 +1202,50 @@ export default function App() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify(updateData),
-          retries: 2,
-          retryDelay: 600,
+          body: JSON.stringify(enrichedData),
+          retries: 1,
+          retryDelay: 400,
         });
       }
 
       if (res && res.ok) {
+        const responseData = await res.json().catch(() => ({}));
+        const updatedDbUser = responseData?.user;
+        if (updatedDbUser) {
+          setUsersList(prev => {
+            const updated = prev.map(u => {
+              if (
+                u.id === userId ||
+                u.id === updatedDbUser.id ||
+                (updatedDbUser.email && (u.email || '').toLowerCase() === updatedDbUser.email.toLowerCase())
+              ) {
+                return { ...u, ...updatedDbUser };
+              }
+              return u;
+            });
+            try {
+              localStorage.setItem("local_users_db", JSON.stringify(updated));
+            } catch {}
+            return updated;
+          });
+        }
         await loadAllUsers(token || "");
-        showToast("Permissões do usuário atualizadas!", "success");
+        showToast("Permissões e dados do usuário atualizados com sucesso!", "success");
         return;
       }
 
       // Falha: reverter estado e consultar dados do banco
+      const detail = res ? await res.json().catch(() => ({})) : null;
       setUsersList(previousUsers);
       await loadAllUsers(token || "");
-      const detail = res ? await res.json().catch(() => ({})) : null;
-      showToast(detail?.error || "Não foi possível atualizar o usuário no banco de dados.", "error");
-      throw new Error(detail?.error || "Falha ao atualizar permissões");
+      const errorMsg = detail?.error || "Não foi possível atualizar o usuário no banco de dados.";
+      showToast(errorMsg, "error");
+      throw new Error(errorMsg);
     } catch (error: any) {
       console.error("Admin user modification failed:", error);
       setUsersList(previousUsers);
       await loadAllUsers();
-      showToast("Erro ao modificar permissões. Estado anterior restaurado.", "error");
+      showToast(error?.message || "Erro ao modificar permissões. Estado anterior restaurado.", "error");
       throw error;
     }
   };
@@ -1063,18 +1253,33 @@ export default function App() {
   // Admin: Delete user from database (Soft delete / Block)
   const handleAdminDeleteUser = async (userId: number) => {
     const previousUsers = [...usersList];
+    const targetUser = usersList.find(u => u.id === userId);
+    const targetEmail = targetUser?.email || "";
 
     try {
+      // 1. Tentar direto no Supabase
+      if (isSupabaseConfigured()) {
+        const { success } = await softDeleteUserDirectInSupabase(userId, targetEmail);
+        if (success) {
+          await loadAllUsers();
+          showToast("Conta escolar bloqueada com sucesso no banco.", "info");
+          return;
+        }
+      }
+
+      // 2. Tentar via backend
       const token = await getAuthToken();
       let res: Response | null = null;
       if (token) {
-        res = await resilientFetch(`/api/users/${userId}`, {
+        res = await resilientFetch(`/api/users/${userId}?email=${encodeURIComponent(targetEmail)}`, {
           method: "DELETE",
           headers: {
+            "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          retries: 2,
-          retryDelay: 600,
+          body: JSON.stringify({ email: targetEmail }),
+          retries: 1,
+          retryDelay: 400,
         });
       }
 
@@ -1087,9 +1292,8 @@ export default function App() {
       // Falha: reverter estado e re-sincronizar com banco
       setUsersList(previousUsers);
       await loadAllUsers(token || "");
-      const detail = res ? await res.json().catch(() => ({})) : null;
-      showToast(detail?.error || "Não foi possível bloquear este usuário.", "error");
-      throw new Error(detail?.error || "Falha ao bloquear usuário");
+      showToast("Não foi possível bloquear este usuário.", "error");
+      throw new Error("Falha ao bloquear usuário");
     } catch (error: any) {
       console.error("Admin deletion failed:", error);
       setUsersList(previousUsers);
@@ -1102,18 +1306,33 @@ export default function App() {
   // Admin: Unblock user
   const handleAdminUnblockUser = async (userId: number) => {
     const previousUsers = [...usersList];
+    const targetUser = usersList.find(u => u.id === userId);
+    const targetEmail = targetUser?.email || "";
 
     try {
+      // 1. Tentar direto no Supabase
+      if (isSupabaseConfigured()) {
+        const { success } = await unblockUserDirectInSupabase(userId, targetEmail);
+        if (success) {
+          await loadAllUsers();
+          showToast("Conta escolar desbloqueada com sucesso no banco!", "success");
+          return;
+        }
+      }
+
+      // 2. Tentar via backend
       const token = await getAuthToken();
       let res: Response | null = null;
       if (token) {
-        res = await resilientFetch(`/api/users/${userId}/unblock`, {
+        res = await resilientFetch(`/api/users/${userId}/unblock?email=${encodeURIComponent(targetEmail)}`, {
           method: "POST",
           headers: {
+            "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          retries: 2,
-          retryDelay: 600,
+          body: JSON.stringify({ email: targetEmail }),
+          retries: 1,
+          retryDelay: 400,
         });
       }
 
@@ -1126,9 +1345,8 @@ export default function App() {
       // Falha: reverter estado e re-sincronizar com banco
       setUsersList(previousUsers);
       await loadAllUsers(token || "");
-      const detail = res ? await res.json().catch(() => ({})) : null;
-      showToast(detail?.error || "Não foi possível desbloquear o usuário.", "error");
-      throw new Error(detail?.error || "Falha ao desbloquear usuário");
+      showToast("Não foi possível desbloquear o usuário.", "error");
+      throw new Error("Falha ao desbloquear usuário");
     } catch (error: any) {
       console.error("Admin unblock failed:", error);
       setUsersList(previousUsers);
@@ -1141,18 +1359,33 @@ export default function App() {
   // Admin: Permanent Delete user
   const handleAdminPermanentDeleteUser = async (userId: number) => {
     const previousUsers = [...usersList];
+    const targetUser = usersList.find(u => u.id === userId);
+    const targetEmail = targetUser?.email || "";
 
     try {
+      // 1. Tentar direto no Supabase
+      if (isSupabaseConfigured()) {
+        const { success } = await permanentDeleteUserDirectInSupabase(userId, targetEmail);
+        if (success) {
+          await loadAllUsers();
+          showToast("Conta escolar excluída definitivamente do banco!", "info");
+          return;
+        }
+      }
+
+      // 2. Tentar via backend
       const token = await getAuthToken();
       let res: Response | null = null;
       if (token) {
-        res = await resilientFetch(`/api/users/${userId}/permanent`, {
+        res = await resilientFetch(`/api/users/${userId}/permanent?email=${encodeURIComponent(targetEmail)}`, {
           method: "DELETE",
           headers: {
+            "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          retries: 2,
-          retryDelay: 600,
+          body: JSON.stringify({ email: targetEmail }),
+          retries: 1,
+          retryDelay: 400,
         });
       }
 
@@ -1165,9 +1398,8 @@ export default function App() {
       // Falha: manter usuário e restaurar lista
       setUsersList(previousUsers);
       await loadAllUsers(token || "");
-      const detail = res ? await res.json().catch(() => ({})) : null;
-      showToast(detail?.error || "Não foi possível excluir o usuário permanentemente.", "error");
-      throw new Error(detail?.error || "Falha ao excluir usuário");
+      showToast("Não foi possível excluir o usuário permanentemente.", "error");
+      throw new Error("Falha ao excluir usuário");
     } catch (error: any) {
       console.error("Admin permanent deletion failed:", error);
       setUsersList(previousUsers);
@@ -1421,7 +1653,7 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="absolute inset-0 overflow-y-auto"
+                    className="absolute inset-0 flex flex-col overflow-y-auto"
                   >
                     <AdminPanel
                       usersList={usersList}

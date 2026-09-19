@@ -193,8 +193,11 @@ export async function updateUserByUid(uid: string, data: any) {
 }
 
 export async function updateUserById(id: number, data: any) {
+  const cleanEmail = data?.email ? String(data.email).trim().toLowerCase() : null;
+  const isSafeInteger = Number.isInteger(id) && id > 0 && id <= 2147483647;
+
   if (isDbCachedOffline()) {
-    return updateUserByIdFallback(id, data);
+    return updateUserByIdFallback(id, data, cleanEmail);
   }
   try {
     const updatedData = { ...data };
@@ -212,19 +215,69 @@ export async function updateUserById(id: number, data: any) {
         if (data.isAdmin === undefined) updatedData.isAdmin = false;
       }
     }
-    const result = await db.update(users)
-      .set({
-        ...updatedData,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, id))
-      .returning();
-    markDbOnline();
-    return result[0];
-  } catch (error) {
-    handleQueryError('updateUserById', error);
-    markDbOffline();
-    return updateUserByIdFallback(id, data);
+
+    let updatedRecord: any = null;
+
+    // 1. Tentar atualizar por ID caso seja um inteiro válido do Postgres
+    if (isSafeInteger) {
+      const result = await db.update(users)
+        .set({
+          ...updatedData,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, id))
+        .returning();
+      if (result && result.length > 0) {
+        updatedRecord = result[0];
+      }
+    }
+
+    // 2. Se não atualizou por ID ou o ID não era um inteiro válido de 32 bits, buscar e atualizar por e-mail
+    if (!updatedRecord && cleanEmail) {
+      const resultByEmail = await db.update(users)
+        .set({
+          ...updatedData,
+          updatedAt: new Date(),
+        })
+        .where(sql`LOWER(${users.email}) = ${cleanEmail}`)
+        .returning();
+
+      if (resultByEmail && resultByEmail.length > 0) {
+        updatedRecord = resultByEmail[0];
+      }
+    }
+
+    // 3. Se ainda não encontrado no banco Postgres e temos e-mail, inserir novo registro no banco
+    if (!updatedRecord && cleanEmail) {
+      try {
+        const inserted = await db.insert(users).values({
+          ...updatedData,
+          email: cleanEmail,
+          nome: data.nome || 'Usuário',
+          role: updatedData.role || 'Aluno',
+          isAdmin: Boolean(updatedData.isAdmin),
+          ativo: data.ativo !== false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }).returning();
+        if (inserted && inserted.length > 0) {
+          updatedRecord = inserted[0];
+        }
+      } catch (insertErr) {
+        console.warn('[Database] Could not auto-insert user during updateUserById:', insertErr);
+      }
+    }
+
+    if (updatedRecord) {
+      markDbOnline();
+      return updatedRecord;
+    }
+
+    // Fallback se não retornou registro
+    return updateUserByIdFallback(id, data, cleanEmail);
+  } catch (error: any) {
+    console.warn('[Database] Error in updateUserById, falling back to local memory store:', error?.message);
+    return updateUserByIdFallback(id, data, cleanEmail);
   }
 }
 
@@ -243,84 +296,134 @@ export async function listAllUsers() {
   }
 }
 
-export async function blockUserById(id: number) {
+export async function blockUserById(id: number, email?: string) {
+  const cleanEmail = email ? String(email).trim().toLowerCase() : null;
+  const isSafeInteger = Number.isInteger(id) && id > 0 && id <= 2147483647;
+
   try {
-    blockUserByIdFallback(id);
+    blockUserByIdFallback(id, cleanEmail);
   } catch (e) {}
 
   if (isDbCachedOffline()) {
-    return blockUserByIdFallback(id);
+    return blockUserByIdFallback(id, cleanEmail);
   }
   try {
-    const result = await db.update(users)
-      .set({ ativo: false, updatedAt: new Date() })
-      .where(eq(users.id, id))
-      .returning();
-    markDbOnline();
-    return result[0];
+    if (isSafeInteger) {
+      const result = await db.update(users)
+        .set({ ativo: false, updatedAt: new Date() })
+        .where(eq(users.id, id))
+        .returning();
+      if (result.length > 0) {
+        markDbOnline();
+        return result[0];
+      }
+    }
+    if (cleanEmail) {
+      const result = await db.update(users)
+        .set({ ativo: false, updatedAt: new Date() })
+        .where(sql`LOWER(${users.email}) = ${cleanEmail}`)
+        .returning();
+      if (result.length > 0) {
+        markDbOnline();
+        return result[0];
+      }
+    }
+    return blockUserByIdFallback(id, cleanEmail);
   } catch (error) {
-    handleQueryError('blockUserById', error);
-    markDbOffline();
-    return blockUserByIdFallback(id);
+    return blockUserByIdFallback(id, cleanEmail);
   }
 }
 
-export async function unblockUserById(id: number) {
+export async function unblockUserById(id: number, email?: string) {
+  const cleanEmail = email ? String(email).trim().toLowerCase() : null;
+  const isSafeInteger = Number.isInteger(id) && id > 0 && id <= 2147483647;
+
   try {
-    unblockUserByIdFallback(id);
+    unblockUserByIdFallback(id, cleanEmail);
   } catch (e) {}
 
   if (isDbCachedOffline()) {
-    return unblockUserByIdFallback(id);
+    return unblockUserByIdFallback(id, cleanEmail);
   }
   try {
-    const result = await db.update(users)
-      .set({ ativo: true, updatedAt: new Date() })
-      .where(eq(users.id, id))
-      .returning();
-    markDbOnline();
-    return result[0];
+    if (isSafeInteger) {
+      const result = await db.update(users)
+        .set({ ativo: true, updatedAt: new Date() })
+        .where(eq(users.id, id))
+        .returning();
+      if (result.length > 0) {
+        markDbOnline();
+        return result[0];
+      }
+    }
+    if (cleanEmail) {
+      const result = await db.update(users)
+        .set({ ativo: true, updatedAt: new Date() })
+        .where(sql`LOWER(${users.email}) = ${cleanEmail}`)
+        .returning();
+      if (result.length > 0) {
+        markDbOnline();
+        return result[0];
+      }
+    }
+    return unblockUserByIdFallback(id, cleanEmail);
   } catch (error) {
-    handleQueryError('unblockUserById', error);
-    markDbOffline();
-    return unblockUserByIdFallback(id);
+    return unblockUserByIdFallback(id, cleanEmail);
   }
 }
 
-export async function deleteUserPermanentlyById(id: number) {
+export async function deleteUserPermanentlyById(id: number, email?: string) {
+  const cleanEmail = email ? String(email).trim().toLowerCase() : null;
+  const isSafeInteger = Number.isInteger(id) && id > 0 && id <= 2147483647;
+
   // Always clean fallback store as well for immediate consistency
   try {
-    deleteUserByIdFallback(id);
+    deleteUserByIdFallback(id, cleanEmail);
   } catch (e) {}
 
   if (isDbCachedOffline()) {
-    return deleteUserByIdFallback(id);
+    return deleteUserByIdFallback(id, cleanEmail);
   }
   try {
-    // 1. Unlink any events created by this user to avoid FK constraint violations
-    try {
-      await db.update(events).set({ creatorId: null }).where(eq(events.creatorId, id));
-    } catch (unlinkErr) {
-      console.warn('[Database] Could not unlink events for user', id, unlinkErr);
+    let targetId: number | null = isSafeInteger ? id : null;
+    if (!targetId && cleanEmail) {
+      const found = await db.select().from(users).where(sql`LOWER(${users.email}) = ${cleanEmail}`).limit(1);
+      if (found.length > 0) {
+        targetId = found[0].id;
+      }
     }
 
-    // 2. Delete user from Supabase / Postgres table
-    const result = await db.delete(users).where(eq(users.id, id)).returning();
-    markDbOnline();
-    return result[0];
-  } catch (error) {
-    handleQueryError('deleteUserPermanentlyById', error);
-    markDbOffline();
-    try {
-      return deleteUserByIdFallback(id);
-    } catch (fallbackError) {
-      console.error('Fallback error of deleteUserByIdFallback:', fallbackError);
-      throw error;
+    if (targetId) {
+      // 1. Unlink any events created by this user to avoid FK constraint violations
+      try {
+        await db.update(events).set({ creatorId: null }).where(eq(events.creatorId, targetId));
+      } catch (unlinkErr) {
+        console.warn('[Database] Could not unlink events for user', targetId, unlinkErr);
+      }
+
+      // 2. Delete user from Supabase / Postgres table
+      const result = await db.delete(users).where(eq(users.id, targetId)).returning();
+      if (result.length > 0) {
+        markDbOnline();
+        return result[0];
+      }
     }
+
+    if (cleanEmail) {
+      const result = await db.delete(users).where(sql`LOWER(${users.email}) = ${cleanEmail}`).returning();
+      if (result.length > 0) {
+        markDbOnline();
+        return result[0];
+      }
+    }
+
+    return deleteUserByIdFallback(id, cleanEmail);
+  } catch (error) {
+    return deleteUserByIdFallback(id, cleanEmail);
   }
 }
 
-export async function deleteUserById(id: number) {
+export async function deleteUserById(id: number, email?: string) {
   // Deleting from admin dashboard soft-deletes / blocks user so they appear in "Contas bloqueadas"
-  return blockUserById(id);
+  return blockUserById(id, email);
 }

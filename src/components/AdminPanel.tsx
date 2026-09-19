@@ -236,7 +236,12 @@ export default function AdminPanel({
 
       await onUpdateUser(userToChangeRole.id, {
         role: payloadRole,
-        isAdmin: payloadIsAdmin
+        isAdmin: payloadIsAdmin,
+        email: userToChangeRole.email,
+        nome: userToChangeRole.nome,
+        uid: userToChangeRole.uid,
+        institution: userToChangeRole.institution,
+        ativo: userToChangeRole.ativo !== false
       });
       setUserToChangeRole(null);
     } catch (err) {
@@ -466,7 +471,7 @@ export default function AdminPanel({
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="flex flex-col h-full overflow-y-auto pb-28 text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark transition-colors"
+      className="flex flex-col flex-1 h-full min-h-0 admin-scrollable overflow-y-auto overflow-x-hidden pb-56 sm:pb-44 text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark transition-colors scroll-smooth overscroll-contain"
     >
       {/* Top Bar / Header */}
       <div className="border-b border-brand-primary/10 dark:border-white/10 bg-brand-bg-light/90 dark:bg-brand-bg-dark/90 backdrop-blur-md sticky top-0 z-30 transition-colors">
@@ -1417,12 +1422,12 @@ export default function AdminPanel({
       {/* MODAL 1: Alterar Nível de Permissão (Chefe Admin Only) */}
       <AnimatePresence>
         {userToChangeRole && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100 flex flex-col gap-4"
+              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100 flex flex-col gap-4 my-auto max-h-[90vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-white/10">
                 <div className="flex items-center gap-2.5">
@@ -1577,12 +1582,12 @@ export default function AdminPanel({
       {/* MODAL 2: Bloquear Conta de Usuário */}
       <AnimatePresence>
         {userToBlock && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center"
+              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-sm w-full p-5 sm:p-6 shadow-2xl border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center my-auto max-h-[90vh] overflow-y-auto"
             >
               <div className="w-12 h-12 rounded-2xl bg-orange-100 dark:bg-orange-950/50 text-orange-600 dark:text-orange-400 flex items-center justify-center mx-auto">
                 <Lock size={24} />
@@ -1635,12 +1640,12 @@ export default function AdminPanel({
       {/* MODAL 3: Desbloquear Conta */}
       <AnimatePresence>
         {userToUnblock && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center"
+              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-sm w-full p-5 sm:p-6 shadow-2xl border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center my-auto max-h-[90vh] overflow-y-auto"
             >
               <div className="w-12 h-12 rounded-2xl bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
                 <Unlock size={24} />
@@ -1693,12 +1698,12 @@ export default function AdminPanel({
       {/* MODAL 4: Excluir Usuário (Soft Delete) */}
       <AnimatePresence>
         {userToDelete && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center"
+              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-sm w-full p-5 sm:p-6 shadow-2xl border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center my-auto max-h-[90vh] overflow-y-auto"
             >
               <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-950/50 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto">
                 <Trash2 size={24} />
@@ -1751,12 +1756,12 @@ export default function AdminPanel({
       {/* MODAL 5: Exclusão Definitiva (Permanent Delete from DB) */}
       <AnimatePresence>
         {userToPermanentDelete && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-red-200 dark:border-red-900/50 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center"
+              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-sm w-full p-5 sm:p-6 shadow-2xl border border-red-200 dark:border-red-900/50 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center my-auto max-h-[90vh] overflow-y-auto"
             >
               <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto border border-red-200 dark:border-red-800">
                 <Trash2 size={24} />
@@ -1810,12 +1815,12 @@ export default function AdminPanel({
       {/* MODAL 6: Excluir Evento */}
       <AnimatePresence>
         {eventToDelete && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center"
+              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-sm w-full p-5 sm:p-6 shadow-2xl border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100 flex flex-col gap-4 text-center my-auto max-h-[90vh] overflow-y-auto"
             >
               <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-950/50 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto">
                 <Trash2 size={24} />
@@ -1867,12 +1872,12 @@ export default function AdminPanel({
       {/* MODAL 7: Editar Usuário Completo */}
       <AnimatePresence>
         {editingUser && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0, scale: 0.96, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96, y: 15 }}
-              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 relative text-slate-800 dark:text-slate-100 overflow-hidden"
+              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl border border-slate-200 dark:border-white/10 relative text-slate-800 dark:text-slate-100 my-auto max-h-[90vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-white/10">
                 <div className="flex items-center gap-2.5">
@@ -2014,12 +2019,12 @@ export default function AdminPanel({
       {/* MODAL 8: Cadastrar Novo Evento */}
       <AnimatePresence>
         {isAddingEvent && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0, scale: 0.96, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96, y: 15 }}
-              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 relative text-slate-800 dark:text-slate-100 overflow-hidden"
+              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl border border-slate-200 dark:border-white/10 relative text-slate-800 dark:text-slate-100 my-auto max-h-[90vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-white/10">
                 <div className="flex items-center gap-2.5">
@@ -2192,12 +2197,12 @@ export default function AdminPanel({
       {/* MODAL 9: Editar Evento */}
       <AnimatePresence>
         {editingEvent && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0, scale: 0.96, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96, y: 15 }}
-              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 relative text-slate-800 dark:text-slate-100 overflow-hidden"
+              className="bg-white dark:bg-brand-card-dark rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl border border-slate-200 dark:border-white/10 relative text-slate-800 dark:text-slate-100 my-auto max-h-[90vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-white/10">
                 <div className="flex items-center gap-2.5">
@@ -2538,12 +2543,12 @@ export default function AdminPanel({
 
         {/* MODAL: Menu de Ações Administrativas Mobile (Exclusivo para CHEFE_ADMIN) */}
         {userForMobileActions && isChefe && (
-          <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0, y: 50 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 50 }}
-              className="bg-white dark:bg-brand-card-dark rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 w-full max-w-md border-t sm:border border-brand-primary/20 dark:border-white/10 shadow-2xl relative"
+              className="bg-white dark:bg-brand-card-dark rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 w-full max-w-md border-t sm:border border-brand-primary/20 dark:border-white/10 shadow-2xl relative my-auto max-h-[90vh] overflow-y-auto"
             >
               {/* Header */}
               <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-white/10">

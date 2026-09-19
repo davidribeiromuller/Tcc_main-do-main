@@ -1,6 +1,7 @@
 import { db, isDbCachedOffline, markDbOffline, markDbOnline } from './index.ts';
 import { events, eventos } from './schema.ts';
 import { eq, sql } from 'drizzle-orm';
+import { createClient } from '@supabase/supabase-js';
 import { 
   listAllEventsFallback, 
   createNewEventFallback, 
@@ -96,8 +97,74 @@ export function mapEventoToEvent(row: any): any {
   };
 }
 
+async function fetchEventsFromSupabaseApi(): Promise<any[]> {
+  const url = process.env.SUPABASE_URL || "https://jaoheenjltzzglfncgfq.supabase.co";
+  const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || "sb_publishable_bpCOfPvR2p5aVpbDMOsCqw_D-E0TlcL";
+  if (!url || !key) return [];
+
+  try {
+    const supabaseClient = createClient(url, key);
+    const combined: any[] = [];
+    const seenTitles = new Set<string>();
+    const seenIds = new Set<number>();
+
+    // Consultar eventos
+    const { data: evRows, error: evErr } = await supabaseClient.from('eventos').select('*').order('data_inicio', { ascending: true });
+    if (!evErr && evRows && evRows.length > 0) {
+      for (const row of evRows) {
+        const mapped = mapEventoToEvent(row);
+        const normTitle = (mapped.title || '').trim().toLowerCase();
+        if (!seenTitles.has(normTitle) && !seenIds.has(mapped.id)) {
+          seenTitles.add(normTitle);
+          seenIds.add(mapped.id);
+          combined.push(mapped);
+        }
+      }
+    }
+
+    // Consultar events
+    const { data: stdRows, error: stdErr } = await supabaseClient.from('events').select('*').order('created_at', { ascending: false });
+    if (!stdErr && stdRows && stdRows.length > 0) {
+      for (const ev of stdRows) {
+        const normTitle = (ev.title || '').trim().toLowerCase();
+        const id = Number(ev.id);
+        if (!seenTitles.has(normTitle) && !seenIds.has(id)) {
+          seenTitles.add(normTitle);
+          seenIds.add(id);
+          combined.push({
+            id,
+            title: ev.title,
+            location: ev.location,
+            day: Number(ev.day) || 15,
+            month: Number(ev.month) ?? 7,
+            year: Number(ev.year) || 2026,
+            time: ev.time || '18:00',
+            isPaid: !!(ev.is_paid ?? ev.isPaid),
+            price: ev.price || null,
+            requirements: ev.requirements || null,
+            description: ev.description || null,
+            creatorRole: ev.creator_role || ev.creatorRole || 'Diretoria Escolar',
+            website: ev.website || null,
+            image: ev.image || 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600',
+            createdAt: ev.created_at || ev.createdAt || new Date().toISOString(),
+          });
+        }
+      }
+    }
+
+    return combined;
+  } catch (err) {
+    console.warn('[Supabase Direct Server] Erro ao consultar API REST:', err);
+    return [];
+  }
+}
+
 export async function listAllEvents() {
   if (isDbCachedOffline()) {
+    const directEvents = await fetchEventsFromSupabaseApi();
+    if (directEvents.length > 0) {
+      return directEvents;
+    }
     return listAllEventsFallback();
   }
 
@@ -150,11 +217,21 @@ export async function listAllEvents() {
       return combinedEvents;
     }
 
-    // Se ambas as tabelas estiverem vazias, retornar o fallback seguro
+    // Se o banco SQL direto não retornou eventos, consultar API Supabase REST
+    const directEvents = await fetchEventsFromSupabaseApi();
+    if (directEvents.length > 0) {
+      return directEvents;
+    }
+
+    // Se ambas as fontes estiverem vazias, retornar o fallback seguro
     return listAllEventsFallback();
   } catch (error) {
     handleQueryError('listAllEvents', error);
     markDbOffline();
+    const directEvents = await fetchEventsFromSupabaseApi();
+    if (directEvents.length > 0) {
+      return directEvents;
+    }
     return listAllEventsFallback();
   }
 }

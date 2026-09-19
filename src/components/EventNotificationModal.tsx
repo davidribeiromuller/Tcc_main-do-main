@@ -55,15 +55,34 @@ export default function EventNotificationModal({
   };
 
   const handleActivate = async () => {
-    if ("Notification" in window) {
+    let permStatus: NotificationPermission = "default";
+
+    if (typeof window !== "undefined" && "Notification" in window) {
       try {
-        if (Notification.permission === "default") {
-          await Notification.requestPermission();
+        if (typeof Notification.requestPermission === "function") {
+          permStatus = await Notification.requestPermission();
+        } else {
+          permStatus = await new Promise<NotificationPermission>((resolve) => {
+            Notification.requestPermission((result) => resolve(result));
+          });
+        }
+
+        if (permStatus === "granted") {
+          try {
+            new Notification(`🔔 Lembrete Ativado: ${event.title}`, {
+              body: `Lembretes configurados para ${event.day} de ${MONTHS_NAMES[event.month]} às ${event.time} (${event.location}).`,
+              icon: "/favicon.ico",
+              tag: `event-${event.id}`,
+            });
+          } catch (notifErr) {
+            console.warn("Disparo teste de notificação:", notifErr);
+          }
         }
       } catch (err) {
         console.warn("Notification request permission error:", err);
       }
     }
+
     onConfirm(event, schedule);
   };
 

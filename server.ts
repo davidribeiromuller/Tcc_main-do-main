@@ -560,7 +560,8 @@ async function startServer() {
   // Administrativo: Atualizar dados/permissões de usuário (Exclusivo CHEFE ADMINISTRADOR)
   app.put("/api/users/:id", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
     try {
-      const userId = parseInt(req.params.id);
+      const rawId = req.params.id;
+      const userId = parseInt(rawId);
       if (isNaN(userId)) {
         return res.status(400).json({ error: "ID de usuário inválido" });
       }
@@ -583,7 +584,12 @@ async function startServer() {
       const callerDbUser = (req as any).dbUser || await getUserByUid(req.user!.uid);
 
       // Proteção de segurança: O Chefe não pode rebaixar a si próprio nem bloquear sua própria conta
-      if (callerDbUser && callerDbUser.id === userId) {
+      const isCaller =
+        (callerDbUser && callerDbUser.id === userId) ||
+        (callerDbUser && updateData.email && (callerDbUser.email || '').toLowerCase() === updateData.email) ||
+        (req.user?.email && updateData.email && req.user.email.toLowerCase() === updateData.email);
+
+      if (isCaller) {
         if (isAdmin === false || (role && role !== 'Diretor' && role !== 'Chefe Administrador')) {
           return res.status(400).json({ error: "Você não pode remover seus próprios privilégios de Chefe Administrador" });
         }
@@ -608,12 +614,13 @@ async function startServer() {
         return res.status(400).json({ error: "ID inválido" });
       }
 
+      const email = req.body?.email || req.query?.email;
       const callerDbUser = (req as any).dbUser || await getUserByUid(req.user!.uid);
-      if (callerDbUser && callerDbUser.id === userId) {
+      if (callerDbUser && (callerDbUser.id === userId || (email && callerDbUser.email?.toLowerCase() === String(email).toLowerCase()))) {
         return res.status(400).json({ error: "Você não pode bloquear sua própria conta de Chefe Administrador" });
       }
 
-      const blockedUser = await blockUserById(userId);
+      const blockedUser = await blockUserById(userId, email ? String(email) : undefined);
       res.json({ success: true, user: blockedUser });
     } catch (error: any) {
       console.error("Erro ao bloquear usuário:", error);
@@ -629,7 +636,8 @@ async function startServer() {
         return res.status(400).json({ error: "ID inválido" });
       }
 
-      const unblockedUser = await unblockUserById(userId);
+      const email = req.body?.email || req.query?.email;
+      const unblockedUser = await unblockUserById(userId, email ? String(email) : undefined);
       res.json({ success: true, user: unblockedUser });
     } catch (error: any) {
       console.error("Erro ao desbloquear usuário:", error);
@@ -645,13 +653,14 @@ async function startServer() {
         return res.status(400).json({ error: "ID inválido" });
       }
 
+      const email = req.body?.email || req.query?.email;
       // Evitar deletar a si mesmo
       const callerDbUser = (req as any).dbUser || await getUserByUid(req.user!.uid);
-      if (callerDbUser && callerDbUser.id === userId) {
+      if (callerDbUser && (callerDbUser.id === userId || (email && callerDbUser.email?.toLowerCase() === String(email).toLowerCase()))) {
         return res.status(400).json({ error: "Você não pode excluir sua própria conta escolar ativa" });
       }
 
-      const deletedUser = await deleteUserPermanentlyById(userId);
+      const deletedUser = await deleteUserPermanentlyById(userId, email ? String(email) : undefined);
       res.json({ success: true, user: deletedUser });
     } catch (error: any) {
       console.error("Erro ao excluir permanentemente usuário:", error);
@@ -667,17 +676,18 @@ async function startServer() {
         return res.status(400).json({ error: "ID inválido" });
       }
 
+      const email = req.body?.email || req.query?.email;
       // Evitar deletar a si mesmo
       const callerDbUser = (req as any).dbUser || await getUserByUid(req.user!.uid);
-      if (callerDbUser && callerDbUser.id === userId) {
+      if (callerDbUser && (callerDbUser.id === userId || (email && callerDbUser.email?.toLowerCase() === String(email).toLowerCase()))) {
         return res.status(400).json({ error: "Você não pode bloquear sua própria conta escolar ativa" });
       }
 
-      const blockedUser = await deleteUserById(userId);
-      res.json({ success: true, user: blockedUser });
+      const softDeletedUser = await blockUserById(userId, email ? String(email) : undefined);
+      res.json({ success: true, user: softDeletedUser });
     } catch (error: any) {
-      console.error("Erro ao bloquear usuário:", error);
-      res.status(500).json({ error: error.message || "Não foi possível bloquear o usuário" });
+      console.error("Erro ao suspender usuário:", error);
+      res.status(500).json({ error: error.message || "Não foi possível suspender o usuário" });
     }
   });
 
