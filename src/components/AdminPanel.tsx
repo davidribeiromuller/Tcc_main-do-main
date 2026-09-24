@@ -106,6 +106,7 @@ export default function AdminPanel({
   const [editFormData, setEditFormData] = useState({
     nome: "",
     email: "",
+    cpf: "",
     role: "Aluno",
     phone: "",
     institution: "",
@@ -148,11 +149,27 @@ export default function AdminPanel({
 
   // Filtered lists
   const filteredUsers = usersList.filter((u) => {
-    const term = searchTerm.toLowerCase();
+    const term = searchTerm.trim().toLowerCase();
+    const termDigits = searchTerm.replace(/\D/g, "");
+
+    const matchesName = u.nome ? u.nome.toLowerCase().includes(term) : false;
+    const matchesEmail = u.email ? u.email.toLowerCase().includes(term) : false;
+
+    // Search by CPF (formatted with punctation or unformatted numbers)
+    let matchesCpf = false;
+    if (u.cpf) {
+      const uCpfClean = u.cpf.toLowerCase();
+      const uCpfDigits = u.cpf.replace(/\D/g, "");
+      matchesCpf =
+        uCpfClean.includes(term) ||
+        (termDigits.length > 0 && uCpfDigits.includes(termDigits));
+    }
+
     const matchesTerm =
       !term ||
-      (u.nome && u.nome.toLowerCase().includes(term)) ||
-      (u.email && u.email.toLowerCase().includes(term)) ||
+      matchesName ||
+      matchesEmail ||
+      matchesCpf ||
       (u.role && u.role.toLowerCase().includes(term)) ||
       (u.institution && u.institution.toLowerCase().includes(term));
     if (!matchesTerm) return false;
@@ -257,6 +274,7 @@ export default function AdminPanel({
     setEditFormData({
       nome: u.nome || "",
       email: u.email || "",
+      cpf: u.cpf || "",
       role: u.role || "Aluno",
       phone: u.phone || "",
       institution: u.institution || "Escola estadual Helena Wysocki",
@@ -275,6 +293,7 @@ export default function AdminPanel({
       const payload: any = {
         nome: editFormData.nome.trim(),
         email: editFormData.email.trim().toLowerCase(),
+        cpf: editFormData.cpf.trim(),
         role: editFormData.role,
         institution: editFormData.institution.trim(),
         phone: editFormData.phone.trim(),
@@ -560,11 +579,21 @@ export default function AdminPanel({
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder={
                       activeTab === "blocked"
-                        ? "Pesquisar contas bloqueadas por nome ou e-mail..."
-                        : "Pesquisar usuários por nome, e-mail, permissão ou instituição..."
+                        ? "Buscar contas bloqueadas por nome, e-mail ou CPF..."
+                        : "Buscar usuários em tempo real por nome, e-mail ou CPF..."
                     }
-                    className="w-full h-10 pl-10 pr-4 text-xs bg-white dark:bg-brand-card-dark border border-brand-primary/20 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-accent text-brand-text-light dark:text-brand-text-dark placeholder-slate-400 shadow-2xs"
+                    className="w-full h-10 pl-10 pr-10 text-xs bg-white dark:bg-brand-card-dark border border-brand-primary/20 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-accent text-brand-text-light dark:text-brand-text-dark placeholder-slate-400 shadow-2xs transition-all"
                   />
+                  {searchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchTerm("")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full transition-colors cursor-pointer"
+                      title="Limpar busca"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
                 </div>
 
                 {/* View Switcher (Table vs Cards) */}
@@ -598,6 +627,27 @@ export default function AdminPanel({
                   </button>
                 </div>
               </div>
+
+              {/* Real-time search status banner */}
+              {searchTerm.trim() && (
+                <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 px-1 pt-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span>
+                      Buscando por: <strong className="text-slate-800 dark:text-white font-mono">"{searchTerm}"</strong>
+                    </span>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full font-semibold bg-brand-primary/20 text-brand-accent dark:text-brand-primary">
+                      {activeTab === "blocked" ? blockedUsers.length : activeUsers.length} resultado(s)
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm("")}
+                    className="text-xs text-brand-accent dark:text-brand-primary hover:underline font-medium cursor-pointer"
+                  >
+                    Limpar busca
+                  </button>
+                </div>
+              )}
 
               {/* Mobile & Touch Quick Filter Chips */}
               <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-3 scrollbar-none w-full select-none text-xs">
@@ -704,11 +754,24 @@ export default function AdminPanel({
               <div className="flex flex-col items-center justify-center py-16 text-center text-slate-400 bg-white dark:bg-brand-card-dark rounded-3xl border border-dashed border-slate-300 dark:border-white/10 p-8">
                 <Users size={40} className="text-slate-300 dark:text-slate-600 mb-2" />
                 <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                  Nenhum usuário ativo encontrado.
+                  {searchTerm.trim()
+                    ? `Nenhum usuário encontrado para "${searchTerm}"`
+                    : "Nenhum usuário ativo encontrado."}
                 </p>
-                <p className="text-xs text-slate-400 mt-1">
-                  Verifique o termo digitado na barra de pesquisa acima.
+                <p className="text-xs text-slate-400 mt-1 max-w-sm">
+                  {searchTerm.trim()
+                    ? "Verifique se o nome, e-mail ou CPF digitado está correto."
+                    : "Verifique o termo digitado na barra de pesquisa ou os filtros acima."}
                 </p>
+                {searchTerm.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm("")}
+                    className="mt-3.5 px-4 py-1.5 rounded-xl bg-brand-primary/20 hover:bg-brand-primary/30 text-brand-accent dark:text-brand-primary text-xs font-semibold transition-all cursor-pointer"
+                  >
+                    Limpar pesquisa
+                  </button>
+                )}
               </div>
             ) : viewMode === "table" ? (
               /* ================= TABLE VIEW ================= */
@@ -773,9 +836,16 @@ export default function AdminPanel({
                                       </span>
                                     )}
                                   </div>
-                                  <span className="text-[11px] text-slate-400 dark:text-slate-400 block truncate">
-                                    {u.institution || "C.E. Helena Wysocki"}
-                                  </span>
+                                  <div className="flex items-center gap-1.5 text-[11px] text-slate-400 dark:text-slate-400 flex-wrap">
+                                    <span className="truncate">
+                                      {u.institution || "C.E. Helena Wysocki"}
+                                    </span>
+                                    {u.cpf && (
+                                      <span className="text-[10px] font-mono text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-white/10 px-1.5 py-0.2 rounded border border-slate-200/80 dark:border-white/10">
+                                        CPF: {u.cpf}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             </td>
@@ -948,6 +1018,11 @@ export default function AdminPanel({
                             <span className="text-xs text-slate-500 dark:text-slate-400 font-mono block truncate mt-0.5">
                               {u.email}
                             </span>
+                            {u.cpf && (
+                              <span className="inline-block text-[10px] font-mono text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-white/10 px-1.5 py-0.5 rounded border border-slate-200/80 dark:border-white/10 mt-1">
+                                CPF: {u.cpf}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1060,11 +1135,24 @@ export default function AdminPanel({
               <div className="flex flex-col items-center justify-center py-16 text-center text-slate-400 bg-white dark:bg-brand-card-dark rounded-3xl border border-dashed border-slate-300 dark:border-white/10 p-8">
                 <Unlock size={44} className="text-emerald-500 mb-2 opacity-80" />
                 <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-                  Nenhuma conta bloqueada no momento!
+                  {searchTerm.trim()
+                    ? `Nenhuma conta bloqueada encontrada para "${searchTerm}"`
+                    : "Nenhuma conta bloqueada no momento!"}
                 </p>
                 <p className="text-xs text-slate-400 mt-1 max-w-sm">
-                  Todos os usuários cadastrados estão com acesso regular às funcionalidades do portal escolar.
+                  {searchTerm.trim()
+                    ? "Tente pesquisar por outro nome, e-mail ou CPF."
+                    : "Todos os usuários cadastrados estão com acesso regular às funcionalidades do portal escolar."}
                 </p>
+                {searchTerm.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm("")}
+                    className="mt-3.5 px-4 py-1.5 rounded-xl bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-300 text-xs font-semibold hover:bg-slate-200 dark:hover:bg-white/15 transition-all cursor-pointer"
+                  >
+                    Limpar pesquisa
+                  </button>
+                )}
               </div>
             ) : viewMode === "table" ? (
               /* Blocked users Table */
@@ -1102,9 +1190,16 @@ export default function AdminPanel({
                                   <span className="font-semibold text-slate-900 dark:text-white block truncate">
                                     {u.nome || "Usuário Bloqueado"}
                                   </span>
-                                  <span className="text-[11px] text-slate-400 block truncate">
-                                    {u.institution || "C.E. Helena Wysocki"}
-                                  </span>
+                                  <div className="flex items-center gap-1.5 text-[11px] text-slate-400 flex-wrap">
+                                    <span className="truncate">
+                                      {u.institution || "C.E. Helena Wysocki"}
+                                    </span>
+                                    {u.cpf && (
+                                      <span className="text-[10px] font-mono text-slate-600 dark:text-slate-300 bg-red-100/60 dark:bg-white/10 px-1.5 py-0.2 rounded border border-red-200/60 dark:border-white/10">
+                                        CPF: {u.cpf}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             </td>
@@ -1197,6 +1292,11 @@ export default function AdminPanel({
                             <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono block truncate mt-0.5">
                               {u.email}
                             </span>
+                            {u.cpf && (
+                              <span className="inline-block text-[10px] font-mono text-red-700 dark:text-red-300 bg-red-100/60 dark:bg-white/10 px-1.5 py-0.5 rounded border border-red-200/60 dark:border-white/10 mt-1">
+                                CPF: {u.cpf}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1964,6 +2064,34 @@ export default function AdminPanel({
                   </div>
                 </div>
 
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                      CPF
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="000.000.000-00"
+                      value={editFormData.cpf}
+                      onChange={(e) => setEditFormData({ ...editFormData, cpf: e.target.value })}
+                      className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none font-mono"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                      Telefone
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="(00) 00000-0000"
+                      value={editFormData.phone}
+                      onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
+                      className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none font-mono"
+                    />
+                  </div>
+                </div>
+
                 <div className="flex items-center gap-6 pt-2 border-t border-slate-100 dark:border-white/10">
                   <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300 select-none">
                     <input
@@ -2456,6 +2584,17 @@ export default function AdminPanel({
 
                 {/* Profile Fields */}
                 <div className="space-y-2.5 text-xs">
+                  {userToViewDetails.cpf && (
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-black/20 border border-slate-100 dark:border-white/5">
+                      <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                        <Tag size={13} /> CPF:
+                      </span>
+                      <span className="font-semibold text-slate-800 dark:text-slate-200 font-mono">
+                        {userToViewDetails.cpf}
+                      </span>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-black/20 border border-slate-100 dark:border-white/5">
                     <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
                       <Building2 size={13} /> Instituição:
