@@ -1,0 +1,1602 @@
+import express from "express";
+import path from "path";
+import dns from "dns";
+import crypto from "crypto";
+import { createServer as createViteServer } from "vite";
+import * as dotenv from "dotenv";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
+
+// Load environment variables
+dotenv.config();
+
+// Ensure verified Supabase credentials are available in environment
+process.env.SUPABASE_URL = process.env.SUPABASE_URL || "https://jaoheenjltzzglfncgfq.supabase.co";
+process.env.SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "sb_publishable_bpCOfPvR2p5aVpbDMOsCqw_D-E0TlcL";
+process.env.SUPABASE_JWKS_URL = process.env.SUPABASE_JWKS_URL || "https://jaoheenjltzzglfncgfq.supabase.co/auth/v1/.well-known/jwks.json";
+if (!process.env.SUPABASE_ANON_KEY) {
+  process.env.SUPABASE_ANON_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
+}
+
+import { requireAuth, AuthRequest } from "./src/middleware/auth.ts";
+import {
+  requireChefeAdmin,
+  requireAdminOrStaff,
+  checkIsChefe,
+  checkIsFuncionario
+} from "./src/middleware/admin.ts";
+import {
+  getOrCreateUser,
+  getUserByUid,
+  getUserByEmail,
+  getUserByPhone,
+  updateUserPassword,
+  updateUserByUid,
+  updateUserById,
+  listAllUsers,
+  deleteUserById,
+  blockUserById,
+  unblockUserById,
+  deleteUserPermanentlyById
+} from "./src/db/users.ts";
+import {
+  listAllEvents,
+  createNewEvent,
+  updateEventById,
+  deleteEventById
+} from "./src/db/events.ts";
+import {
+  requireSupabaseServerAuth,
+  isSupabaseServerConfigured,
+  SupabaseRequest
+} from "./src/lib/supabase-server.ts";
+
+async function startServer() {
+  const app = express();
+  const PORT = 3000;
+
+  // Body parsing middleware
+  app.use(express.json({ limit: "10mb" }));
+  app.use(express.urlencoded({ limit: "10mb", extended: true }));
+
+  // --- API ROUTES ---
+
+  // Health check endpoint
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok" });
+  });
+
+  // Supabase/Postgres Database Status Info
+  app.get("/api/db-status", async (req, res) => {
+    try {
+      const isSupabase = !!(process.env.SUPABASE_DB_URL || process.env.SUPABASE_DATABASE_URL || process.env.DATABASE_URL || process.env.DIRECT_URL || process.env.POSTGRES_URL);
+      const host = process.env.SUPABASE_DB_URL ? "Supabase (DB URL)" : (process.env.DATABASE_URL ? "Supabase (Custom URL)" : "Google Cloud SQL / Local");
+      
+      const { db, isDbCachedOffline, markDbOffline, markDbOnline, getDbHealthStats } = await import("./src/db/index.ts");
+      const { sql } = await import("drizzle-orm");
+      const healthStats = getDbHealthStats();
+      
+      if (isDbCachedOffline()) {
+        return res.json({
+          active: false,
+          provider: isSupabase ? "Supabase (PostgreSQL)" : "Google Cloud SQL (PostgreSQL)",
+          host: host,
+          version: "Drizzle ORM + PG Node Driver",
+          cachedOffline: true,
+          error: "Conexão off-line em cache",
+          sdkInstalled: true,
+          health: healthStats
+        });
+      }
+      
+      const queryResult = await db.execute(sql`SELECT 1 as connection_test`);
+      const active = !!(queryResult && queryResult.rows && queryResult.rows.length > 0);
+      
+      if (active) {
+        markDbOnline();
+      }
+
+      res.json({
+        active,
+        provider: isSupabase ? "Supabase (PostgreSQL)" : "Google Cloud SQL (PostgreSQL)",
+        host: host,
+        version: "Drizzle ORM + PG Node Driver",
+        sdkInstalled: true,
+        health: getDbHealthStats()
+      });
+    } catch (error: any) {
+      console.warn("[Database] Real-time status test failed:", error.message || error);
+      let healthStats = null;
+      try {
+        const { markDbOffline, getDbHealthStats } = await import("./src/db/index.ts");
+        markDbOffline();
+        healthStats = getDbHealthStats();
+      } catch (e) {}
+      res.json({
+        active: false,
+        provider: !!(process.env.SUPABASE_DB_URL || process.env.DATABASE_URL) ? "Supabase PostgreSQL (Não conectado)" : "Cloud SQL / Local (Sem conexão)",
+        error: error.message || "Erro de conexão",
+        sdkInstalled: true,
+        health: healthStats
+      });
+    }
+  });
+
+  // Supabase Server SDK Test Endpoint
+  app.get("/api/supabase-test", requireSupabaseServerAuth("none"), async (req: SupabaseRequest, res) => {
+    try {
+      const isConfigured = isSupabaseServerConfigured();
+      if (!isConfigured) {
+        return res.json({
+          configured: false,
+          message: "Supabase Server SDK is installed but missing SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY variables."
+        });
+      }
+
+      // Check if we can perform a simple request
+      const ctx = req.supabaseContext;
+      res.json({
+        configured: true,
+        message: "Supabase Server SDK initialized successfully with context!",
+        authMode: ctx?.authMode,
+        hasClient: !!req.supabase,
+        hasAdminClient: !!req.supabaseAdmin,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        configured: false,
+        error: error.message || "Internal error in Supabase server wrapper"
+      });
+    }
+  });
+
+  // Comprehensive Supabase Auth & Project Status Diagnostic Endpoint
+  app.get("/api/auth/supabase-status", async (req, res) => {
+    const rawUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+    const rawKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+    const dbUrl = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL || "";
+
+    if (!rawUrl || rawUrl.includes("placeholder") || rawUrl.includes("[ID_DO_SEU_PROJETO]")) {
+      return res.json({
+        configured: false,
+        validDns: false,
+        error: "MISSING_CONFIGURATION",
+        message: "As variáveis SUPABASE_URL e VITE_SUPABASE_URL não foram configuradas com um projeto Supabase real.",
+        url: rawUrl,
+        hasAnonKey: !!rawKey
+      });
+    }
+
+    try {
+      const parsedUrl = new URL(rawUrl);
+      const hostname = parsedUrl.hostname;
+
+      // Extract project ref from subdomain: <ref>.supabase.co
+      const projectRef = hostname.split(".")[0];
+
+      // Perform real DNS lookup
+      const dnsResult = await new Promise<{ ok: boolean; address?: string; error?: string }>((resolve) => {
+        dns.lookup(hostname, (err, address) => {
+          if (err) {
+            resolve({ ok: false, error: err.code });
+          } else {
+            resolve({ ok: true, address });
+          }
+        });
+      });
+
+      if (!dnsResult.ok) {
+        return res.json({
+          configured: true,
+          validDns: false,
+          error: "DNS_PROBE_FINISHED_NXDOMAIN",
+          hostname,
+          projectRef,
+          url: rawUrl,
+          hasAnonKey: !!rawKey,
+          hasDbUrl: !!dbUrl,
+          message: `O domínio '${hostname}' não existe no DNS (NXDOMAIN). Isso ocorre quando o projeto no Supabase foi pausado por inatividade ou excluído. Acesse https://supabase.com/dashboard para restaurar o projeto ou atualize as variáveis com o novo projeto.`
+        });
+      }
+
+      return res.json({
+        configured: true,
+        validDns: true,
+        hostname,
+        projectRef,
+        ipAddress: dnsResult.address,
+        url: rawUrl,
+        hasAnonKey: !!rawKey,
+        hasDbUrl: !!dbUrl,
+        message: `Domínio Supabase '${hostname}' está ativo e respondendo no DNS.`
+      });
+    } catch (err: any) {
+      return res.status(400).json({
+        configured: false,
+        validDns: false,
+        error: "INVALID_URL",
+        message: err.message
+      });
+    }
+  });
+
+  // In-memory token stores for single-use, secure recovery
+  interface PasswordResetSession {
+    token: string;
+    email: string;
+    userId: number;
+    expiresAt: number;
+    used: boolean;
+    type: "email" | "phone";
+  }
+
+  interface PhoneRecoveryOtp {
+    phone: string;
+    normalizedPhone: string;
+    code: string;
+    email: string;
+    userId: number;
+    expiresAt: number;
+    attempts: number;
+    maxAttempts: number;
+    createdAt: number;
+    lastRequestedAt: number;
+    verified: boolean;
+  }
+
+  const resetSessionsMap = new Map<string, PasswordResetSession>();
+  const phoneOtpMap = new Map<string, PhoneRecoveryOtp>();
+  const recoveryRateLimitMap = new Map<string, { count: number; firstRequestTime: number }>();
+
+  function checkRecoveryRateLimit(key: string, maxRequests: number, windowMs: number): boolean {
+    const now = Date.now();
+    const record = recoveryRateLimitMap.get(key);
+    if (!record || now - record.firstRequestTime > windowMs) {
+      recoveryRateLimitMap.set(key, { count: 1, firstRequestTime: now });
+      return true;
+    }
+    if (record.count >= maxRequests) {
+      return false;
+    }
+    record.count += 1;
+    return true;
+  }
+
+  // Check if email already exists before registration
+  app.get("/api/auth/check-email", async (req, res) => {
+    try {
+      const email = req.query.email as string;
+      if (!email) {
+        return res.status(400).json({ error: "Email é obrigatório" });
+      }
+      const cleanEmail = email.trim().toLowerCase();
+      const user = await getUserByEmail(cleanEmail);
+      res.json({ exists: !!user });
+    } catch (error: any) {
+      console.error("Erro ao verificar email:", error);
+      res.status(500).json({ error: error.message || "Erro ao verificar email" });
+    }
+  });
+
+  // Check if phone already exists before registration
+  app.get("/api/auth/check-phone", async (req, res) => {
+    try {
+      const rawPhone = req.query.phone as string;
+      if (!rawPhone) {
+        return res.status(400).json({ error: "Telefone é obrigatório" });
+      }
+      const cleanDigits = rawPhone.replace(/\D/g, "");
+      if (cleanDigits.length < 8) {
+        return res.json({ exists: false });
+      }
+      const user = await getUserByPhone(cleanDigits);
+      res.json({ exists: !!user });
+    } catch (error: any) {
+      console.error("Erro ao verificar telefone:", error);
+      res.status(500).json({ error: error.message || "Erro ao verificar telefone" });
+    }
+  });
+
+  // PASSWORD RECOVERY: Request via Email
+  app.post("/api/auth/recovery/request-email", async (req, res) => {
+    try {
+      const { email } = req.body;
+      const cleanEmail = (email || "").trim().toLowerCase();
+      if (!cleanEmail) {
+        return res.status(400).json({ error: "Por favor, informe seu endereço de e-mail." });
+      }
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(cleanEmail)) {
+        return res.status(400).json({ error: "Formato de e-mail inválido. Exemplo: aluno@escola.pr.gov.br" });
+      }
+
+      const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "ip";
+      if (!checkRecoveryRateLimit(`email-rate-${cleanEmail}`, 5, 15 * 60 * 1000) || !checkRecoveryRateLimit(`ip-email-${ip}`, 20, 15 * 60 * 1000)) {
+        return res.status(429).json({ error: "Muitas solicitações de recuperação para este e-mail. Aguarde alguns minutos." });
+      }
+
+      const user = await getUserByEmail(cleanEmail);
+      if (!user) {
+        return res.status(404).json({
+          error: "Os dados informados não foram encontrados. Confira as informações e tente novamente."
+        });
+      }
+
+      if (user.ativo === false) {
+        return res.status(403).json({
+          error: "Sua conta está desativada ou bloqueada. Entre em contato com a diretoria do C.E. Helena Wysocki para regularizar seu acesso."
+        });
+      }
+
+      // Invalidate previous sessions for this email
+      for (const [key, sess] of resetSessionsMap.entries()) {
+        if (sess.email === cleanEmail) {
+          resetSessionsMap.delete(key);
+        }
+      }
+
+      const resetToken = crypto.randomBytes(32).toString("hex");
+      const expiresAt = Date.now() + 15 * 60 * 1000; // 15 minutes
+
+      resetSessionsMap.set(resetToken, {
+        token: resetToken,
+        email: cleanEmail,
+        userId: user.id,
+        expiresAt,
+        used: false,
+        type: "email"
+      });
+
+      const host = req.get("host") || "localhost:3000";
+      const protocol = req.protocol === "https" || req.headers["x-forwarded-proto"] === "https" ? "https" : "http";
+      const resetUrl = `${protocol}://${host}/?reset_token=${resetToken}`;
+
+      console.log(`[Password Recovery] Link gerado para ${cleanEmail}: ${resetUrl}`);
+
+      res.json({
+        success: true,
+        message: "Link de recuperação gerado com sucesso. Utilize o link para cadastrar uma nova senha.",
+        token: resetToken,
+        resetUrl,
+        expiresMinutes: 15
+      });
+    } catch (error: any) {
+      console.error("Erro na recuperação por email:", error);
+      res.status(500).json({ error: error.message || "Erro ao processar recuperação por e-mail." });
+    }
+  });
+
+  // PASSWORD RECOVERY: Request via Phone (SMS Code)
+  app.post("/api/auth/recovery/request-phone", async (req, res) => {
+    try {
+      const { phone } = req.body;
+      const cleanPhone = (phone || "").trim();
+      const digitsOnly = cleanPhone.replace(/\D/g, "");
+
+      if (!digitsOnly || digitsOnly.length < 10) {
+        return res.status(400).json({ error: "Informe um número de telefone celular válido com DDD (mínimo 10 dígitos)." });
+      }
+
+      const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "ip";
+      const phoneKey = digitsOnly.startsWith("55") && digitsOnly.length >= 12 ? digitsOnly.slice(2) : digitsOnly;
+
+      const existingOtp = phoneOtpMap.get(phoneKey);
+      const now = Date.now();
+      if (existingOtp && now - existingOtp.lastRequestedAt < 60 * 1000) {
+        const waitSec = Math.ceil((60 * 1000 - (now - existingOtp.lastRequestedAt)) / 1000);
+        return res.status(429).json({
+          error: `Aguarde ${waitSec} segundos antes de solicitar um novo código SMS.`,
+          cooldownSeconds: waitSec
+        });
+      }
+
+      if (!checkRecoveryRateLimit(`phone-rate-${phoneKey}`, 5, 60 * 60 * 1000) || !checkRecoveryRateLimit(`ip-phone-${ip}`, 15, 60 * 60 * 1000)) {
+        return res.status(429).json({ error: "Limite de solicitações de SMS atingido para este número. Tente novamente mais tarde." });
+      }
+
+      const user = await getUserByPhone(digitsOnly);
+      if (!user) {
+        return res.status(404).json({
+          error: "Os dados informados não foram encontrados. Confira as informações e tente novamente."
+        });
+      }
+
+      if (user.ativo === false) {
+        return res.status(403).json({
+          error: "Sua conta está desativada ou bloqueada pela administração escolar."
+        });
+      }
+
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = now + 10 * 60 * 1000; // 10 minutes
+
+      phoneOtpMap.set(phoneKey, {
+        phone: cleanPhone,
+        normalizedPhone: phoneKey,
+        code,
+        email: user.email,
+        userId: user.id,
+        expiresAt,
+        attempts: 0,
+        maxAttempts: 5,
+        createdAt: now,
+        lastRequestedAt: now,
+        verified: false
+      });
+
+      console.log(`[SMS Gateway Simulator] Código de verificação para ${cleanPhone} (${phoneKey}): [${code}] (Válido por 10 min)`);
+
+      const last4 = digitsOnly.slice(-4);
+      const ddd = digitsOnly.slice(0, 2);
+      const masked = `(${ddd}) •••••-${last4}`;
+
+      res.json({
+        success: true,
+        message: `Código de verificação SMS enviado para ${masked}.`,
+        maskedPhone: masked,
+        expiresMinutes: 10,
+        cooldownSeconds: 60,
+        testCode: code
+      });
+    } catch (error: any) {
+      console.error("Erro na solicitação SMS:", error);
+      res.status(500).json({ error: error.message || "Erro ao solicitar código por SMS." });
+    }
+  });
+
+  // PASSWORD RECOVERY: Verify Phone Code
+  app.post("/api/auth/recovery/verify-phone-code", async (req, res) => {
+    try {
+      const { phone, code } = req.body;
+      const cleanDigits = (phone || "").replace(/\D/g, "");
+      const phoneKey = cleanDigits.startsWith("55") && cleanDigits.length >= 12 ? cleanDigits.slice(2) : cleanDigits;
+      const cleanCode = (code || "").trim();
+
+      if (!phoneKey || !cleanCode) {
+        return res.status(400).json({ error: "Telefone e código são obrigatórios." });
+      }
+
+      const otpData = phoneOtpMap.get(phoneKey);
+      if (!otpData) {
+        return res.status(400).json({ error: "Nenhum código ativo encontrado para este telefone. Solicite um novo código." });
+      }
+
+      const now = Date.now();
+      if (now > otpData.expiresAt) {
+        phoneOtpMap.delete(phoneKey);
+        return res.status(400).json({ error: "O código informado expirou. Por favor, solicite um novo código." });
+      }
+
+      if (otpData.attempts >= otpData.maxAttempts) {
+        phoneOtpMap.delete(phoneKey);
+        return res.status(429).json({ error: "Limite máximo de tentativas excedido. Solicite um novo código SMS." });
+      }
+
+      if (otpData.code !== cleanCode) {
+        otpData.attempts += 1;
+        const remaining = otpData.maxAttempts - otpData.attempts;
+        if (remaining <= 0) {
+          phoneOtpMap.delete(phoneKey);
+          return res.status(400).json({ error: "Código incorreto. Limite de tentativas esgotado. Solicite um novo código." });
+        }
+        return res.status(400).json({
+          error: `Código de verificação incorreto. Tentativas restantes: ${remaining}.`,
+          remainingAttempts: remaining
+        });
+      }
+
+      otpData.verified = true;
+      phoneOtpMap.delete(phoneKey);
+
+      const resetToken = crypto.randomBytes(32).toString("hex");
+      const expiresAt = now + 15 * 60 * 1000; // 15 minutes
+
+      resetSessionsMap.set(resetToken, {
+        token: resetToken,
+        email: otpData.email,
+        userId: otpData.userId,
+        expiresAt,
+        used: false,
+        type: "phone"
+      });
+
+      res.json({
+        success: true,
+        message: "Telefone confirmado com sucesso!",
+        resetToken,
+        expiresMinutes: 15
+      });
+    } catch (error: any) {
+      console.error("Erro ao validar código SMS:", error);
+      res.status(500).json({ error: error.message || "Erro ao validar código SMS." });
+    }
+  });
+
+  // PASSWORD RECOVERY: Verify Token validity
+  app.get("/api/auth/recovery/verify-token", async (req, res) => {
+    try {
+      const token = req.query.token as string;
+      if (!token) {
+        return res.status(400).json({ valid: false, error: "Token ausente." });
+      }
+
+      const session = resetSessionsMap.get(token);
+      if (!session) {
+        return res.status(404).json({ valid: false, error: "Link de recuperação inválido ou não encontrado." });
+      }
+
+      if (session.used) {
+        return res.status(400).json({ valid: false, error: "Este link de recuperação já foi utilizado." });
+      }
+
+      if (Date.now() > session.expiresAt) {
+        resetSessionsMap.delete(token);
+        return res.status(400).json({ valid: false, error: "Este link de recuperação expirou. Por favor, solicite um novo." });
+      }
+
+      const [userPart, domain] = session.email.split("@");
+      const maskedUser = userPart.length > 2 ? `${userPart.slice(0, 2)}••••` : `${userPart}•`;
+      const maskedEmail = `${maskedUser}@${domain || ""}`;
+
+      res.json({
+        valid: true,
+        email: maskedEmail,
+        type: session.type
+      });
+    } catch (error: any) {
+      console.error("Erro ao verificar token:", error);
+      res.status(500).json({ valid: false, error: "Erro ao verificar validade do link." });
+    }
+  });
+
+  // PASSWORD RECOVERY: Reset Password
+  app.post("/api/auth/recovery/reset-password", async (req, res) => {
+    try {
+      const { token, newPassword } = req.body;
+      if (!token) {
+        return res.status(400).json({ error: "Token de recuperação ausente." });
+      }
+
+      if (!newPassword || typeof newPassword !== "string" || newPassword.length < 4) {
+        return res.status(400).json({ error: "A nova senha deve conter no mínimo 4 caracteres." });
+      }
+
+      const session = resetSessionsMap.get(token);
+      if (!session) {
+        return res.status(404).json({ error: "Token de recuperação inválido ou inexistente." });
+      }
+
+      if (session.used) {
+        return res.status(400).json({ error: "Este token já foi utilizado anteriormente." });
+      }
+
+      if (Date.now() > session.expiresAt) {
+        resetSessionsMap.delete(token);
+        return res.status(400).json({ error: "Este token expirou. Solicite um novo link ou código." });
+      }
+
+      await updateUserPassword(session.userId || session.email, newPassword);
+
+      session.used = true;
+      resetSessionsMap.delete(token);
+
+      for (const [k, s] of resetSessionsMap.entries()) {
+        if (s.email === session.email) {
+          resetSessionsMap.delete(k);
+        }
+      }
+
+      console.log(`[Password Recovery] Senha atualizada com sucesso para ${session.email}`);
+
+      res.json({
+        success: true,
+        message: "Senha alterada com sucesso! Você já pode entrar com sua nova senha.",
+        email: session.email
+      });
+    } catch (error: any) {
+      console.error("Erro ao redefinir senha:", error);
+      res.status(500).json({ error: error.message || "Erro ao redefinir senha." });
+    }
+  });
+
+  // Dedicated Registration Endpoint with duplicate check (email + phone)
+  app.post("/api/auth/register", async (req, res) => {
+    try {
+      const { email, password, nome, cpf, phone, birthdate, gender, institution, role } = req.body;
+      const cleanEmail = (email || "").trim().toLowerCase();
+
+      if (!cleanEmail) {
+        return res.status(400).json({ error: "O e-mail é obrigatório." });
+      }
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(cleanEmail)) {
+        return res.status(400).json({ error: "Formato de e-mail inválido. Exemplo: aluno@escola.pr.gov.br" });
+      }
+
+      // STRICT DUPLICATE EMAIL CHECK
+      const existingUser = await getUserByEmail(cleanEmail);
+      if (existingUser) {
+        return res.status(400).json({ error: "Este e-mail já está cadastrado no sistema. Por favor, tente fazer login ou recupere sua senha." });
+      }
+
+      // STRICT DUPLICATE PHONE CHECK IF PHONE PROVIDED
+      if (phone) {
+        const cleanDigits = String(phone).replace(/\D/g, "");
+        if (cleanDigits.length >= 8) {
+          const existingPhoneUser = await getUserByPhone(cleanDigits);
+          if (existingPhoneUser) {
+            return res.status(400).json({ error: "Este número de telefone celular já está em uso em outra conta." });
+          }
+        }
+      }
+
+      if (!password || password.length < 3) {
+        return res.status(400).json({ error: "A senha precisa ter no mínimo 3 caracteres." });
+      }
+
+      const uid = "local-uid-" + Math.floor(Math.random() * 88888 + 10000);
+      let registeredUser = await getOrCreateUser(
+        uid,
+        cleanEmail,
+        nome || cleanEmail.split("@")[0],
+        "",
+        "local",
+        role || "Aluno",
+        password
+      );
+
+      if (cpf || phone || birthdate || gender || institution) {
+        const updated = await updateUserByUid(uid, {
+          cpf: cpf ? String(cpf).trim() : "",
+          phone: phone ? String(phone).trim() : "",
+          birthdate: birthdate ? String(birthdate).trim() : "",
+          gender: gender ? String(gender).trim() : "",
+          institution: institution ? String(institution).trim() : "Escola estadual Helena Wysocki",
+        });
+        if (updated) {
+          registeredUser = updated;
+        }
+      }
+
+      const token = `local-${uid}|${registeredUser.role || 'Aluno'}|${encodeURIComponent(registeredUser.nome || '')}|${encodeURIComponent(cleanEmail)}|${encodeURIComponent(password)}`;
+
+      res.json({ user: registeredUser, token });
+    } catch (error: any) {
+      console.error("Erro no registro do usuário:", error);
+      res.status(500).json({ error: error.message || "Erro ao realizar o cadastro escolar." });
+    }
+  });
+
+  // Local password login with database verification
+  app.post("/api/auth/local-login-password", async (req, res) => {
+    try {
+      const { email, password } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ error: "Email e senha são obrigatórios" });
+      }
+
+      const cleanEmail = email.trim().toLowerCase();
+      let user = await getUserByEmail(cleanEmail);
+      
+      if (!user) {
+        const isDirector = cleanEmail === "davidribeiromuller2009@gmail.com" || cleanEmail === "diretoria@helenawysocki.com";
+        const isKnownDefault = isDirector || cleanEmail === "aluno@escola.pr.gov.br";
+        
+        if (isKnownDefault) {
+          const defaultName = cleanEmail === "davidribeiromuller2009@gmail.com" 
+            ? "David Ribeiro Müller" 
+            : (cleanEmail === "diretoria@helenawysocki.com" ? "Diretoria Helena Wysocki" : "Aluno Helena Wysocki");
+          
+          user = await getOrCreateUser(
+            "auto-uid-" + Math.floor(Math.random() * 88888 + 10000),
+            cleanEmail,
+            defaultName,
+            "",
+            "local",
+            isDirector ? "Diretor" : "Aluno",
+            password || "senha123"
+          );
+        } else {
+          return res.status(404).json({ error: "Nenhuma conta cadastrada com este e-mail. Por favor, crie uma conta primeiro." });
+        }
+      } else {
+        if (user.password && user.password !== password) {
+          return res.status(401).json({ error: "Senha incorreta. Verifique os dados digitados e tente novamente." });
+        }
+      }
+
+      if (user && user.ativo === false) {
+        return res.status(403).json({
+          error: "Sua conta foi bloqueada ou desativada pela administração. Entre em contato com a diretoria da Escola Helena Wysocki para solicitar o desbloqueio."
+        });
+      }
+
+      // Generate local token matching standard requireAuth middleware expectation
+      const token = `local-${user.uid}|${user.role || 'Aluno'}|${encodeURIComponent(user.nome || '')}|${encodeURIComponent(user.email)}`;
+
+      res.json({ user, token });
+    } catch (error: any) {
+      console.error("Erro no login local por senha:", error);
+      res.status(500).json({ error: error.message || "Erro interno no servidor" });
+    }
+  });
+
+  // Direct Google Authentication endpoint (supports web preview / sandboxed iframe environments)
+  app.post("/api/auth/google-direct-login", async (req, res) => {
+    try {
+      const { email, nome, foto_perfil, role } = req.body;
+      if (!email || typeof email !== "string" || !email.trim()) {
+        return res.status(400).json({ error: "O endereço de e-mail é obrigatório para autenticação Google." });
+      }
+      const cleanEmail = email.trim().toLowerCase();
+      const userName = nome || (cleanEmail ? cleanEmail.split("@")[0].replace(/[._]/g, " ") : "Usuário Google");
+      const userPhoto = foto_perfil || "";
+      const userRole = role || "Aluno";
+      let hash = 0;
+      for (let i = 0; i < cleanEmail.length; i++) {
+        hash = (Math.imul(31, hash) + cleanEmail.charCodeAt(i)) | 0;
+      }
+      const uid = "google-uid-" + Math.abs(hash);
+
+      const user = await getOrCreateUser(
+        uid,
+        cleanEmail,
+        userName,
+        userPhoto,
+        "google",
+        userRole
+      );
+
+      if (user && user.ativo === false) {
+        return res.status(403).json({
+          error: "Sua conta foi bloqueada ou desativada pela administração escolar. Entre em contato com a diretoria da Escola Helena Wysocki para solicitar o desbloqueio."
+        });
+      }
+
+      const token = `google-${uid}|${user.role || 'Aluno'}|${encodeURIComponent(user.nome || '')}|${encodeURIComponent(cleanEmail)}|${encodeURIComponent(userPhoto)}`;
+
+      res.json({ user, token });
+    } catch (error: any) {
+      console.error("Erro no login direto com Google:", error);
+      res.status(500).json({ error: error.message || "Falha ao autenticar com o Google" });
+    }
+  });
+
+  // Autenticação: Login / Registrar Sincronizado
+  app.post("/api/auth/login", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Contexto de autenticação ausente" });
+      }
+
+      const uid = req.user.uid || (req.user as any).sub || (req.user as any).user_id;
+      const email = req.user.email || req.body?.email || "";
+      const name = req.body?.nome || (req.user as any).name || (req.user as any).displayName || (email ? email.split("@")[0] : "Usuário Google");
+      const picture = req.body?.foto_perfil || (req.user as any).picture || (req.user as any).photoURL || "";
+      const provider = req.user.iss === "local-sim" ? "local" : "google";
+      const role = req.body?.role || (req.user as any).role || "Aluno";
+      const password = (req.user as any).password;
+
+      if (!uid) {
+        return res.status(400).json({ error: "UID não identificado no token de autenticação." });
+      }
+      
+      // Sincroniza o usuário do Firebase/Local com nossa tabela PostgreSQL/Fallback
+      const user = await getOrCreateUser(
+        uid,
+        email,
+        name,
+        picture,
+        provider,
+        role,
+        password
+      );
+
+      if (user && user.ativo === false) {
+        return res.status(403).json({
+          error: "Sua conta foi bloqueada ou desativada pela administração escolar. Entre em contato com a diretoria da Escola Helena Wysocki para solicitar o desbloqueio."
+        });
+      }
+
+      res.json({ user });
+    } catch (error: any) {
+      console.error("Erro no fluxo de login:", error);
+      res.status(500).json({ error: error.message || "Falha geral de autenticação" });
+    }
+  });
+
+  // Autenticação: Obter Perfil do database
+  app.get("/api/auth/profile", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Sessão inválida" });
+      }
+
+      let dbUser = await getUserByUid(req.user.uid);
+      if (!dbUser && req.user.email) {
+        dbUser = await getUserByEmail(req.user.email);
+      }
+
+      if (!dbUser) {
+        return res.status(404).json({ error: "Usuário não encontrado no banco" });
+      }
+
+      if (dbUser.ativo === false) {
+        return res.status(403).json({
+          error: "Sua conta foi bloqueada ou desativada pela administração.",
+          blocked: true,
+          user: dbUser
+        });
+      }
+
+      res.json({ user: dbUser });
+    } catch (error: any) {
+      console.error("Erro ao obter perfil:", error);
+      res.status(500).json({ error: error.message || "Falha ao obter perfil" });
+    }
+  });
+
+  // Autenticação: Logout
+  app.post("/api/auth/logout", (req, res) => {
+    res.json({ success: true, message: "Logout realizado com sucesso" });
+  });
+
+  // Usuário: Atualizar próprio perfil do app
+  app.put("/api/users/profile", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Acesso negado" });
+      }
+
+      const { nome, cpf, phone, birthdate, gender, institution, role, foto_perfil } = req.body;
+
+      // Sanitizar dados
+      const updateData: any = {};
+      if (nome !== undefined) updateData.nome = String(nome).trim();
+      if (cpf !== undefined) updateData.cpf = String(cpf).trim();
+      if (phone !== undefined) updateData.phone = String(phone).trim();
+      if (birthdate !== undefined) updateData.birthdate = String(birthdate).trim();
+      if (gender !== undefined) updateData.gender = String(gender).trim();
+      if (institution !== undefined) updateData.institution = String(institution).trim();
+      if (foto_perfil !== undefined) updateData.foto_perfil = String(foto_perfil).trim();
+
+      // Segurança: Apenas o Chefe Administrador pode alterar o próprio papel para admin
+      if (role !== undefined) {
+        const currentUserInDb = await getUserByUid(req.user.uid);
+        const isSelfChefe = checkIsChefe(currentUserInDb, req.user);
+        if (isSelfChefe) {
+          updateData.role = String(role).trim();
+        } else if (role !== "Diretor" && role !== "Chefe Administrador" && role !== "Funcionário") {
+          updateData.role = String(role).trim();
+        }
+      }
+      updateData.lastActiveAt = new Date();
+
+      const updatedUser = await updateUserByUid(req.user.uid, updateData);
+      res.json({ user: updatedUser });
+    } catch (error: any) {
+      console.error("Erro ao atualizar perfil do usuário:", error);
+      res.status(500).json({ error: error.message || "Erro ao salvar perfil" });
+    }
+  });
+
+  // User activity ping / heartbeat
+  app.post("/api/users/heartbeat", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Acesso negado" });
+      }
+      const now = new Date();
+      await updateUserByUid(req.user.uid, { lastActiveAt: now });
+      res.json({ success: true, lastActiveAt: now.toISOString() });
+    } catch (error: any) {
+      console.error("Erro no heartbeat de atividade do usuário:", error);
+      res.json({ success: false });
+    }
+  });
+
+  // Administrativo / Diretório Escolar: Listar todos os usuários com controle de permissão por nível
+  app.get("/api/users", requireAuth, requireAdminOrStaff, async (req: AuthRequest, res) => {
+    try {
+      const allUsers = await listAllUsers();
+      const adminRole = (req as any).adminRole || 'funcionario';
+
+      // 1. CHEFE ADMINISTRADOR: Acesso a todas as informações e colunas detalhadas
+      if (adminRole === 'chefe') {
+        const chefeView = allUsers.map((u: any) => {
+          const { password, ...rest } = u;
+          return {
+            ...rest,
+            ativo: rest.ativo !== false,
+            isAdmin: rest.isAdmin || rest.role === 'Diretor'
+          };
+        });
+        return res.json({ users: chefeView, adminRole: 'chefe' });
+      }
+
+      // 2. FUNCIONÁRIO ADMINISTRADOR: Acesso restrito às informações permitidas:
+      // Nome, Email, Tipo/Função, Status da conta, Instituição, Data de Cadastro / Última atividade
+      const funcionarioView = allUsers.map(u => ({
+        id: u.id,
+        uid: u.uid,
+        nome: u.nome,
+        email: u.email,
+        foto_perfil: u.foto_perfil,
+        role: u.role,
+        ativo: u.ativo !== false,
+        institution: u.institution,
+        createdAt: u.createdAt,
+        lastActiveAt: u.lastActiveAt,
+        lastLogin: u.lastLogin,
+        isAdmin: u.isAdmin || u.role === 'Diretor'
+      }));
+
+      return res.json({ users: funcionarioView, adminRole: 'funcionario' });
+    } catch (error: any) {
+      console.error("Erro ao listar usuários:", error);
+      res.status(500).json({ error: error.message || "Falha ao obter usuários" });
+    }
+  });
+
+  // Administrativo: Atualizar dados/permissões de usuário (Exclusivo CHEFE ADMINISTRADOR)
+  app.put("/api/users/:id", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
+    try {
+      const rawId = req.params.id;
+      const userId = parseInt(rawId);
+      if (isNaN(userId)) {
+        return res.status(400).json({ error: "ID de usuário inválido" });
+      }
+
+      const { nome, email, role, isAdmin, ativo, password, institution, phone, cpf, birthdate, gender, foto_perfil } = req.body;
+      const updateData: any = {};
+      if (nome !== undefined) updateData.nome = String(nome).trim();
+      if (email !== undefined) updateData.email = String(email).trim().toLowerCase();
+      if (role !== undefined) updateData.role = String(role).trim();
+      if (isAdmin !== undefined) updateData.isAdmin = Boolean(isAdmin);
+      if (ativo !== undefined) updateData.ativo = Boolean(ativo);
+      if (password !== undefined && String(password).trim()) updateData.password = String(password).trim();
+      if (institution !== undefined) updateData.institution = String(institution).trim();
+      if (phone !== undefined) updateData.phone = String(phone).trim();
+      if (cpf !== undefined) updateData.cpf = String(cpf).trim();
+      if (birthdate !== undefined) updateData.birthdate = String(birthdate).trim();
+      if (gender !== undefined) updateData.gender = String(gender).trim();
+      if (foto_perfil !== undefined) updateData.foto_perfil = String(foto_perfil).trim();
+
+      const callerDbUser = (req as any).dbUser || await getUserByUid(req.user!.uid);
+
+      // Proteção de segurança: O Chefe não pode rebaixar a si próprio nem bloquear sua própria conta
+      const isCaller =
+        (callerDbUser && callerDbUser.id === userId) ||
+        (callerDbUser && updateData.email && (callerDbUser.email || '').toLowerCase() === updateData.email) ||
+        (req.user?.email && updateData.email && req.user.email.toLowerCase() === updateData.email);
+
+      if (isCaller) {
+        if (isAdmin === false || (role && role !== 'Diretor' && role !== 'Chefe Administrador')) {
+          return res.status(400).json({ error: "Você não pode remover seus próprios privilégios de Chefe Administrador" });
+        }
+        if (ativo === false) {
+          return res.status(400).json({ error: "Você não pode bloquear sua própria conta de Chefe Administrador" });
+        }
+      }
+
+      const updatedUser = await updateUserById(userId, updateData);
+      res.json({ success: true, user: updatedUser });
+    } catch (error: any) {
+      console.error("Erro ao atualizar dados do usuário:", error);
+      res.status(500).json({ error: error.message || "Erro ao atualizar permissões e dados do usuário" });
+    }
+  });
+
+  // Administrativo: Bloquear usuário no banco (Exclusivo CHEFE ADMINISTRADOR)
+  app.post("/api/users/:id/block", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ error: "ID inválido" });
+      }
+
+      const email = req.body?.email || req.query?.email;
+      const callerDbUser = (req as any).dbUser || await getUserByUid(req.user!.uid);
+      if (callerDbUser && (callerDbUser.id === userId || (email && callerDbUser.email?.toLowerCase() === String(email).toLowerCase()))) {
+        return res.status(400).json({ error: "Você não pode bloquear sua própria conta de Chefe Administrador" });
+      }
+
+      const blockedUser = await blockUserById(userId, email ? String(email) : undefined);
+      res.json({ success: true, user: blockedUser });
+    } catch (error: any) {
+      console.error("Erro ao bloquear usuário:", error);
+      res.status(500).json({ error: error.message || "Não foi possível bloquear o usuário" });
+    }
+  });
+
+  // Administrativo: Desbloquear / Reativar conta de usuário no banco (Exclusivo CHEFE ADMINISTRADOR)
+  app.post("/api/users/:id/unblock", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ error: "ID inválido" });
+      }
+
+      const email = req.body?.email || req.query?.email;
+      const unblockedUser = await unblockUserById(userId, email ? String(email) : undefined);
+      res.json({ success: true, user: unblockedUser });
+    } catch (error: any) {
+      console.error("Erro ao desbloquear usuário:", error);
+      res.status(500).json({ error: error.message || "Não foi possível desbloquear o usuário" });
+    }
+  });
+
+  // Administrativo: Excluir definitivamente usuário do database (Exclusivo CHEFE ADMINISTRADOR)
+  app.delete("/api/users/:id/permanent", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ error: "ID inválido" });
+      }
+
+      const email = req.body?.email || req.query?.email;
+      // Evitar deletar a si mesmo
+      const callerDbUser = (req as any).dbUser || await getUserByUid(req.user!.uid);
+      if (callerDbUser && (callerDbUser.id === userId || (email && callerDbUser.email?.toLowerCase() === String(email).toLowerCase()))) {
+        return res.status(400).json({ error: "Você não pode excluir sua própria conta escolar ativa" });
+      }
+
+      const deletedUser = await deleteUserPermanentlyById(userId, email ? String(email) : undefined);
+      res.json({ success: true, user: deletedUser });
+    } catch (error: any) {
+      console.error("Erro ao excluir permanentemente usuário:", error);
+      res.status(500).json({ error: error.message || "Não foi possível excluir o usuário" });
+    }
+  });
+
+  // Administrativo: Bloqueio suave / soft-delete (Exclusivo CHEFE ADMINISTRADOR)
+  app.delete("/api/users/:id", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ error: "ID inválido" });
+      }
+
+      const email = req.body?.email || req.query?.email;
+      // Evitar deletar a si mesmo
+      const callerDbUser = (req as any).dbUser || await getUserByUid(req.user!.uid);
+      if (callerDbUser && (callerDbUser.id === userId || (email && callerDbUser.email?.toLowerCase() === String(email).toLowerCase()))) {
+        return res.status(400).json({ error: "Você não pode bloquear sua própria conta escolar ativa" });
+      }
+
+      const softDeletedUser = await blockUserById(userId, email ? String(email) : undefined);
+      res.json({ success: true, user: softDeletedUser });
+    } catch (error: any) {
+      console.error("Erro ao suspender usuário:", error);
+      res.status(500).json({ error: error.message || "Não foi possível suspender o usuário" });
+    }
+  });
+
+  // --- EVENTS ENDPOINTS ---
+
+  // Obter Feed de Eventos (Público)
+  app.get("/api/events", async (req, res) => {
+    try {
+      const events = await listAllEvents();
+      res.json({ events });
+    } catch (error: any) {
+      console.error("Erro ao obter eventos:", error);
+      res.status(500).json({ error: error.message || "Falha ao obter eventos" });
+    }
+  });
+
+  // Criar Novo Evento (Chefe Administrador ou Funcionário Administrador)
+  app.post("/api/events", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const { title, location, day, month, year, time, isPaid, price, requirements, website, image } = req.body;
+
+      if (!title || !location || !day || isNaN(month) || !year) {
+        return res.status(400).json({ error: "Parâmetros obrigatórios incompletos" });
+      }
+
+      let dbUser = await getUserByUid(req.user!.uid);
+      if (!dbUser && req.user?.email) {
+        dbUser = await getUserByEmail(req.user.email);
+      }
+      if (!dbUser && req.user) {
+        dbUser = await getOrCreateUser(
+          req.user.uid,
+          req.user.email || '',
+          (req.user as any).name || 'Usuário',
+          (req.user as any).picture || '',
+          req.user.firebase?.sign_in_provider === 'google.com' ? 'google' : 'local',
+          (req.user as any).role || 'Aluno'
+        );
+      }
+
+      if (dbUser && dbUser.ativo === false) {
+        return res.status(403).json({
+          error: "Sua conta está bloqueada pela administração escolar.",
+          blocked: true
+        });
+      }
+
+      const isChefe = checkIsChefe(dbUser, req.user);
+      const isFuncionario = checkIsFuncionario(dbUser, req.user);
+
+      if (!isChefe && !isFuncionario) {
+        return res.status(403).json({
+          error: "Acesso negado: Apenas Administradores (Chefe ou Funcionário) podem publicar eventos escolares."
+        });
+      }
+
+      const creatorId = dbUser ? dbUser.id : null;
+
+      const newEvent = await createNewEvent({
+        title: String(title).trim(),
+        location: String(location).trim(),
+        day: Number(day),
+        month: Number(month),
+        year: Number(year),
+        time: time ? String(time).trim() : "18:00",
+        isPaid: Boolean(isPaid),
+        price: price ? String(price).trim() : null,
+        requirements: requirements ? String(requirements).trim() : "",
+        website: website ? String(website).trim() : null,
+        image: image ? String(image).trim() : "https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=400",
+        creatorId: creatorId || undefined,
+      });
+
+      res.status(201).json({ event: newEvent });
+    } catch (error: any) {
+      console.error("Erro ao criar evento:", error);
+      res.status(500).json({ error: error.message || "Erro no salvamento do evento" });
+    }
+  });
+
+  // Atualizar / Editar Evento por ID
+  // Chefe Administrador: pode editar qualquer evento
+  // Funcionário Administrador: pode editar apenas eventos criados por ele mesmo
+  app.put("/api/events/:id", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const eventId = parseInt(req.params.id);
+      if (isNaN(eventId)) {
+        return res.status(400).json({ error: "ID de evento inválido" });
+      }
+
+      let dbUser = await getUserByUid(req.user!.uid);
+      if (!dbUser && req.user?.email) {
+        dbUser = await getUserByEmail(req.user.email);
+      }
+
+      if (dbUser && dbUser.ativo === false) {
+        return res.status(403).json({
+          error: "Sua conta está bloqueada pela administração escolar.",
+          blocked: true
+        });
+      }
+
+      const isChefe = checkIsChefe(dbUser, req.user);
+      const isFuncionario = checkIsFuncionario(dbUser, req.user);
+
+      const allEvents = await listAllEvents();
+      const targetEvent = allEvents.find(e => e.id === eventId);
+      if (!targetEvent) {
+        return res.status(404).json({ error: "Evento não encontrado" });
+      }
+
+      // Regra de permissão: Chefe pode editar qualquer um; Funcionário apenas o seu próprio
+      if (!isChefe) {
+        if (!isFuncionario) {
+          return res.status(403).json({ error: "Acesso negado: Requer privilégios de Administrador para editar eventos." });
+        }
+        if (!dbUser || targetEvent.creatorId !== dbUser.id) {
+          return res.status(403).json({
+            error: "Acesso negado: Como Funcionário Administrador, você só pode editar eventos criados por você mesmo."
+          });
+        }
+      }
+
+      const { title, location, day, month, year, time, isPaid, price, requirements, website, image } = req.body;
+      const updatePayload: any = {};
+      if (title !== undefined) updatePayload.title = String(title).trim();
+      if (location !== undefined) updatePayload.location = String(location).trim();
+      if (day !== undefined) updatePayload.day = Number(day);
+      if (month !== undefined) updatePayload.month = Number(month);
+      if (year !== undefined) updatePayload.year = Number(year);
+      if (time !== undefined) updatePayload.time = String(time).trim();
+      if (isPaid !== undefined) updatePayload.isPaid = Boolean(isPaid);
+      if (price !== undefined) updatePayload.price = price ? String(price).trim() : null;
+      if (requirements !== undefined) updatePayload.requirements = requirements ? String(requirements).trim() : "";
+      if (website !== undefined) updatePayload.website = website ? String(website).trim() : null;
+      if (image !== undefined) updatePayload.image = image ? String(image).trim() : targetEvent.image;
+
+      const updated = await updateEventById(eventId, updatePayload);
+      res.json({ success: true, event: updated });
+    } catch (error: any) {
+      console.error("Erro ao atualizar evento:", error);
+      res.status(500).json({ error: error.message || "Erro na atualização do evento" });
+    }
+  });
+
+  // Excluir Evento por ID
+  // Chefe Administrador: pode excluir qualquer evento
+  // Funcionário Administrador: pode excluir apenas eventos criados por ele mesmo
+  app.delete("/api/events/:id", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const eventId = parseInt(req.params.id);
+      if (isNaN(eventId)) {
+        return res.status(400).json({ error: "ID de evento inválido" });
+      }
+
+      let dbUser = await getUserByUid(req.user!.uid);
+      if (!dbUser && req.user?.email) {
+        dbUser = await getUserByEmail(req.user.email);
+      }
+
+      if (dbUser && dbUser.ativo === false) {
+        return res.status(403).json({
+          error: "Sua conta está bloqueada pela administração escolar.",
+          blocked: true
+        });
+      }
+
+      const isChefe = checkIsChefe(dbUser, req.user);
+      const isFuncionario = checkIsFuncionario(dbUser, req.user);
+
+      const allEvents = await listAllEvents();
+      const targetEvent = allEvents.find(e => e.id === eventId);
+      if (!targetEvent) {
+        return res.status(404).json({ error: "Evento não encontrado" });
+      }
+
+      // Regra de permissão: Chefe pode excluir qualquer um; Funcionário apenas o seu próprio
+      if (!isChefe) {
+        if (!isFuncionario) {
+          return res.status(403).json({ error: "Acesso negado: Requer privilégios de Administrador para excluir eventos." });
+        }
+        if (!dbUser || targetEvent.creatorId !== dbUser.id) {
+          return res.status(403).json({
+            error: "Acesso negado: Como Funcionário Administrador, você só pode excluir eventos criados por você mesmo."
+          });
+        }
+      }
+
+      const deleted = await deleteEventById(eventId);
+      res.json({ success: true, event: deleted });
+    } catch (error: any) {
+      console.error("Erro ao deletar evento:", error);
+      res.status(500).json({ error: error.message || "Erro na exclusão do evento" });
+    }
+  });
+
+  // --- AI CHAT ENDPOINT ---
+  let aiInstance: any = null;
+  function getGenAI() {
+    if (!aiInstance) {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error("GEMINI_API_KEY não configurada no servidor. Por favor, adicione-a nas configurações.");
+      }
+      aiInstance = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+    }
+    return aiInstance;
+  }
+
+  function getHelenaLocalFallback(message: string, eventsList: any[]): string {
+    const text = message.toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, ""); // Remove accents
+
+    // Helper to format date
+    const formatDate = (e: any) => {
+      const months = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+      return `${e.day} de ${months[e.month] || 'Outubro'} de ${e.year}`;
+    };
+
+    // 1. Check for specific event match by title keywords
+    const matchingEvents = eventsList.filter(e => {
+      const titleClean = e.title.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const keywords = titleClean.split(/\s+/).filter((w: string) => w.length > 3);
+      return keywords.some((kw: string) => text.includes(kw)) || titleClean.includes(text);
+    });
+
+    if (matchingEvents.length > 0 && text.length > 4) {
+      const e = matchingEvents[0];
+      return `Encontrei este evento no nosso portal que corresponde à sua busca! 🌟
+
+**${e.title}**
+📍 **Local:** ${e.location}
+📅 **Data:** ${formatDate(e)}
+🕒 **Horário:** ${e.time || "18:00"}
+💰 **Tipo:** ${e.isPaid ? `Pago (${e.price || 'R$ 15,00'})` : "Gratuito/Entrada Livre"}
+⚠️ **Requisitos:** ${e.requirements || "Livre para todos os estudantes."}
+${e.website ? `🌐 **Website do Evento:** [Acesse aqui](${e.website})` : ""}
+
+Espero que goste! Precisa de mais alguma informação sobre as atividades escolares?`;
+    }
+
+    // 2. Greetings
+    if (/\b(oi|ola|bom dia|boa tarde|boa noite|ola helena|ajuda|quem e voce|quem es tu|ajudar)\b/.test(text)) {
+      return `Olá! Eu sou a **Helena**, sua Assistente Virtual inteligente do Portal de Eventos da Escola Estadual Helena Wysocki. 🌟
+
+Estou operando em modo de compatibilidade direta com nossa base de dados local para garantir resposta instantânea para você!
+
+Como posso ajudar? Você pode me perguntar sobre:
+- 📅 **Os próximos eventos escolares**
+- 🆓 **Eventos gratuitos**
+- 💰 **Eventos pagos ou preços de ingressos**
+- ⚠️ **Requisitos importantes para participar**
+- 💡 **Uma recomendação de atividade bem legal!**
+
+O que você gostaria de explorar hoje?`;
+    }
+
+    // 3. Free events query
+    if (/\b(gratis|gratuito|sem pagar|0800|de graca)\b/.test(text)) {
+      const free = eventsList.filter(e => !e.isPaid);
+      if (free.length > 0) {
+        return `Temos ótimas notícias! O portal conta com os seguintes **eventos gratuitos** (Entrada Livre):
+
+${free.map((e, idx) => `${idx + 1}. **${e.title}**
+   📍 Local: ${e.location}
+   📅 Data: ${formatDate(e)} às ${e.time || "18:00"}`).join("\n\n")}
+
+Aproveite para participar e trazer seus colegas! Precisa de detalhes sobre algum deles?`;
+      } else {
+        return `Atualmente todos os eventos cadastrados em nosso portal requerem inscrição ou taxa de ingresso, ou não temos eventos cadastrados no momento. 
+
+Fique atento ao portal, pois novos eventos gratuitos são adicionados frequentemente!`;
+      }
+    }
+
+    // 4. Paid/Price events query
+    if (/\b(pago|preço|preco|valores|valor|ingresso|quanto custa|custa|pagar)\b/.test(text)) {
+      const paid = eventsList.filter(e => e.isPaid);
+      if (paid.length > 0) {
+        return `Aqui estão os eventos que possuem custos ou taxas de ingresso cadastrados no nosso portal:
+
+${paid.map((e, idx) => `${idx + 1}. **${e.title}**
+   💰 Valor: **${e.price || "Inscrição Antecipada"}**
+   📍 Local: ${e.location}
+   📅 Data: ${formatDate(e)} às ${e.time || "18:00"}`).join("\n\n")}
+
+Lembre-se de realizar a inscrição ou compra antecipada se necessário!`;
+      } else {
+        return `Atualmente, todos os eventos escolares listados em nosso portal são totalmente **gratuitos** (Entrada Livre)! 
+
+Aproveite esta excelente oportunidade para participar de todas as atividades!`;
+      }
+    }
+
+    // 5. Requirements
+    if (/\b(requisito|requisitos|regras|regra|precisa|levar|documento|restr)\b/.test(text)) {
+      const withReqs = eventsList.filter(e => e.requirements && e.requirements.trim().length > 0);
+      if (withReqs.length > 0) {
+        return `Aqui estão as regras e requisitos de participação importantes para os eventos da escola:
+
+${withReqs.map((e, idx) => `${idx + 1}. **${e.title}**
+   ⚠️ Requisito: _${e.requirements}_`).join("\n\n")}
+
+Certifique-se de cumprir os requisitos antes do dia do evento para garantir sua participação!`;
+      } else {
+        return `Para os eventos atualmente listados no nosso portal, não há nenhum requisito especial exigido! A entrada é livre para todos os estudantes de forma geral. 😊`;
+      }
+    }
+
+    // 6. Recommendation
+    if (/\b(sugere|recomenda|indica|dica|legal|melhor|sugerir|recomendacao)\b/.test(text)) {
+      if (eventsList.length > 0) {
+        const e = eventsList[Math.floor(Math.random() * eventsList.length)];
+        return `Com certeza! Minha principal recomendação hoje é o evento:
+
+⭐ **${e.title}** ⭐
+📍 **Onde:** ${e.location}
+📅 **Quando:** ${formatDate(e)} às ${e.time || "18:00"}
+💰 **Custo:** ${e.isPaid ? `Pago (${e.price || 'R$ 15,00'})` : "Gratuito"}
+
+**Por que eu recomendo?** 
+Este evento reúne aprendizado prático, integração e é uma excelente oportunidade para complementar sua jornada escolar e conhecer projetos incríveis desenvolvidos por outros alunos da Escola Helena Wysocki!
+
+Gostou da sugestão ou quer ver outra?`;
+      } else {
+        return `Como ainda não temos eventos registrados no portal no momento, minha recomendação é que você acompanhe os informativos da secretaria e do nosso feed escolar. Em breve teremos novidades empolgantes por aqui! 📅`;
+      }
+    }
+
+    // 7. General listing / Upcoming
+    if (/\b(agenda|calendario|calendário|proximos|proximo|evento|eventos|atividades|acontecer|listar|quais sao)\b/.test(text)) {
+      if (eventsList.length > 0) {
+        return `Claro! Aqui está a nossa agenda de eventos cadastrados para a Escola Estadual Helena Wysocki:
+
+${eventsList.slice(0, 5).map((e, idx) => `${idx + 1}. **${e.title}**
+   📅 Data: ${formatDate(e)} às ${e.time || "18:00"}
+   📍 Local: ${e.location}
+   ${e.isPaid ? `💰 Preço: ${e.price || 'R$ 15,00'}` : '🆓 Gratuito'}`).join("\n\n")}
+
+Para saber mais sobre algum deles, basta me perguntar pelo nome ou clicar no evento na tela principal!`;
+      } else {
+        return `No momento não possuímos nenhum evento escolar cadastrado no nosso calendário de atividades. 📅
+
+Fique atento às atualizações do portal para novidades!`;
+      }
+    }
+
+    // 8. Contact
+    if (/\b(contato|falar|telefone|email|secretaria|diretoria|ajuda)\b/.test(text)) {
+      return `Se você precisar falar com a secretaria ou direção da Escola Estadual Helena Wysocki, os canais oficiais de comunicação são:
+
+📞 **Telefone:** (31) 3333-4444 (Secretaria Escolar)
+✉️ **E-mail:** secretaria@helenawysocki.com
+🏫 **Endereço:** Rua Principal da Educação, nº 100 - Belo Horizonte, MG
+
+Estou à disposição para responder dúvidas sobre o calendário de eventos do portal!`;
+    }
+
+    // 9. Catch-all / Conversation
+    if (eventsList.length > 0) {
+      const e = eventsList[0];
+      return `Entendi! Como assistente virtual do Portal de Eventos da Escola Helena Wysocki, posso te ajudar a descobrir tudo sobre as nossas atividades escolares. 🎓
+
+Por exemplo, um dos nossos principais destaques na agenda é o evento **${e.title}**, que vai acontecer no dia **${formatDate(e)}** lá no **${e.location}**.
+
+Você gostaria de saber mais sobre este evento, ver a lista completa de eventos gratuitos, ou quer que eu recomende alguma atividade especial?`;
+    } else {
+      return `Olá! Entendi sua mensagem, mas atualmente não temos eventos cadastrados no portal para que eu possa pesquisar.
+
+Estou à disposição para tirar qualquer dúvida geral sobre o Portal de Eventos da Escola Helena Wysocki! 😊`;
+    }
+  }
+
+  app.post("/api/ai/chat", async (req, res) => {
+    try {
+      const { message, history } = req.body;
+      if (!message) {
+        return res.status(400).json({ error: "Mensagem é obrigatória" });
+      }
+
+      // Obter lista atualizada de eventos para contexto da IA
+      let eventsContext = "";
+      let eventsList: any[] = [];
+      try {
+        eventsList = await listAllEvents();
+        eventsContext = eventsList.map(e => {
+          return `- ID: ${e.id}\n  Título: ${e.title}\n  Local: ${e.location}\n  Data: ${e.day}/${e.month + 1}/${e.year}\n  Horário: ${e.time}\n  Pago: ${e.isPaid ? 'Sim' : 'Não'}${e.price ? `\n  Preço: ${e.price}` : ''}${e.requirements ? `\n  Requisitos: ${e.requirements}` : ''}${e.website ? `\n  Website: ${e.website}` : ''}`;
+        }).join("\n\n");
+      } catch (dbErr: any) {
+        console.warn("Não foi possível carregar eventos para contexto da IA:", dbErr);
+        eventsContext = "Nenhum evento cadastrado no momento ou falha de conexão com o banco.";
+      }
+
+      try {
+        const ai = getGenAI();
+        
+        // Mapear histórico para o formato do SDK @google/genai
+        const contentsHistory = (history || []).map((h: any) => ({
+          role: h.role === "user" ? "user" : "model",
+          parts: [{ text: h.content }]
+        }));
+
+        // Adicionar nova mensagem
+        contentsHistory.push({
+          role: "user",
+          parts: [{ text: message }]
+        });
+
+        let responseText = "";
+        try {
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("Timeout ao aguardar resposta do modelo Gemini")), 4000)
+          );
+
+          const geminiPromise = ai.models.generateContent({
+            model: "gemini-3.8-flash",
+            contents: contentsHistory,
+            config: {
+              temperature: 0.6,
+              systemInstruction: `Você é a "Assistente Helena", assistente de IA rápida, prestativa e amigável do Portal de Eventos da Escola Estadual Helena Wysocki.
+Seu papel é responder com agilidade, tirar dúvidas e recomendar eventos escolares.
+
+Lista ATUALIZADA de eventos escolares em tempo real:
+${eventsContext}
+
+Diretrizes:
+- Responda em português do Brasil com objetividade, simpatia e clareza.
+- Vá direto ao ponto de forma acolhedora.
+- Utilize formatação Markdown limpa (tópicos com negritos) para fácil leitura.
+- Para eventos gratuitos, indique "Entrada Livre / Gratuito".`
+            }
+          });
+
+          const response = await Promise.race([geminiPromise, timeoutPromise]);
+          if (response && response.text) {
+            responseText = response.text;
+          }
+        } catch (modelErr: any) {
+          console.warn("[AI Chat] Provedor Gemini indisponível ou excedeu tempo limite:", modelErr?.message || modelErr);
+          throw modelErr;
+        }
+
+        if (responseText) {
+          return res.json({ reply: responseText });
+        } else {
+          throw new Error("Resposta da API do Gemini vazia.");
+        }
+      } catch (aiError: any) {
+        console.warn("[AI Chat] Falha no provedor de nuvem Gemini, acionando fallback local inteligente:", aiError.message || aiError);
+        const reply = getHelenaLocalFallback(message, eventsList);
+        return res.json({ reply });
+      }
+    } catch (error: any) {
+      console.error("Erro na API de Chat AI:", error);
+      res.status(500).json({ error: error.message || "Erro ao processar conversa com AI" });
+    }
+  });
+
+  // --- OAUTH CALLBACK HANDLER (POPUP & REDIRECT) ---
+  app.get(["/auth/callback", "/auth/callback/"], (req, res) => {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+        <head>
+          <meta charset="utf-8">
+          <title>Autenticação Concluída</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8fafc; color: #1e293b; }
+            .card { background: white; padding: 2rem; border-radius: 1rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); text-align: center; max-width: 380px; }
+            .spinner { width: 32px; height: 32px; border: 3px solid #e2e8f0; border-top-color: #4C6B4C; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 1rem; }
+            @keyframes spin { to { transform: rotate(360deg); } }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="spinner"></div>
+            <h3 style="margin: 0 0 0.5rem 0;">Autenticado com Sucesso!</h3>
+            <p style="margin: 0; font-size: 0.875rem; color: #64748b;">Retornando para o aplicativo eloEscola...</p>
+          </div>
+          <script>
+            try {
+              const hash = window.location.hash;
+              const search = window.location.search;
+              if (window.opener && !window.opener.closed) {
+                window.opener.postMessage({ type: 'GOOGLE_OAUTH_SUCCESS', hash, search }, '*');
+                setTimeout(() => { try { window.close(); } catch(e) {} }, 500);
+              } else {
+                window.location.href = '/' + (search || '') + (hash || '');
+              }
+            } catch (e) {
+              window.location.href = '/';
+            }
+          </script>
+        </body>
+      </html>
+    `);
+  });
+
+  // --- VITE / STATIC SERVING FLOW ---
+
+  // Vite development integration or production bundle serving
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  }
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on port ${PORT} with environment ${process.env.NODE_ENV || "development"}`);
+  });
+}
+
+startServer();

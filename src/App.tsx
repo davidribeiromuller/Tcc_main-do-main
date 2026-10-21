@@ -1,0 +1,1812 @@
+import { useState, useEffect } from "react";
+import { signOut } from "firebase/auth";
+import { auth } from "./lib/firebase.ts";
+import { User, Event } from "./types.ts";
+import { defaultEvents, defaultUsers } from "./data/defaultData.ts";
+import Splash from "./components/Splash.tsx";
+import Login from "./components/Login.tsx";
+import Register from "./components/Register.tsx";
+import PasswordRecovery from "./components/PasswordRecovery.tsx";
+import Feed from "./components/Feed.tsx";
+import CalendarView from "./components/CalendarView.tsx";
+import Settings from "./components/Settings.tsx";
+import Contact from "./components/Contact.tsx";
+import EventDetail from "./components/EventDetail.tsx";
+import AdminPanel from "./components/AdminPanel.tsx";
+import MapView from "./components/MapView.tsx";
+import BottomNav from "./components/BottomNav.tsx";
+import DesktopNavbar from "./components/DesktopNavbar.tsx";
+import MobileHeader from "./components/MobileHeader.tsx";
+import WelcomeScreen from "./components/WelcomeScreen.tsx";
+import { motion, AnimatePresence } from "motion/react";
+import { CheckCircle, AlertCircle, CheckCircle2, Info, X } from "lucide-react";
+import logoImg from "./assets/images/logo.jpg";
+import { resilientFetch, setupNetworkAutoRecovery, safeAppReload } from "./lib/apiResilience.ts";
+import { getSupabaseClient, isSupabaseConfigured, getEffectiveSupabaseUrl } from "./lib/supabase.ts";
+import {
+  fetchEventsDirectFromSupabase,
+  createEventDirectInSupabase,
+  updateEventDirectInSupabase,
+  deleteEventDirectInSupabase,
+} from "./lib/eventsService.ts";
+import {
+  fetchUsersDirectFromSupabase,
+  updateUserDirectInSupabase,
+  softDeleteUserDirectInSupabase,
+  unblockUserDirectInSupabase,
+  permanentDeleteUserDirectInSupabase,
+  authenticateUserDirectInSupabase,
+  registerUserDirectInSupabase,
+  syncOAuthUserDirectInSupabase,
+  heartbeatUserDirectInSupabase,
+} from "./lib/usersService.ts";
+import { canAccessAdminPanel } from "./lib/permissions.ts";
+
+export default function App() {
+  const [resetTokenParam, setResetTokenParam] = useState<string | null>(() => {
+    try {
+      if (typeof window !== "undefined") {
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get("reset_token") || params.get("token") || params.get("recovery_token");
+        if (token) return token;
+        if (window.location.hash.includes("token=")) {
+          const hashQuery = window.location.hash.split("?")[1] || window.location.hash.substring(1);
+          const hashParams = new URLSearchParams(hashQuery);
+          const hashToken = hashParams.get("reset_token") || hashParams.get("token") || hashParams.get("recovery_token");
+          if (hashToken) return hashToken;
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [activeScreen, setActiveScreen] = useState<string>(() => {
+    return resetTokenParam ? "recovery" : "splash";
+  });
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    try {
+      const stored = localStorage.getItem("local_user");
+      if (stored) {
+        const parsed: User = JSON.parse(stored);
+        const cleanEmail = (parsed.email || "").toLowerCase().trim();
+        const isDirectorAccount = cleanEmail === "diretoria@helenawysocki.com" || cleanEmail === "davidribeiromuller2009@gmail.com" || parsed.isAdmin === true || parsed.role === "Diretor";
+        return {
+          ...parsed,
+          isAdmin: isDirectorAccount,
+          role: isDirectorAccount ? "Diretor" : parsed.role
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  });
+  const [impersonatorAdmin, setImpersonatorAdmin] = useState<User | null>(() => {
+    try {
+      const saved = localStorage.getItem("impersonator_admin");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [events, setEvents] = useState<Event[]>(() => {
+    try {
+      const stored = localStorage.getItem("local_events");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  });
+  const [isLoadingEvents, setIsLoadingEvents] = useState<boolean>(true);
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [focusedMapEventId, setFocusedMapEventId] = useState<number | null>(null);
+  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(() => {
+    try {
+      const saved = localStorage.getItem("user_geolocation_coords");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [usersList, setUsersList] = useState<User[]>(() => {
+    try {
+      const stored = localStorage.getItem("local_users_db");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      return defaultUsers;
+    } catch {
+      return defaultUsers;
+    }
+  });
+  const [isLoadingAuth, setIsLoadingAuth] = useState(false);
+  const [isDeletingEvent, setIsDeletingEvent] = useState(false);
+  const [feedSearchOpen, setFeedSearchOpen] = useState(false);
+  const [feedSearchTerm, setFeedSearchTerm] = useState("");
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  // Dark mode theme state & persistence
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    try {
+      const savedTheme = localStorage.getItem("theme_mode");
+      if (savedTheme === "dark" || savedTheme === "light") {
+        return savedTheme;
+      }
+      if (typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+        return "dark";
+      }
+      return "light";
+    } catch {
+      return "light";
+    }
+  });
+
+  useEffect(() => {
+    document.title = "Página eloEscola";
+    if (theme === "dark") {
+      document.documentElement.classList.add("dark");
+      localStorage.setItem("theme_mode", "dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+      localStorage.setItem("theme_mode", "light");
+    }
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+  };
+
+  // Toast notification system
+  const [toast, setToast] = useState<{ message: string; type: "error" | "success" | "warning" | "info" } | null>(null);
+
+  const showToast = (message: string, type: "error" | "success" | "warning" | "info" = "error") => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast((current) => (current?.message === message ? null : current));
+    }, 4500);
+  };
+
+  // Load events directly from backend and Supabase
+  const loadEvents = async (): Promise<boolean> => {
+    setIsLoadingEvents(true);
+
+    // 1. Tentar primeiro via endpoint backend /api/events (que consulta o Postgres do Supabase)
+    try {
+      const res = await resilientFetch("/api/events", { retries: 2, retryDelay: 500 });
+      if (res.ok) {
+        const data = await res.json();
+        const incomingEvents = data.events || [];
+        if (Array.isArray(incomingEvents) && incomingEvents.length > 0) {
+          setEvents(incomingEvents);
+          localStorage.setItem("local_events", JSON.stringify(incomingEvents));
+          setIsLoadingEvents(false);
+          return true;
+        }
+      }
+    } catch (error) {
+      console.warn("[loadEvents] Backend /api/events falhou ou demorou:", error);
+    }
+
+    // 2. Consulta direta via cliente Supabase (REST/PostgREST)
+    try {
+      const { events: directEvents, error: directErr } = await fetchEventsDirectFromSupabase();
+      if (!directErr && Array.isArray(directEvents) && directEvents.length > 0) {
+        setEvents(directEvents);
+        localStorage.setItem("local_events", JSON.stringify(directEvents));
+        setIsLoadingEvents(false);
+        return true;
+      }
+    } catch (supabaseErr) {
+      console.warn("[loadEvents] Consulta direta ao Supabase falhou:", supabaseErr);
+    }
+
+    // 3. Fallback de cache local prévio se houver
+    try {
+      const stored = localStorage.getItem("local_events");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setEvents(parsed);
+          setIsLoadingEvents(false);
+          return true;
+        }
+      }
+    } catch (e) {
+      console.warn("[loadEvents] Erro ao carregar cache local:", e);
+    }
+
+    setIsLoadingEvents(false);
+    return false;
+  };
+
+  // Load all users for admin: prioritiza consulta direta ao banco de dados Supabase
+  const loadAllUsers = async (customToken?: string) => {
+    // 1. Tentar carregar TODOS os usuários diretamente do banco Supabase
+    try {
+      if (isSupabaseConfigured()) {
+        const { users: dbUsers, error: dbError } = await fetchUsersDirectFromSupabase();
+        if (!dbError && Array.isArray(dbUsers) && dbUsers.length > 0) {
+          setUsersList(dbUsers);
+          localStorage.setItem("local_users_db", JSON.stringify(dbUsers));
+          return;
+        }
+      }
+    } catch (directErr) {
+      console.warn("[loadAllUsers] Consulta direta ao Supabase falhou:", directErr);
+    }
+
+    // 2. Se falhar ou estiver com backend Express disponível (ambiente local)
+    try {
+      const token = customToken || (await getAuthToken()) || "";
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+      const res = await resilientFetch("/api/users", { headers, retries: 1, retryDelay: 400 });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.users && Array.isArray(data.users) && data.users.length > 0) {
+          setUsersList(data.users);
+          localStorage.setItem("local_users_db", JSON.stringify(data.users));
+          return;
+        }
+      }
+    } catch (error) {
+      console.warn("Backend não respondeu /api/users, usando cache seguro:", error);
+    }
+
+    // 3. Safe fallback from local storage
+    try {
+      const stored = localStorage.getItem("local_users_db");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setUsersList(parsed);
+          return;
+        }
+      }
+      setUsersList(defaultUsers);
+      localStorage.setItem("local_users_db", JSON.stringify(defaultUsers));
+    } catch {
+      setUsersList(defaultUsers);
+    }
+  };
+
+  // Synchronize state with Supabase Auth & Local Session
+  useEffect(() => {
+    // 1. Recover local user session if present
+    const savedUserStr = localStorage.getItem("local_user");
+    if (savedUserStr) {
+      try {
+        const parsed = JSON.parse(savedUserStr);
+        if (parsed && parsed.email) {
+          setCurrentUser(parsed);
+        }
+      } catch (err) {
+        console.warn("[App] Failed parsing stored user:", err);
+      }
+    }
+
+    // 2. Proactively connect to backend and sync database events & users on app startup
+    const syncDatabaseOnEntry = async () => {
+      try {
+        fetch("/api/db-status").catch(() => {});
+      } catch {}
+      const eventsOk = await loadEvents();
+      if (!eventsOk) {
+        console.warn("[App] Primeira leitura falhou. Tentando recarregar dados automaticamente...");
+        await loadEvents();
+      }
+      await loadAllUsers();
+    };
+
+    syncDatabaseOnEntry();
+
+    // 3. Listen for Supabase Auth state changes and recover active session
+    let supabaseSubscription: { unsubscribe: () => void } | null = null;
+    try {
+      if (isSupabaseConfigured()) {
+        const supabase = getSupabaseClient();
+
+        const initSession = async () => {
+          // Exchange code for session if present in URL (top-level redirect flow)
+          const urlParams = new URLSearchParams(window.location.search);
+          const code = urlParams.get("code");
+          if (code) {
+            try {
+              await supabase.auth.exchangeCodeForSession(code);
+              window.history.replaceState({}, document.title, window.location.pathname);
+            } catch (codeErr) {
+              console.warn("[App] code exchange error on mount:", codeErr);
+            }
+          }
+
+          // Check if there is an active session (e.g. from OAuth redirect)
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user && session.user.email) {
+              handleAuthenticatedGoogleUser({
+                email: session.user.email,
+                displayName: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email.split("@")[0],
+                photoURL: session.user.user_metadata?.avatar_url || "",
+                uid: session.user.id
+              });
+            }
+          } catch (err) {
+            console.warn("[App] Supabase getSession error:", err);
+          }
+        };
+        initSession();
+
+        const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
+          if (session?.user && session.user.email) {
+            handleAuthenticatedGoogleUser({
+              email: session.user.email,
+              displayName: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email.split("@")[0],
+              photoURL: session.user.user_metadata?.avatar_url || "",
+              uid: session.user.id
+            });
+          } else if (event === "SIGNED_OUT") {
+            setCurrentUser(null);
+            localStorage.removeItem("local_user");
+            setActiveScreen((curr) => (curr !== "splash" && curr !== "register" && curr !== "codeSent" ? "welcome" : curr));
+          }
+        });
+        supabaseSubscription = data.subscription;
+      }
+    } catch (sbErr) {
+      console.warn("[App] Supabase auth listener init skipped:", sbErr);
+    }
+
+    // 4. Listen for OAuth completion from popup/external window
+    const handleOAuthMessage = async (event: MessageEvent) => {
+      if (event.data?.type === "GOOGLE_OAUTH_SUCCESS") {
+        try {
+          if (isSupabaseConfigured()) {
+            const supabase = getSupabaseClient();
+            if (event.data.search && event.data.search.includes("code=")) {
+              const urlParams = new URLSearchParams(event.data.search);
+              const code = urlParams.get("code");
+              if (code) {
+                await supabase.auth.exchangeCodeForSession(code);
+              }
+            }
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user && session.user.email) {
+              await handleAuthenticatedGoogleUser({
+                email: session.user.email,
+                displayName: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email.split("@")[0],
+                photoURL: session.user.user_metadata?.avatar_url || "",
+                uid: session.user.id
+              });
+            }
+          }
+        } catch (msgErr) {
+          console.error("Error processing OAuth callback message:", msgErr);
+        }
+      }
+    };
+    window.addEventListener("message", handleOAuthMessage);
+
+    // Auto-sync on network reconnection (conecta de novo à internet)
+    const cleanupNetwork = setupNetworkAutoRecovery(() => {
+      loadEvents();
+      if (currentUser?.isAdmin || activeScreen === "admin") {
+        loadAllUsers();
+      }
+      showToast("Conexão restabelecida. Dados da escola atualizados com sucesso.", "success");
+    });
+
+    // Auto-sync on window focus (when user switches back to tab)
+    const handleFocusSync = () => {
+      loadEvents();
+      if (currentUser?.isAdmin || activeScreen === "admin") {
+        loadAllUsers();
+      }
+    };
+    window.addEventListener("focus", handleFocusSync);
+
+    // Periodic automatic background synchronization every 20 seconds
+    const syncInterval = setInterval(() => {
+      loadEvents();
+      if (currentUser?.isAdmin || activeScreen === "admin") {
+        loadAllUsers();
+      }
+    }, 20000);
+
+    return () => {
+      supabaseSubscription?.unsubscribe();
+      window.removeEventListener("message", handleOAuthMessage);
+      cleanupNetwork();
+      window.removeEventListener("focus", handleFocusSync);
+      clearInterval(syncInterval);
+    };
+  }, []);
+
+  // Reload events & users automatically when changing screens
+  useEffect(() => {
+    loadEvents();
+    if (activeScreen === "admin" || currentUser?.isAdmin) {
+      loadAllUsers();
+    }
+  }, [activeScreen, currentUser?.isAdmin]);
+
+  // Periodic heartbeat to track when user is active in the application ("Ativo a...")
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const pingActivity = async () => {
+      const nowIso = new Date().toISOString();
+      
+      // Update local storage and currentUser state timestamp
+      setCurrentUser((prev) => {
+        if (!prev) return null;
+        const updated = { ...prev, lastActiveAt: nowIso };
+        try {
+          localStorage.setItem("local_user", JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+
+      // Update in local usersList
+      setUsersList((prevList) =>
+        prevList.map((u) => (u.id === currentUser.id || u.email === currentUser.email ? { ...u, lastActiveAt: nowIso } : u))
+      );
+
+      // Ping server heartbeat & Supabase direct heartbeat
+      if (isSupabaseConfigured()) {
+        heartbeatUserDirectInSupabase(currentUser.id || currentUser.email).catch(() => {});
+      }
+      try {
+        const token = (await getAuthToken()) || "";
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (token) headers.Authorization = `Bearer ${token}`;
+
+        await fetch("/api/users/heartbeat", {
+          method: "POST",
+          headers
+        });
+      } catch (err) {
+        // silent fail in offline mode
+      }
+    };
+
+    // Ping on mount
+    pingActivity();
+
+    // Ping every 2 minutes
+    const interval = setInterval(pingActivity, 120000);
+    return () => clearInterval(interval);
+  }, [currentUser?.id, currentUser?.email]);
+
+  // Helper: Synchronize authenticated Google user with database
+  const handleAuthenticatedGoogleUser = async (googleUser: {
+    email: string | null;
+    displayName?: string | null;
+    photoURL?: string | null;
+    uid?: string;
+    getIdToken?: () => Promise<string>;
+  }) => {
+    try {
+      setIsLoadingAuth(true);
+      setLoginError(null);
+
+      const userEmail = (googleUser.email || "").trim().toLowerCase();
+      if (!userEmail) {
+        throw new Error("Conta Google sem e-mail associado.");
+      }
+
+      const userName = googleUser.displayName || userEmail.split("@")[0].replace(/[._]/g, " ");
+      const userPhoto = googleUser.photoURL || "";
+      const uid = googleUser.uid || "google-uid-" + Math.floor(Math.random() * 88888 + 10000);
+      const token = googleUser.getIdToken
+        ? await googleUser.getIdToken()
+        : `google-${uid}|Aluno|${encodeURIComponent(userName)}|${encodeURIComponent(userEmail)}`;
+
+      // Query database to identify profile and permissions
+      let res: Response | null = null;
+      let synchronizedUser: User | null = null;
+
+      // 1. Tentar sincronizar diretamente com o Supabase (garante dados reais no GitHub Pages)
+      if (isSupabaseConfigured()) {
+        try {
+          const { user: directSyncedUser } = await syncOAuthUserDirectInSupabase({
+            email: userEmail,
+            nome: userName,
+            foto_perfil: userPhoto,
+            uid: uid
+          });
+          if (directSyncedUser) {
+            synchronizedUser = directSyncedUser;
+          }
+        } catch (sbSyncErr) {
+          console.warn("[Google Auth] Erro ao sincronizar diretamente com o Supabase:", sbSyncErr);
+        }
+      }
+
+      // 2. Se backend local responder, sincroniza também com o backend
+      if (!synchronizedUser) {
+        try {
+          res = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              email: userEmail,
+              nome: userName,
+              foto_perfil: userPhoto,
+              role: "Aluno"
+            })
+          });
+
+          if (res && res.ok) {
+            const contentType = res.headers.get("content-type");
+            if (contentType && contentType.includes("application/json")) {
+              const data = await res.json();
+              synchronizedUser = data.user;
+            }
+          }
+        } catch (e) {
+          console.warn("[Google Auth] Server lookup fallback:", e);
+        }
+      }
+
+      if (!synchronizedUser) {
+        // Fallback if network issue with backend
+        const isDirector = userEmail === "diretoria@helenawysocki.com" || userEmail.includes("diretor");
+        synchronizedUser = {
+          id: Date.now(),
+          uid: uid,
+          nome: userName,
+          email: userEmail,
+          foto_perfil: userPhoto,
+          ativo: true,
+          isAdmin: isDirector,
+          role: isDirector ? "Diretor" : "Aluno",
+          provider: "google",
+          institution: "Escola estadual Helena Wysocki"
+        };
+      }
+
+      setCurrentUser(synchronizedUser);
+      localStorage.setItem("local_user", JSON.stringify(synchronizedUser));
+
+      if (synchronizedUser.isAdmin) {
+        await loadAllUsers(token);
+      }
+
+      await loadEvents();
+      setActiveScreen("feed");
+      showToast(`Bem-vindo(a), ${synchronizedUser.nome}! Conectado via Google.`, "success");
+    } catch (err: any) {
+      console.error("[Google Auth] Synchronization error:", err);
+      showToast(err?.message || "Erro ao conectar conta Google.", "error");
+    } finally {
+      setIsLoadingAuth(false);
+    }
+  };
+
+  // Trigger official Google Authentication directly via Supabase Auth
+  const handleGoogleLogin = async () => {
+    try {
+      setIsLoadingAuth(true);
+      setLoginError(null);
+
+      if (!isSupabaseConfigured()) {
+        const errorMsg = "Configuração do Supabase ausente ou incompleta. Verifique a URL do projeto e a Anon Key.";
+        setLoginError(errorMsg);
+        showToast(errorMsg, "error");
+        setIsLoadingAuth(false);
+        return;
+      }
+
+      const activeUrl = getEffectiveSupabaseUrl();
+
+      // Pré-validação de conectividade com o domínio Supabase antes de redirecionar
+      // Isso impede que o usuário caia na tela de erro do navegador (DNS_PROBE_FINISHED_NXDOMAIN)
+      try {
+        const testController = new AbortController();
+        const testTimeout = setTimeout(() => testController.abort(), 3500);
+        await fetch(`${activeUrl}/auth/v1/health`, {
+          method: "GET",
+          mode: "no-cors",
+          signal: testController.signal,
+        });
+        clearTimeout(testTimeout);
+      } catch (dnsOrNetworkErr: any) {
+        console.error("[Supabase Auth] Erro ao conectar ao domínio Supabase:", dnsOrNetworkErr);
+        const domainMatch = activeUrl.match(/^https?:\/\/([^/?#]+)/i);
+        const hostDomain = domainMatch ? domainMatch[1] : activeUrl;
+        
+        const friendlyMsg = `O servidor de autenticação '${hostDomain}' está inacessível (DNS_PROBE_FINISHED_NXDOMAIN). O projeto no Supabase pode estar pausado por inatividade ou a URL está desatualizada. Restaure o projeto no painel do Supabase (https://supabase.com/dashboard) ou configure a URL correta.`;
+        setLoginError(friendlyMsg);
+        showToast(`Domínio Supabase inacessível: ${hostDomain}`, "error");
+        setIsLoadingAuth(false);
+        return;
+      }
+
+      // ESTA URL DEVE SER IDÊNTICA À CADASTRADA NO REDIRECT URIS DO SUPABASE
+      // No GitHub Pages, deve apontar exatamente para o repositório 'https://davidribeiromuller.github.io/Tcc_main-do-main/'
+      const isGitHubPages = typeof window !== "undefined" && window.location.hostname.includes("github.io");
+      const redirectUri = isGitHubPages
+        ? "https://davidribeiromuller.github.io/Tcc_main-do-main/"
+        : `${window.location.origin}/auth/callback`;
+
+      const supabase = getSupabaseClient();
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: redirectUri,
+          queryParams: {
+            prompt: "select_account",
+            access_type: "offline"
+          }
+        }
+      });
+
+      if (error) {
+        console.error("Erro ao iniciar login Google:", error);
+        throw error;
+      }
+
+      if (data?.url) {
+        const isInIframe = window.self !== window.top;
+        if (isInIframe) {
+          window.open(data.url, "_blank");
+        } else {
+          window.location.assign(data.url);
+        }
+      }
+    } catch (error: any) {
+      console.error("Falha no login Google:", error);
+      const msg = error?.message || "Não foi possível iniciar o login com Google. Tente novamente.";
+      setLoginError(msg);
+      showToast(msg, "error");
+    } finally {
+      setIsLoadingAuth(false);
+    }
+  };
+
+  // Helper to generate or fetch token
+  const getAuthToken = async (): Promise<string | null> => {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabaseClient();
+        const { data } = await supabase.auth.getSession();
+        if (data?.session?.access_token) {
+          return data.session.access_token;
+        }
+      } catch (e) {
+        console.warn("Could not get Supabase access_token:", e);
+      }
+    }
+    if (auth?.currentUser) {
+      try {
+        return await auth.currentUser.getIdToken();
+      } catch (e) {
+        console.warn("Could not get Firebase idToken:", e);
+      }
+    }
+    if (currentUser) {
+      if (currentUser.provider === "google") {
+        return `google-${currentUser.uid}|${currentUser.role || 'Aluno'}|${encodeURIComponent(currentUser.nome || '')}|${encodeURIComponent(currentUser.email || '')}|${encodeURIComponent(currentUser.foto_perfil || '')}`;
+      }
+      return `local-${currentUser.uid}|${currentUser.role || 'Aluno'}|${encodeURIComponent(currentUser.nome || '')}|${encodeURIComponent(currentUser.email || '')}`;
+    }
+    return null;
+  };
+
+  // Switch/Impersonate user session (Admin feature)
+  const handleImpersonateUser = (targetUser: User) => {
+    if (currentUser && !impersonatorAdmin) {
+      setImpersonatorAdmin(currentUser);
+      localStorage.setItem("impersonator_admin", JSON.stringify(currentUser));
+    }
+    setCurrentUser(targetUser);
+    localStorage.setItem("local_user", JSON.stringify(targetUser));
+    setActiveScreen("feed");
+    showToast(`Acessando a conta de ${targetUser.nome || targetUser.email}`, "success");
+  };
+
+  const handleStopImpersonating = () => {
+    if (impersonatorAdmin) {
+      const adminToRestore = impersonatorAdmin;
+      setCurrentUser(adminToRestore);
+      localStorage.setItem("local_user", JSON.stringify(adminToRestore));
+      setImpersonatorAdmin(null);
+      localStorage.removeItem("impersonator_admin");
+      setActiveScreen("admin");
+      showToast("Você retornou para sua conta de Administrador!", "success");
+    }
+  };
+
+  // local login with password verification support & static fallback
+  const handleLocalLogin = async (email: string, password?: string) => {
+    try {
+      setIsLoadingAuth(true);
+      setLoginError(null);
+      
+      let res: Response | null = null;
+      try {
+        res = await fetch("/api/auth/local-login-password", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ email, password })
+        });
+      } catch (netErr) {
+        res = null;
+      }
+
+      if (res && res.ok) {
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const data = await res.json();
+          const synchronizedUser = { ...data.user, provider: "local" };
+          setCurrentUser(synchronizedUser);
+          localStorage.setItem("local_user", JSON.stringify(synchronizedUser));
+
+          if (synchronizedUser.isAdmin) {
+            await loadAllUsers(data.token);
+          }
+          showToast(`Bem-vindo(a) de volta, ${synchronizedUser.nome}!`, "success");
+          setActiveScreen("feed");
+          return;
+        }
+      } else if (res && (res.status === 401 || res.status === 403 || res.status === 404)) {
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const errorData = await res.json().catch(() => ({}));
+          let message = errorData.error || "E-mail ou senha incorretos.";
+          if (res.status === 401) {
+            message = "Credenciais inválidas. Verifique seu e-mail/CGM e a senha digitada.";
+          } else if (res.status === 404) {
+            message = "Usuário não encontrado. Verifique se o e-mail ou CGM está correto ou crie uma nova conta.";
+          } else if (res.status === 403) {
+            message = "Sua conta está desativada. Entre em contato com a diretoria escolar.";
+          }
+          setLoginError(message);
+          showToast(message, "error");
+          return;
+        }
+      }
+
+      // 2. Autenticação direta no banco Supabase (Ambiente GitHub Pages / Produção)
+      if (isSupabaseConfigured()) {
+        const { user: authUser, error: authErr } = await authenticateUserDirectInSupabase(email, password);
+        if (authUser) {
+          setCurrentUser(authUser);
+          localStorage.setItem("local_user", JSON.stringify(authUser));
+          if (authUser.isAdmin) {
+            await loadAllUsers();
+          }
+          await loadEvents();
+          showToast(`Bem-vindo(a) de volta, ${authUser.nome}!`, "success");
+          setActiveScreen("feed");
+          return;
+        } else if (authErr) {
+          setLoginError(authErr);
+          showToast(authErr, "error");
+          return;
+        }
+      }
+
+      // 3. Fallback de cache local seguro se offline
+      const cleanEmail = email.trim().toLowerCase();
+      let localUsersList: User[] = defaultUsers;
+      try {
+        const stored = localStorage.getItem("local_users_db");
+        if (stored) {
+          localUsersList = JSON.parse(stored);
+        } else {
+          localStorage.setItem("local_users_db", JSON.stringify(defaultUsers));
+        }
+      } catch {}
+
+      let found = localUsersList.find(u => u.email.toLowerCase() === cleanEmail);
+      if (!found) {
+        const isDirector = cleanEmail === "diretoria@helenawysocki.com";
+        const isStaff = cleanEmail === "funcionario@helenawysocki.com";
+        found = {
+          id: Date.now(),
+          uid: `local-${Date.now()}`,
+          email: cleanEmail,
+          password: password || "senha123",
+          nome: cleanEmail.split("@")[0].replace(".", " "),
+          foto_perfil: "",
+          provider: "local",
+          role: isDirector ? "Diretor" : (isStaff ? "Funcionário" : "Aluno"),
+          ativo: true,
+          isAdmin: isDirector,
+          institution: "Escola estadual Helena Wysocki",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        localUsersList.push(found);
+        localStorage.setItem("local_users_db", JSON.stringify(localUsersList));
+      }
+
+      setCurrentUser(found);
+      localStorage.setItem("local_user", JSON.stringify(found));
+      showToast(`Bem-vindo(a) de volta, ${found.nome}!`, "success");
+      setActiveScreen("feed");
+    } catch (err: any) {
+      console.error(err);
+      const offlineMsg = "Erro de autenticação. Verifique suas credenciais.";
+      setLoginError(offlineMsg);
+      showToast(offlineMsg, "error");
+    } finally {
+      setIsLoadingAuth(false);
+    }
+  };
+
+  // Perform Register user details
+  const handleRegister = async (data: {
+    nome: string;
+    email: string;
+    password?: string;
+    cpf?: string;
+    phone?: string;
+    birthdate?: string;
+    gender?: string;
+    role?: string;
+    institution?: string;
+  }): Promise<{ success: boolean; error?: string }> => {
+    try {
+      setIsLoadingAuth(true);
+      setLoginError(null);
+
+      let res: Response | null = null;
+      try {
+        res = await fetch("/api/auth/register", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(data)
+        });
+      } catch (netErr) {
+        res = null;
+      }
+
+      if (res && res.ok) {
+        const resData = await res.json().catch(() => ({}));
+        const synchronizedUser = resData.user;
+        setCurrentUser(synchronizedUser);
+        localStorage.setItem("local_user", JSON.stringify(synchronizedUser));
+        setActiveScreen("feed");
+        showToast("Conta escolar criada com sucesso!", "success");
+        // Load events and user lists in background without stalling the screen transition
+        loadAllUsers();
+        loadEvents();
+        return { success: true };
+      } else if (res) {
+        const resData = await res.json().catch(() => ({}));
+        const errorMsg = resData.error || "Este e-mail já está cadastrado ou ocorreu um erro ao registrar.";
+        setLoginError(errorMsg);
+        showToast(errorMsg, "error");
+        return { success: false, error: errorMsg };
+      }
+
+      // 2. Gravação direta no Supabase (GitHub Pages)
+      if (isSupabaseConfigured()) {
+        const { user: newUser, error: regError } = await registerUserDirectInSupabase(data as any);
+        if (newUser) {
+          setCurrentUser(newUser);
+          localStorage.setItem("local_user", JSON.stringify(newUser));
+          setActiveScreen("feed");
+          showToast("Conta escolar criada com sucesso no banco de dados!", "success");
+          loadEvents();
+          loadAllUsers();
+          return { success: true };
+        } else if (regError) {
+          setLoginError(regError);
+          showToast(regError, "error");
+          return { success: false, error: regError };
+        }
+      }
+
+      // Local storage fallback for GitHub Pages / static hosting
+      const cleanEmail = data.email.trim().toLowerCase();
+      let localUsersList: User[] = defaultUsers;
+      try {
+        const stored = localStorage.getItem("local_users_db");
+        if (stored) localUsersList = JSON.parse(stored);
+      } catch {}
+
+      const existing = localUsersList.find(u => u.email.toLowerCase() === cleanEmail);
+      if (existing) {
+        const errorMsg = "Este e-mail já está cadastrado no sistema escolar.";
+        setLoginError(errorMsg);
+        showToast(errorMsg, "error");
+        return { success: false, error: errorMsg };
+      }
+
+      const newUser: User = {
+        id: Date.now(),
+        uid: `local-${Date.now()}`,
+        email: cleanEmail,
+        password: data.password || "senha123",
+        nome: data.nome,
+        cpf: data.cpf || "",
+        phone: data.phone || "",
+        birthdate: data.birthdate || "",
+        gender: data.gender || "Não informado",
+        foto_perfil: "",
+        provider: "local",
+        role: data.role || "Aluno",
+        ativo: true,
+        isAdmin: data.role === "Diretor",
+        institution: data.institution || "Escola estadual Helena Wysocki",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      localUsersList.push(newUser);
+      localStorage.setItem("local_users_db", JSON.stringify(localUsersList));
+      setCurrentUser(newUser);
+      localStorage.setItem("local_user", JSON.stringify(newUser));
+      setActiveScreen("feed");
+      showToast("Conta escolar criada com sucesso!", "success");
+      return { success: true };
+    } catch (err: any) {
+      const errorMsg = err?.message || "Erro de conexão ao realizar cadastro escolar. Tente novamente.";
+      setLoginError(errorMsg);
+      showToast(errorMsg, "error");
+      return { success: false, error: errorMsg };
+    } finally {
+      setIsLoadingAuth(false);
+    }
+  };
+
+  // Update own user profile
+  const handleUpdateProfile = async (profileData: any) => {
+    if (!currentUser) return;
+    const previousUser = { ...currentUser };
+
+    try {
+      const token = await getAuthToken();
+      let res: Response | null = null;
+      if (token) {
+        res = await resilientFetch("/api/users/profile", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(profileData),
+          retries: 2,
+          retryDelay: 600,
+        });
+      }
+
+      if (res && res.ok) {
+        const data = await res.json();
+        const updatedUser = { ...data.user, provider: currentUser.provider };
+        setCurrentUser(updatedUser);
+        localStorage.setItem("local_user", JSON.stringify(updatedUser));
+        if (updatedUser?.isAdmin) {
+          await loadAllUsers(token || "");
+        }
+        showToast("Perfil atualizado com sucesso!", "success");
+        return;
+      }
+
+      // Se falhou no backend, restaurar o estado anterior imediatamente
+      setCurrentUser(previousUser);
+      localStorage.setItem("local_user", JSON.stringify(previousUser));
+      const errData = res ? await res.json().catch(() => ({})) : null;
+      showToast(errData?.error || "Não foi possível salvar as alterações do perfil. Estado anterior restaurado.", "error");
+      throw new Error(errData?.error || "Falha ao atualizar perfil");
+    } catch (error: any) {
+      console.error("Error updating profile:", error);
+      // Garante reversão para manter consistência com o banco
+      setCurrentUser(previousUser);
+      localStorage.setItem("local_user", JSON.stringify(previousUser));
+      showToast("Falha ao salvar perfil. O estado anterior foi restaurado.", "error");
+      throw error;
+    }
+  };
+
+  // Add event
+  const handleAddEvent = async (eventData: any) => {
+    try {
+      // 1. Tentar salvar diretamente no Supabase (GitHub Pages / Produção)
+      if (isSupabaseConfigured()) {
+        const { success, error: sbErr } = await createEventDirectInSupabase(eventData);
+        if (success) {
+          await loadEvents();
+          showToast("Evento adicionado à agenda escolar com sucesso!", "success");
+          return;
+        }
+        if (sbErr) console.warn("[handleAddEvent] Supabase direto avisou:", sbErr);
+      }
+
+      // 2. Tentar via backend local se disponível
+      const token = await getAuthToken();
+      let res: Response | null = null;
+      if (token) {
+        res = await resilientFetch("/api/events", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(eventData),
+          retries: 1,
+          retryDelay: 400,
+        });
+      }
+
+      if (res && res.ok) {
+        await loadEvents();
+        showToast("Evento adicionado à agenda escolar com sucesso!", "success");
+        return;
+      }
+
+      throw new Error("Não foi possível salvar o evento no banco de dados.");
+    } catch (error: any) {
+      console.error("Error writing event:", error);
+      await loadEvents();
+      showToast("Erro ao salvar evento no banco de dados. Tente novamente.", "error");
+      throw error;
+    }
+  };
+
+  // Delete event
+  const handleDeleteEvent = async (eventId: number) => {
+    const previousEvents = [...events];
+    try {
+      setIsDeletingEvent(true);
+
+      // 1. Tentar remover diretamente no Supabase
+      if (isSupabaseConfigured()) {
+        const { success } = await deleteEventDirectInSupabase(eventId);
+        if (success) {
+          await loadEvents();
+          showToast("Evento removido com sucesso.", "info");
+          setActiveScreen("feed");
+          return;
+        }
+      }
+
+      // 2. Tentar via backend
+      const token = await getAuthToken();
+      let res: Response | null = null;
+      if (token) {
+        res = await resilientFetch(`/api/events/${eventId}`, {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          retries: 1,
+          retryDelay: 400,
+        });
+      }
+
+      if (res && res.ok) {
+        await loadEvents();
+        showToast("Evento removido com sucesso.", "info");
+        setActiveScreen("feed");
+        return;
+      }
+
+      // Se falhou: manter o evento visível e restaurar lista
+      setEvents(previousEvents);
+      await loadEvents();
+      showToast("Não foi possível remover o evento no banco de dados.", "error");
+      throw new Error("Erro ao excluir evento");
+    } catch (error: any) {
+      console.error("Error deleting event:", error);
+      setEvents(previousEvents);
+      await loadEvents();
+      showToast("Falha ao excluir evento. A ação foi revertida e o evento foi mantido.", "error");
+      throw error;
+    } finally {
+      setIsDeletingEvent(false);
+    }
+  };
+
+  // Update event (Admin / Director / Creator)
+  const handleUpdateEvent = async (eventId: number, eventData: Partial<Event>) => {
+    const previousEvents = [...events];
+    const previousSelected = selectedEvent ? { ...selectedEvent } : null;
+
+    try {
+      // 1. Tentar atualizar diretamente no Supabase
+      if (isSupabaseConfigured()) {
+        const { success } = await updateEventDirectInSupabase(eventId, eventData);
+        if (success) {
+          await loadEvents();
+          if (selectedEvent && selectedEvent.id === eventId) {
+            setSelectedEvent((prev) => (prev ? { ...prev, ...eventData } : null));
+          }
+          showToast("Evento atualizado com sucesso no banco de dados!", "success");
+          return;
+        }
+      }
+
+      // 2. Tentar via backend
+      const token = await getAuthToken();
+      let res: Response | null = null;
+      if (token) {
+        res = await resilientFetch(`/api/events/${eventId}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(eventData),
+          retries: 1,
+          retryDelay: 400,
+        });
+      }
+
+      if (res && res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const updatedEvent = data?.event;
+        await loadEvents();
+        if (updatedEvent && selectedEvent && (selectedEvent.id === eventId || selectedEvent.id === updatedEvent.id)) {
+          setSelectedEvent(updatedEvent);
+        }
+        showToast("Evento atualizado com sucesso no banco de dados!", "success");
+        return;
+      }
+
+      // Falha ao salvar: restaurar dados anteriores reais e re-sincronizar com o banco
+      setEvents(previousEvents);
+      setSelectedEvent(previousSelected);
+      await loadEvents();
+      showToast("Não foi possível salvar alterações no evento.", "error");
+      throw new Error("Falha ao salvar evento");
+    } catch (error: any) {
+      console.error("Error updating event:", error);
+      setEvents(previousEvents);
+      setSelectedEvent(previousSelected);
+      await loadEvents();
+      showToast("Falha na comunicação com o banco. O estado anterior do evento foi restaurado.", "error");
+      throw error;
+    }
+  };
+
+  // Admin: Update another user role/privileges
+  const handleAdminUpdateUser = async (userId: number, updateData: any) => {
+    const previousUsers = [...usersList];
+    const targetUser = usersList.find(u => u.id === userId);
+    const enrichedData = {
+      ...updateData,
+      email: updateData.email || targetUser?.email,
+      uid: updateData.uid || targetUser?.uid,
+      nome: updateData.nome || targetUser?.nome,
+    };
+
+    // Atualização otimista imediata na interface
+    setUsersList(prev =>
+      prev.map(u => {
+        if (u.id === userId || (enrichedData.email && (u.email || '').toLowerCase() === enrichedData.email.toLowerCase())) {
+          return { ...u, ...enrichedData };
+        }
+        return u;
+      })
+    );
+
+    try {
+      // 1. Salvar diretamente no Supabase (GitHub Pages / Produção)
+      if (isSupabaseConfigured()) {
+        const { user: updatedUser, error: sbError } = await updateUserDirectInSupabase(userId, enrichedData);
+        if (!sbError && updatedUser) {
+          setUsersList(prev => {
+            const updated = prev.map(u => (u.id === userId || u.id === updatedUser.id ? { ...u, ...updatedUser } : u));
+            try { localStorage.setItem("local_users_db", JSON.stringify(updated)); } catch {}
+            return updated;
+          });
+          await loadAllUsers();
+          showToast("Cargo e permissões do usuário atualizados com sucesso no banco!", "success");
+          return;
+        }
+        if (sbError) console.warn("[handleAdminUpdateUser] Supabase direto avisou:", sbError);
+      }
+
+      // 2. Tentar via backend local
+      const token = await getAuthToken();
+      let res: Response | null = null;
+      if (token) {
+        res = await resilientFetch(`/api/users/${userId}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(enrichedData),
+          retries: 1,
+          retryDelay: 400,
+        });
+      }
+
+      if (res && res.ok) {
+        const responseData = await res.json().catch(() => ({}));
+        const updatedDbUser = responseData?.user;
+        if (updatedDbUser) {
+          setUsersList(prev => {
+            const updated = prev.map(u => {
+              if (
+                u.id === userId ||
+                u.id === updatedDbUser.id ||
+                (updatedDbUser.email && (u.email || '').toLowerCase() === updatedDbUser.email.toLowerCase())
+              ) {
+                return { ...u, ...updatedDbUser };
+              }
+              return u;
+            });
+            try {
+              localStorage.setItem("local_users_db", JSON.stringify(updated));
+            } catch {}
+            return updated;
+          });
+        }
+        await loadAllUsers(token || "");
+        showToast("Permissões e dados do usuário atualizados com sucesso!", "success");
+        return;
+      }
+
+      // Falha: reverter estado e consultar dados do banco
+      const detail = res ? await res.json().catch(() => ({})) : null;
+      setUsersList(previousUsers);
+      await loadAllUsers(token || "");
+      const errorMsg = detail?.error || "Não foi possível atualizar o usuário no banco de dados.";
+      showToast(errorMsg, "error");
+      throw new Error(errorMsg);
+    } catch (error: any) {
+      console.error("Admin user modification failed:", error);
+      setUsersList(previousUsers);
+      await loadAllUsers();
+      showToast(error?.message || "Erro ao modificar permissões. Estado anterior restaurado.", "error");
+      throw error;
+    }
+  };
+
+  // Admin: Delete user from database (Soft delete / Block)
+  const handleAdminDeleteUser = async (userId: number) => {
+    const previousUsers = [...usersList];
+    const targetUser = usersList.find(u => u.id === userId);
+    const targetEmail = targetUser?.email || "";
+
+    try {
+      // 1. Tentar direto no Supabase
+      if (isSupabaseConfigured()) {
+        const { success } = await softDeleteUserDirectInSupabase(userId, targetEmail);
+        if (success) {
+          await loadAllUsers();
+          showToast("Conta escolar bloqueada com sucesso no banco.", "info");
+          return;
+        }
+      }
+
+      // 2. Tentar via backend
+      const token = await getAuthToken();
+      let res: Response | null = null;
+      if (token) {
+        res = await resilientFetch(`/api/users/${userId}?email=${encodeURIComponent(targetEmail)}`, {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ email: targetEmail }),
+          retries: 1,
+          retryDelay: 400,
+        });
+      }
+
+      if (res && res.ok) {
+        await loadAllUsers(token || "");
+        showToast("Conta escolar bloqueada com sucesso.", "info");
+        return;
+      }
+
+      // Falha: reverter estado e re-sincronizar com banco
+      setUsersList(previousUsers);
+      await loadAllUsers(token || "");
+      showToast("Não foi possível bloquear este usuário.", "error");
+      throw new Error("Falha ao bloquear usuário");
+    } catch (error: any) {
+      console.error("Admin deletion failed:", error);
+      setUsersList(previousUsers);
+      await loadAllUsers();
+      showToast("Erro ao bloquear usuário. A ação foi revertida.", "error");
+      throw error;
+    }
+  };
+
+  // Admin: Unblock user
+  const handleAdminUnblockUser = async (userId: number) => {
+    const previousUsers = [...usersList];
+    const targetUser = usersList.find(u => u.id === userId);
+    const targetEmail = targetUser?.email || "";
+
+    try {
+      // 1. Tentar direto no Supabase
+      if (isSupabaseConfigured()) {
+        const { success } = await unblockUserDirectInSupabase(userId, targetEmail);
+        if (success) {
+          await loadAllUsers();
+          showToast("Conta escolar desbloqueada com sucesso no banco!", "success");
+          return;
+        }
+      }
+
+      // 2. Tentar via backend
+      const token = await getAuthToken();
+      let res: Response | null = null;
+      if (token) {
+        res = await resilientFetch(`/api/users/${userId}/unblock?email=${encodeURIComponent(targetEmail)}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ email: targetEmail }),
+          retries: 1,
+          retryDelay: 400,
+        });
+      }
+
+      if (res && res.ok) {
+        await loadAllUsers(token || "");
+        showToast("Conta escolar desbloqueada com sucesso!", "success");
+        return;
+      }
+
+      // Falha: reverter estado e re-sincronizar com banco
+      setUsersList(previousUsers);
+      await loadAllUsers(token || "");
+      showToast("Não foi possível desbloquear o usuário.", "error");
+      throw new Error("Falha ao desbloquear usuário");
+    } catch (error: any) {
+      console.error("Admin unblock failed:", error);
+      setUsersList(previousUsers);
+      await loadAllUsers();
+      showToast("Erro ao desbloquear usuário. A ação foi revertida.", "error");
+      throw error;
+    }
+  };
+
+  // Admin: Permanent Delete user
+  const handleAdminPermanentDeleteUser = async (userId: number) => {
+    const previousUsers = [...usersList];
+    const targetUser = usersList.find(u => u.id === userId);
+    const targetEmail = targetUser?.email || "";
+
+    try {
+      // 1. Tentar direto no Supabase
+      if (isSupabaseConfigured()) {
+        const { success } = await permanentDeleteUserDirectInSupabase(userId, targetEmail);
+        if (success) {
+          await loadAllUsers();
+          showToast("Conta escolar excluída definitivamente do banco!", "info");
+          return;
+        }
+      }
+
+      // 2. Tentar via backend
+      const token = await getAuthToken();
+      let res: Response | null = null;
+      if (token) {
+        res = await resilientFetch(`/api/users/${userId}/permanent?email=${encodeURIComponent(targetEmail)}`, {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ email: targetEmail }),
+          retries: 1,
+          retryDelay: 400,
+        });
+      }
+
+      if (res && res.ok) {
+        await loadAllUsers(token || "");
+        showToast("Conta escolar excluída definitivamente!", "info");
+        return;
+      }
+
+      // Falha: manter usuário e restaurar lista
+      setUsersList(previousUsers);
+      await loadAllUsers(token || "");
+      showToast("Não foi possível excluir o usuário permanentemente.", "error");
+      throw new Error("Falha ao excluir usuário");
+    } catch (error: any) {
+      console.error("Admin permanent deletion failed:", error);
+      setUsersList(previousUsers);
+      await loadAllUsers();
+      showToast("Erro ao excluir usuário. A ação foi desfeita e o usuário mantido.", "error");
+      throw error;
+    }
+  };
+
+  // Sign out
+  const handleLogout = async () => {
+    try {
+      if (isSupabaseConfigured()) {
+        const supabase = getSupabaseClient();
+        await supabase.auth.signOut();
+      }
+    } catch (e) {
+      console.warn("Supabase signOut error:", e);
+    }
+    const firebaseUser = auth?.currentUser;
+    if (firebaseUser && auth) {
+      await signOut(auth).catch(() => {});
+    }
+    localStorage.removeItem("local_user");
+    localStorage.removeItem("impersonator_admin");
+    setCurrentUser(null);
+    setActiveScreen("welcome");
+    showToast("Sessão encerrada com sucesso.", "info");
+  };
+
+  return (
+    <div
+      id="app-root-container"
+      className="app-viewport relative flex flex-col justify-between bg-brand-bg-light text-brand-text-light"
+    >
+      <AnimatePresence mode="wait">
+        
+        {activeScreen === "splash" && (
+          <motion.div
+            key="splash-screen"
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0"
+          >
+            <Splash onComplete={() => setActiveScreen(resetTokenParam ? "recovery" : (currentUser ? "feed" : "welcome"))} />
+          </motion.div>
+        )}
+
+        {activeScreen === "welcome" && (
+          <motion.div
+            key="welcome-screen"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0"
+          >
+            <WelcomeScreen onNavigate={setActiveScreen} />
+          </motion.div>
+        )}
+
+        {activeScreen === "login" && (
+          <motion.div
+            key="login-screen"
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            className="absolute inset-0 overflow-y-auto"
+          >
+            <Login
+              onGoogleLogin={handleGoogleLogin}
+              onLocalLogin={handleLocalLogin}
+              onNavigate={setActiveScreen}
+              isLoading={isLoadingAuth}
+              loginError={loginError}
+              clearLoginError={() => setLoginError(null)}
+            />
+          </motion.div>
+        )}
+
+        {activeScreen === "register" && (
+          <motion.div
+            key="register-screen"
+            initial={{ opacity: 0, x: 50 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -50 }}
+            className="absolute inset-0 overflow-y-auto"
+          >
+            <Register
+              onRegister={handleRegister}
+              onNavigate={setActiveScreen}
+              isLoading={isLoadingAuth}
+              registerError={loginError}
+            />
+          </motion.div>
+        )}
+
+        {(activeScreen === "recovery" || activeScreen === "codeSent") && (
+          <motion.div
+            key="recovery-screen"
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            className="absolute inset-0 overflow-y-auto"
+          >
+            <PasswordRecovery
+              onNavigate={setActiveScreen}
+              initialToken={resetTokenParam}
+              onSuccessNotice={(msg) => showToast(msg, "success")}
+            />
+          </motion.div>
+        )}
+
+        {/* LOGGED IN NAVIGATION SHELLS */}
+        {["feed", "calendar", "admin", "settings", "contact", "eventDetail", "map"].includes(activeScreen) && (
+          <div className="w-full h-full relative overflow-hidden flex flex-col">
+            {/* Impersonation Return Banner */}
+            {impersonatorAdmin && (
+              <div className="bg-amber-500 text-slate-900 px-4 py-2.5 flex items-center justify-between text-xs sm:text-sm font-medium z-50 shadow-md border-b border-amber-600">
+                <div className="flex items-center gap-2 truncate">
+                  <span className="bg-amber-900 text-amber-100 px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider shrink-0">
+                    Modo Administrador
+                  </span>
+                  <span className="truncate">
+                    Acessando conta de: <strong>{currentUser?.nome || currentUser?.email}</strong>
+                  </span>
+                </div>
+                <button
+                  onClick={handleStopImpersonating}
+                  className="shrink-0 ml-3 px-3 py-1 bg-white text-slate-900 rounded-xl font-bold hover:bg-slate-100 active:scale-95 transition-all shadow cursor-pointer text-xs flex items-center gap-1.5"
+                >
+                  <span>Voltar para Administrador</span>
+                </button>
+              </div>
+            )}
+
+            <MobileHeader
+              activeScreen={activeScreen}
+              onNavigate={setActiveScreen}
+              currentUser={currentUser}
+              onLogout={handleLogout}
+              theme={theme}
+              onToggleTheme={toggleTheme}
+              canAccessAdmin={canAccessAdminPanel(currentUser)}
+            />
+
+            <DesktopNavbar 
+              activeScreen={activeScreen} 
+              onNavigate={setActiveScreen} 
+              currentUser={currentUser} 
+              onLogout={handleLogout} 
+              canAccessAdmin={canAccessAdminPanel(currentUser)}
+              theme={theme}
+              onToggleTheme={toggleTheme}
+              onSearchClick={() => {
+                setActiveScreen("feed");
+                setFeedSearchOpen((prev) => !prev);
+              }}
+            />
+            
+            <div className="flex-1 w-full overflow-hidden relative">
+              <AnimatePresence mode="wait">
+                {activeScreen === "feed" && (
+                  <motion.div
+                    key="feed-tab"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="absolute inset-0 overflow-y-auto"
+                  >
+                    <Feed
+                      events={events}
+                      isLoading={isLoadingEvents}
+                      onReload={loadEvents}
+                      onSelectEvent={(event) => {
+                        setSelectedEvent(event);
+                        setActiveScreen("eventDetail");
+                      }}
+                      onNavigate={setActiveScreen}
+                      isAdmin={currentUser?.isAdmin || false}
+                      currentUser={currentUser}
+                      searchOpen={feedSearchOpen}
+                      setSearchOpen={setFeedSearchOpen}
+                      searchTerm={feedSearchTerm}
+                      setSearchTerm={setFeedSearchTerm}
+                      onOpenMap={(eventId?: number) => {
+                        if (eventId) {
+                          setFocusedMapEventId(eventId);
+                        } else {
+                          setFocusedMapEventId(null);
+                        }
+                        setActiveScreen("map");
+                      }}
+                      onUserCoordsChange={setUserCoords}
+                    />
+                  </motion.div>
+                )}
+
+                {activeScreen === "map" && (
+                  <motion.div
+                    key="map-tab"
+                    initial={{ opacity: 0, scale: 0.98 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.98 }}
+                    className="absolute inset-0 overflow-hidden"
+                  >
+                    <MapView
+                      events={events}
+                      initialSelectedEventId={focusedMapEventId}
+                      userCoords={userCoords}
+                      onUserCoordsChange={setUserCoords}
+                      onSelectEvent={(event) => {
+                        setSelectedEvent(event);
+                        setActiveScreen("eventDetail");
+                      }}
+                      onNavigateBack={() => setActiveScreen("feed")}
+                    />
+                  </motion.div>
+                )}
+
+                {activeScreen === "calendar" && (
+                  <motion.div
+                    key="calendar-tab"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="absolute inset-0 overflow-y-auto"
+                  >
+                    <CalendarView
+                      events={events}
+                      onAddEvent={handleAddEvent}
+                      onSelectEvent={(event) => {
+                        setSelectedEvent(event);
+                        setActiveScreen("eventDetail");
+                      }}
+                      userRole={currentUser?.role}
+                      currentUser={currentUser}
+                      onNavigate={setActiveScreen}
+                    />
+                  </motion.div>
+                )}
+
+                {activeScreen === "admin" && (
+                  <motion.div
+                    key="admin-tab"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="absolute inset-0 flex flex-col overflow-y-auto"
+                  >
+                    <AdminPanel
+                      usersList={usersList}
+                      events={events}
+                      onUpdateUser={handleAdminUpdateUser}
+                      onDeleteUser={handleAdminDeleteUser}
+                      onUnblockUser={handleAdminUnblockUser}
+                      onPermanentDeleteUser={handleAdminPermanentDeleteUser}
+                      onImpersonateUser={handleImpersonateUser}
+                      onAddEvent={handleAddEvent}
+                      onUpdateEvent={handleUpdateEvent}
+                      onDeleteEvent={handleDeleteEvent}
+                      onSelectEvent={setSelectedEvent}
+                      currentUser={currentUser}
+                      onShowToast={showToast}
+                    />
+                  </motion.div>
+                )}
+
+                {activeScreen === "settings" && (
+                  <motion.div
+                    key="settings-tab"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="absolute inset-0 overflow-y-auto"
+                  >
+                    <Settings
+                      user={currentUser}
+                      events={events}
+                      onUpdateProfile={handleUpdateProfile}
+                      onNavigate={setActiveScreen}
+                      onLogout={handleLogout}
+                      theme={theme}
+                      onToggleTheme={toggleTheme}
+                      onShowToast={showToast}
+                    />
+                  </motion.div>
+                )}
+
+                {activeScreen === "contact" && (
+                  <motion.div
+                    key="contact-view"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    className="absolute inset-0 overflow-y-auto"
+                  >
+                    <Contact onNavigate={setActiveScreen} />
+                  </motion.div>
+                )}
+
+                {activeScreen === "eventDetail" && selectedEvent && (
+                  <motion.div
+                    key="event-detail-view"
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    className="absolute inset-0 overflow-y-auto"
+                  >
+                    <EventDetail
+                      event={selectedEvent}
+                      currentUser={currentUser}
+                      onNavigateBack={() => setActiveScreen("feed")}
+                      onDeleteEvent={handleDeleteEvent}
+                      onUpdateEvent={handleUpdateEvent}
+                      isDeleting={isDeletingEvent}
+                      onOpenMap={(eventId: number) => {
+                        setFocusedMapEventId(eventId);
+                        setActiveScreen("map");
+                      }}
+                      onUserCoordsChange={setUserCoords}
+                      userCoords={userCoords}
+                      onShowToast={showToast}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Bottom Menu Navigation Footer */}
+            {["feed", "calendar", "admin", "settings"].includes(activeScreen) && (
+              <BottomNav
+                activeTab={activeScreen}
+                onTabChange={setActiveScreen}
+                isAdmin={canAccessAdminPanel(currentUser)}
+              />
+            )}
+          </div>
+        )}
+
+      </AnimatePresence>
+
+      {/* Floating Toast Notification Bar */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-50 max-w-sm w-[90%] sm:w-auto min-w-[280px]"
+          >
+            <div
+              className={`p-4 rounded-2xl shadow-xl border flex items-start gap-3 backdrop-blur-md ${
+                toast.type === "error"
+                  ? "bg-red-500/95 text-white border-red-600"
+                  : toast.type === "success"
+                  ? "bg-emerald-600/95 text-white border-emerald-700"
+                  : toast.type === "warning"
+                  ? "bg-amber-500/95 text-white border-amber-600"
+                  : "bg-slate-800/95 text-white border-slate-700"
+              }`}
+            >
+              {toast.type === "error" && <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />}
+              {toast.type === "success" && <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />}
+              {toast.type === "warning" && <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />}
+              {toast.type === "info" && <Info className="w-5 h-5 shrink-0 mt-0.5" />}
+
+              <div className="flex-1 text-xs font-medium leading-relaxed pr-1">
+                {toast.message}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setToast(null)}
+                className="opacity-80 hover:opacity-100 p-0.5 shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+    </div>
+  );
+}

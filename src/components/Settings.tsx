@@ -1,0 +1,693 @@
+import React, { useState, useEffect, useMemo } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { 
+  User, 
+  Bell, 
+  Palette, 
+  MessageSquare, 
+  ChevronRight, 
+  ArrowLeft, 
+  Save, 
+  LogOut, 
+  Database, 
+  Server, 
+  Camera, 
+  Upload, 
+  Moon, 
+  Sun,
+  Ticket,
+  Calendar,
+  Route as RouteIcon,
+  CheckCircle2,
+  Sparkles,
+  ShieldCheck,
+  BellRing
+} from "lucide-react";
+import { SCHOOLS_LIST } from "../lib/schools.ts";
+import { Event } from "../types.ts";
+import { calculateRealUserStats } from "../lib/userStats.ts";
+import { isChefeAdmin, isFuncionarioAdmin } from "../lib/permissions.ts";
+
+const ensureDbDateToInputFormat = (dateVal: string): string => {
+  if (!dateVal) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) return dateVal;
+  const parts = dateVal.split("/");
+  if (parts.length === 3) {
+    const [d, m, y] = parts;
+    if (d.length === 2 && m.length === 2 && y.length === 4) {
+      return `${y}-${m}-${d}`;
+    }
+  }
+  return "";
+};
+
+interface SettingsProps {
+  user: any;
+  events?: Event[];
+  onUpdateProfile: (profileData: any) => Promise<void>;
+  onNavigate: (screen: string) => void;
+  onLogout: () => void;
+  theme?: "light" | "dark";
+  onToggleTheme?: () => void;
+  onShowToast?: (message: string, type?: "error" | "warning" | "success" | "info") => void;
+}
+
+export default function Settings({
+  user,
+  events = [],
+  onUpdateProfile,
+  onNavigate,
+  onLogout,
+  theme = "light",
+  onToggleTheme,
+  onShowToast
+}: SettingsProps) {
+  const notifySettings = (message: string, type: "error" | "warning" | "success" | "info" = "info") => {
+    if (onShowToast) {
+      onShowToast(message, type);
+    }
+  };
+
+  const [editMode, setEditMode] = useState(false);
+  const [nome, setNome] = useState(user?.nome || "");
+  const [email, setEmail] = useState(user?.email || "");
+  const [cpf, setCpf] = useState(user?.cpf || "");
+  const [phone, setPhone] = useState(user?.phone || "");
+  const [birthdate, setBirthdate] = useState(user?.birthdate || "");
+  const [gender, setGender] = useState(user?.gender || "Masculino");
+  const [institution, setInstitution] = useState(user?.institution || SCHOOLS_LIST[0]);
+  const [role, setRole] = useState(user?.role || "Aluno");
+  const [fotoPerfil, setFotoPerfil] = useState(user?.foto_perfil || "");
+
+  // Keep state in sync with updated user
+  useEffect(() => {
+    if (user) {
+      setNome(user.nome || "");
+      setEmail(user.email || "");
+      setCpf(user.cpf || "");
+      setPhone(user.phone || "");
+      setBirthdate(user.birthdate || "");
+      setGender(user.gender || "Masculino");
+      setInstitution(user.institution || SCHOOLS_LIST[0]);
+      setRole(user.role || "Aluno");
+      setFotoPerfil(user.foto_perfil || "");
+    }
+  }, [user]);
+
+  // Apply CPF Mask
+  const handleCpfChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let value = e.target.value.replace(/\D/g, "");
+    if (value.length > 11) value = value.slice(0, 11);
+    
+    if (value.length > 9) {
+      value = value.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+    } else if (value.length > 6) {
+      value = value.replace(/(\d{3})(\d{3})(\d{1,3})/, "$1.$2.$3");
+    } else if (value.length > 3) {
+      value = value.replace(/(\d{3})(\d{1,3})/, "$1.$2");
+    }
+    setCpf(value);
+  };
+
+  // Smart Phone Formatting (+XX XX X XXXX-XXXX or (XX) XXXXX-XXXX)
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    const isInternational = val.startsWith("+");
+    let clean = val.replace(/\D/g, "");
+    
+    if (isInternational || clean.length > 11) {
+      if (clean.length > 13) clean = clean.slice(0, 13);
+      let res = "+";
+      if (clean.length > 0) {
+        res += clean.substring(0, 2);
+      }
+      if (clean.length > 2) {
+        res += " " + clean.substring(2, 4);
+      }
+      if (clean.length > 4) {
+        res += " " + clean.substring(4, 5);
+      }
+      if (clean.length > 5) {
+        res += " " + clean.substring(5, 9);
+      }
+      if (clean.length > 9) {
+        res += "-" + clean.substring(9, 13);
+      }
+      setPhone(res);
+    } else {
+      if (clean.length > 11) clean = clean.slice(0, 11);
+      let res = "";
+      if (clean.length > 0) {
+        res += "(" + clean.substring(0, 2);
+      }
+      if (clean.length > 2) {
+        res += ") " + clean.substring(2, 7);
+      }
+      if (clean.length > 7) {
+        res += "-" + clean.substring(7, 11);
+      }
+      setPhone(res);
+    }
+  };
+
+  const [dbStatus, setDbStatus] = useState<{
+    active: boolean;
+    provider: string;
+    host: string;
+    version: string;
+    sdkInstalled: boolean;
+    error?: string;
+  } | null>(null);
+
+  const [notificationStatus, setNotificationStatus] = useState<string>(() => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      return Notification.permission;
+    }
+    return "unsupported";
+  });
+
+  const handleRequestNotificationPermission = async () => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      try {
+        const permission = await Notification.requestPermission();
+        setNotificationStatus(permission);
+        if (permission === "granted") {
+          try {
+            new Notification("Escola Estadual Helena Wysocki", {
+              body: "Notificações escolares ativadas com sucesso! Você receberá avisos sobre novos eventos.",
+              icon: "/favicon.ico"
+            });
+          } catch {}
+        }
+      } catch (e) {
+        console.warn("Erro ao solicitar notificação:", e);
+      }
+    } else {
+      notifySettings("Notificações do sistema não são suportadas pelo seu navegador atual.", "warning");
+    }
+  };
+
+  const userStats = useMemo(() => {
+    return calculateRealUserStats(user?.id, events || []);
+  }, [user?.id, events]);
+
+  const [isLoadingDbStatus, setIsLoadingDbStatus] = useState(true);
+
+  const fetchDbStatus = () => {
+    setIsLoadingDbStatus(true);
+    fetch("/api/db-status")
+      .then((res) => res.json())
+      .then((data) => {
+        setDbStatus(data);
+        setIsLoadingDbStatus(false);
+      })
+      .catch((err) => {
+        console.warn("Erro ao buscar status do banco:", err);
+        setIsLoadingDbStatus(false);
+      });
+  };
+
+  useEffect(() => {
+    if (!editMode) {
+      fetchDbStatus();
+    }
+  }, [editMode]);
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nome.trim()) {
+      notifySettings("Por favor, digite seu nome completo!", "warning");
+      return;
+    }
+
+    await onUpdateProfile({
+      nome,
+      email,
+      cpf,
+      phone,
+      birthdate,
+      gender,
+      institution,
+      role,
+      foto_perfil: fotoPerfil
+    });
+
+    setEditMode(false);
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="flex flex-col h-full overflow-y-auto pb-24 text-brand-text-light dark:text-brand-text-dark"
+    >
+      {/* Header */}
+      <div className="border-b border-brand-primary/10">
+        <div className="max-w-4xl mx-auto w-full flex items-center gap-3 p-6">
+          {editMode ? (
+            <button
+              onClick={() => setEditMode(false)}
+              className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-white/10 text-slate-500 animate-in fade-in zoom-in-75 duration-100"
+            >
+              <ArrowLeft size={20} />
+            </button>
+          ) : (
+            <button
+              onClick={() => onNavigate("feed")}
+              className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-white/10 text-slate-500 md:hidden animate-in fade-in zoom-in-75 duration-100"
+            >
+              <ArrowLeft size={20} />
+            </button>
+          )}
+          <div>
+            <h1 className="text-2xl font-display font-medium tracking-tight">
+              {editMode ? "Editar Perfil" : "Configurações"}
+            </h1>
+            <p className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">
+              {user?.email || "Minha conta escolar"}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <AnimatePresence mode="wait">
+        {!editMode ? (
+          <motion.div
+            key="settings-list"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -15 }}
+            className="max-w-4xl mx-auto w-full p-6 flex flex-col gap-6"
+          >
+            {/* Short User Snapshot */}
+            <div className="bg-brand-secondary/30 dark:bg-brand-card-dark rounded-3xl p-4 flex items-center gap-4 border border-brand-primary/10">
+              <div className="w-14 h-14 rounded-full bg-yellow-400 border-2 border-white flex items-center justify-center font-display font-medium text-white text-xl uppercase overflow-hidden">
+                {user?.foto_perfil ? (
+                  <img src={user.foto_perfil} alt={user.nome} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                ) : (
+                  (user?.nome || user?.email || "U").slice(0, 2)
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <h4 className="font-display font-semibold text-base leading-tight truncate">
+                  {user?.nome || " Hudson W."}
+                </h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 uppercase font-mono tracking-wider">
+                  {user?.role || "Aluno"}
+                </p>
+              </div>
+            </div>
+
+            {/* Real User Statistics Grid */}
+            <div className="bg-brand-secondary/30 dark:bg-brand-card-dark rounded-3xl p-5 border border-brand-primary/10 flex flex-col gap-3">
+              <div className="flex items-center justify-between pb-2 border-b border-brand-primary/10">
+                <div className="flex items-center gap-2">
+                  <Sparkles size={18} className="text-brand-accent dark:text-brand-primary" />
+                  <span className="text-sm font-semibold text-slate-800 dark:text-white">Minhas Estatísticas no Portal</span>
+                </div>
+                <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Atividade Real</span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="p-3 bg-white dark:bg-black/20 rounded-2xl border border-brand-primary/10 flex flex-col items-center justify-center text-center">
+                  <div className="p-2 rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400 mb-1">
+                    <Ticket size={16} />
+                  </div>
+                  <span className="text-xl font-bold font-mono text-slate-800 dark:text-white leading-none">
+                    {userStats.participatedEventsCount}
+                  </span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-1">
+                    Inscrições
+                  </span>
+                </div>
+
+                <div className="p-3 bg-white dark:bg-black/20 rounded-2xl border border-brand-primary/10 flex flex-col items-center justify-center text-center">
+                  <div className="p-2 rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-950/30 dark:text-purple-400 mb-1">
+                    <Calendar size={16} />
+                  </div>
+                  <span className="text-xl font-bold font-mono text-slate-800 dark:text-white leading-none">
+                    {userStats.createdEventsCount}
+                  </span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-1">
+                    Eventos Criados
+                  </span>
+                </div>
+
+                <div className="p-3 bg-white dark:bg-black/20 rounded-2xl border border-brand-primary/10 flex flex-col items-center justify-center text-center">
+                  <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400 mb-1">
+                    <RouteIcon size={16} />
+                  </div>
+                  <span className="text-xl font-bold font-mono text-slate-800 dark:text-white leading-none">
+                    {userStats.routesCalculatedCount}
+                  </span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-1">
+                    Rotas Traçadas
+                  </span>
+                </div>
+
+                <div className="p-3 bg-white dark:bg-black/20 rounded-2xl border border-brand-primary/10 flex flex-col items-center justify-center text-center">
+                  <div className="p-2 rounded-xl bg-orange-50 text-orange-600 dark:bg-orange-950/30 dark:text-orange-400 mb-1">
+                    <MessageSquare size={16} />
+                  </div>
+                  <span className="text-xl font-bold font-mono text-slate-800 dark:text-white leading-none">
+                    {userStats.feedbacksSentCount}
+                  </span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-1">
+                    Contatos / Avisos
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* List Menu Options */}
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => setEditMode(true)}
+                className="w-full h-14 px-4 rounded-2xl bg-white dark:bg-brand-card-dark border border-brand-primary/10 flex items-center justify-between hover:bg-brand-primary/10 active:scale-99 transition-all cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-orange-50 text-orange-600 dark:bg-orange-950/30 dark:text-orange-400">
+                    <User size={18} />
+                  </div>
+                  <span className="text-sm font-semibold">Editar Perfil</span>
+                </div>
+                <ChevronRight size={18} className="text-slate-400" />
+              </button>
+
+              {/* Modo Escuro / Modo Claro Toggle */}
+              <div className="w-full p-4 rounded-2xl bg-white dark:bg-brand-card-dark border border-brand-primary/10 flex items-center justify-between gap-3 shadow-2xs">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-xl transition-colors ${
+                    theme === "dark" 
+                      ? "bg-indigo-950/50 text-indigo-400" 
+                      : "bg-amber-50 text-amber-600"
+                  }`}>
+                    {theme === "dark" ? <Moon size={18} /> : <Sun size={18} />}
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold leading-tight text-slate-800 dark:text-white">
+                      Modo Escuro
+                    </div>
+                    <div className="text-[11px] text-slate-400 dark:text-slate-400">
+                      {theme === "dark" 
+                        ? "Tema escuro ativado (tons confortáveis)" 
+                        : "Tema claro original ativado"}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={onToggleTheme}
+                  role="switch"
+                  aria-checked={theme === "dark"}
+                  title={theme === "dark" ? "Desativar modo escuro" : "Ativar modo escuro"}
+                  className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    theme === "dark" ? "bg-brand-accent dark:bg-brand-primary" : "bg-slate-200"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out flex items-center justify-center text-[10px] ${
+                      theme === "dark" ? "translate-x-5 text-brand-accent" : "translate-x-0 text-amber-500"
+                    }`}
+                  >
+                    {theme === "dark" ? <Moon size={11} /> : <Sun size={11} />}
+                  </span>
+                </button>
+              </div>
+
+              {/* Notification Permission Request Flow */}
+              <div className="w-full p-4 rounded-2xl bg-white dark:bg-brand-card-dark border border-brand-primary/10 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400">
+                    <Bell size={18} />
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold leading-tight">Notificações Escolares</div>
+                    <div className="text-[11px] text-slate-400">
+                      {notificationStatus === "granted"
+                        ? "Permissão concedida no sistema"
+                        : notificationStatus === "denied"
+                        ? "Permissão bloqueada no navegador"
+                        : "Receba alertas sobre novos eventos"}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleRequestNotificationPermission}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-all ${
+                    notificationStatus === "granted"
+                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+                      : "bg-[#1A73E8] text-white hover:bg-[#1557b0] shadow-sm active:scale-95"
+                  }`}
+                >
+                  {notificationStatus === "granted" ? "Ativado ✓" : "Ativar Permissão"}
+                </button>
+              </div>
+
+              <button
+                onClick={() => onNavigate("contact")}
+                className="w-full h-14 px-4 rounded-2xl bg-white dark:bg-brand-card-dark border border-brand-primary/10 flex items-center justify-between hover:bg-brand-primary/10 active:scale-99 transition-all cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-teal-50 text-teal-600 dark:bg-teal-950/30 dark:text-teal-400">
+                    <MessageSquare size={18} />
+                  </div>
+                  <span className="text-sm font-semibold">Entrar em contato</span>
+                </div>
+                <ChevronRight size={18} className="text-slate-400" />
+              </button>
+            </div>
+
+            {/* Supabase / Postgres Database Connection Diagnostics for Administrators & Staff */}
+            {(isChefeAdmin(user) || isFuncionarioAdmin(user) || user?.role === "Professor" || user?.role === "Diretor" || user?.role === "Pedagogo(a)" || user?.role === "Funcionário") && (
+              <div className="bg-brand-secondary/30 dark:bg-brand-card-dark rounded-3xl p-5 border border-brand-primary/10 flex flex-col gap-4">
+                <div className="flex justify-between items-center pb-2 border-b border-brand-primary/10">
+                  <div className="flex items-center gap-2">
+                    <Database size={18} className="text-brand-accent dark:text-brand-primary" />
+                    <span className="text-sm font-semibold">Banco de Dados Supabase</span>
+                  </div>
+                  
+                  <div className="flex items-center gap-1.5">
+                    <span className={`w-2.5 h-2.5 rounded-full ${dbStatus?.active ? 'bg-emerald-500 animate-pulse' : 'bg-yellow-500 animate-pulse'}`} />
+                    <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400">
+                      {dbStatus?.active ? "Conectado" : "Padrão Escola"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2.5">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-400">Canal Ativo:</span>
+                    <span className="font-semibold text-right">{dbStatus ? dbStatus.provider : "Carregando..."}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-400">Host / Origem:</span>
+                    <span className="font-mono text-[10px] break-all text-right">{dbStatus ? dbStatus.host : "Identificando..."}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-400">Tecnologia:</span>
+                    <span className="text-[10px] text-right">Drizzle ORM + Supabase JS SDK</span>
+                  </div>
+                </div>
+
+                <div className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed bg-brand-primary/5 dark:bg-black/20 p-3 rounded-xl border border-brand-primary/5 mt-1">
+                  <strong>Configuração Flexível:</strong> O aplicativo está pré-compilado para carregar o Supabase. Adicione as chaves <code>DATABASE_URL</code>, <code>SUPABASE_URL</code> e <code>SUPABASE_ANON_KEY</code> nas variáveis de ambiente do AI Studio para sincronizar.
+                </div>
+              </div>
+            )}
+
+            {/* Logout button */}
+            <button
+              onClick={onLogout}
+              className="w-full h-12 bg-red-50 text-red-600 dark:bg-red-950/20 dark:text-red-400 font-semibold rounded-2xl flex items-center justify-center gap-2 hover:bg-red-100 dark:hover:bg-red-950/35 active:scale-98 transition-all mt-6 cursor-pointer"
+            >
+              <LogOut size={18} />
+              Sair da Conta Escolar
+            </button>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="edit-profile-form"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -15 }}
+            className="max-w-4xl mx-auto w-full p-6"
+          >
+            <form onSubmit={handleSaveProfile} className="flex flex-col gap-4">
+              {/* Profile Image Section */}
+              <div className="flex flex-col items-center gap-3 py-4 bg-brand-secondary/20 dark:bg-brand-card-dark/40 rounded-3xl border border-brand-primary/10 mb-2">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Foto de Perfil</span>
+                
+                <div className="relative group">
+                  <div className="w-24 h-24 rounded-full bg-yellow-400 border-4 border-white dark:border-brand-card-dark flex items-center justify-center font-display font-medium text-white text-3xl uppercase overflow-hidden shadow-md">
+                    {fotoPerfil ? (
+                      <img src={fotoPerfil} alt={nome || "Avatar"} className="w-full h-full object-cover" />
+                    ) : (
+                      (nome || email || "U").slice(0, 2)
+                    )}
+                  </div>
+                  
+                  <label 
+                    htmlFor="profile-image-upload" 
+                    className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-white"
+                  >
+                    <Camera size={22} />
+                  </label>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    id="profile-image-upload"
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                          if (event.target?.result) {
+                            setFotoPerfil(String(event.target.result));
+                          }
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => document.getElementById("profile-image-upload")?.click()}
+                    className="h-9 px-4 rounded-xl border border-brand-primary text-xs font-semibold hover:bg-brand-primary/10 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Upload size={14} />
+                    Carregar Foto
+                  </button>
+                  {fotoPerfil && (
+                    <button
+                      type="button"
+                      onClick={() => setFotoPerfil("")}
+                      className="h-9 px-4 rounded-xl bg-red-50 text-red-600 dark:bg-red-950/20 dark:text-red-400 border border-red-200/50 hover:bg-red-100 text-xs font-semibold cursor-pointer"
+                    >
+                      Remover
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  Formatos aceitos: JPG, PNG, WEBP.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase font-bold text-slate-400">Nome</span>
+                <input
+                  type="text"
+                  value={nome}
+                  onChange={(e) => setNome(e.target.value)}
+                  className="w-full h-11 px-3 bg-white dark:bg-brand-card-dark border border-brand-primary rounded-xl text-sm"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase font-bold text-slate-400">Alterar email</span>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full h-11 px-3 bg-white dark:bg-brand-card-dark border border-brand-primary rounded-xl text-sm"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase font-bold text-slate-400">CPF</span>
+                <input
+                  type="text"
+                  value={cpf}
+                  onChange={handleCpfChange}
+                  placeholder="111.111.111-11"
+                  className="w-full h-11 px-3 bg-white dark:bg-brand-card-dark border border-brand-primary rounded-xl text-sm"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase font-bold text-slate-400">Número de Celular</span>
+                <input
+                  type="text"
+                  value={phone}
+                  onChange={handlePhoneChange}
+                  placeholder="+55 41 9 9999-9999"
+                  className="w-full h-11 px-3 bg-white dark:bg-brand-card-dark border border-brand-primary rounded-xl text-sm"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase font-bold text-slate-400">Data de Nascimento</span>
+                <input
+                  type="date"
+                  value={ensureDbDateToInputFormat(birthdate)}
+                  onChange={(e) => setBirthdate(e.target.value)}
+                  className="w-full h-11 px-3 bg-white dark:bg-brand-card-dark border border-brand-primary rounded-xl text-sm"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase font-bold text-slate-400">Gênero</span>
+                <select
+                  value={gender}
+                  onChange={(e) => setGender(e.target.value)}
+                  className="w-full h-11 px-2 bg-white dark:bg-brand-card-dark border border-brand-primary rounded-xl text-sm"
+                >
+                  <option value="Masculino">Masculino</option>
+                  <option value="Feminino">Feminino</option>
+                  <option value="Outro">Outro</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase font-bold text-slate-400">Instituição</span>
+                <select
+                  value={institution}
+                  onChange={(e) => setInstitution(e.target.value)}
+                  className="w-full h-11 px-2 bg-white dark:bg-brand-card-dark border border-brand-primary rounded-xl text-xs"
+                >
+                  {SCHOOLS_LIST.map((school) => (
+                    <option key={school} value={school}>
+                      {school}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase font-bold text-slate-400">Cargo / Função</span>
+                <select
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                  className="w-full h-11 px-2 bg-white dark:bg-brand-card-dark border border-brand-primary rounded-xl text-sm"
+                >
+                  <option value="Aluno">Aluno(a)</option>
+                  <option value="Diretor">Diretor(a)</option>
+                  <option value="Pedagogo(a)">Pedagogo(a)</option>
+                  <option value="Professor">Professor(a)</option>
+                  <option value="Responsáveis">Responsáveis</option>
+                  <option value="Funcionário">Funcionário(a)</option>
+                  <option value="Cliente">Cliente</option>
+                </select>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full h-12 mt-4 bg-brand-primary text-white font-semibold rounded-2xl flex items-center justify-center gap-2 hover:opacity-95 active:scale-98 transition-all shadow-md cursor-pointer"
+              >
+                <Save size={18} />
+                Salvar Perfil
+              </button>
+            </form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
