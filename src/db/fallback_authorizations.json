@@ -1,0 +1,31 @@
+[
+  {
+    "id": "auth-1793968300391-88088d36",
+    "eventId": 1001,
+    "studentUserId": "student-lucas-123",
+    "studentName": "Lucas Oliveira",
+    "studentSchool": "Colégio Estadual Professor Júlio Szymanski",
+    "studentClass": "Turma Regular",
+    "guardianFullName": "Carla Maria Oliveira",
+    "guardianRelationship": "Mãe",
+    "guardianContact": "(41) 98888-2222",
+    "authorizationText": "Autorizo formalmente",
+    "consentVersion": "v1.0-2026",
+    "declarationAccepted": true,
+    "signedAt": "2026-11-06T12:31:40.392Z",
+    "signaturePath": "/uploads/signatures/auth-1793968300391-88088d36.png",
+    "signatureDataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAFUlEQVR42mNk+M9QzwAEjDAGYzUAAJpGB/2YQY1CAAAAAElFTkSuQmCC",
+    "verificationMethod": "digital_handwritten_signature",
+    "verificationStatus": "confirmed",
+    "status": "authorized",
+    "eventSnapshot": {
+      "title": "Feira de Ciências e Tecnologia",
+      "location": "Parque Cachoeira",
+      "date": "14 de Novembro de 2026",
+      "time": "09:00",
+      "schoolName": "Colégio Estadual Professor Júlio Szymanski"
+    },
+    "createdAt": "2026-11-06T12:31:40.392Z",
+    "updatedAt": "2026-11-06T12:31:40.392Z"
+  }
+]

@@ -1,0 +1,976 @@
+# REESTRUTURAÇÃO COMPLETA DO ELOESCOLA — REDESIGN, NOVAS FUNCIONALIDADES, BANCO DE DADOS, AUTENTICAÇÃO INSTITUCIONAL E AUDITORIA TOTAL
+
+Quero que você realize uma atualização profunda no meu projeto EloEscola. Esta solicitação envolve redesign de interface, criação de novas funcionalidades, atualização de informações, integração com o Supabase, implementação de autenticação específica para escolas e revisão completa de todo o funcionamento do aplicativo.
+
+**IMPORTANTE: NÃO CRIE APENAS UMA DEMONSTRAÇÃO VISUAL. IMPLEMENTE AS FUNCIONALIDADES REAIS, CONECTADAS AO BACKEND E AO BANCO DE DADOS.**
+
+Você tem autorização para corrigir, implementar e modificar o código necessário para cumprir as solicitações abaixo. Entretanto, não deve remover funcionalidades existentes que não foram solicitadas para remoção, nem alterar componentes que já funcionam corretamente sem necessidade.
+
+---
+
+# ETAPA 1 — ANÁLISE COMPLETA ANTES DE QUALQUER MODIFICAÇÃO
+
+Antes de começar:
+
+1. Analise todos os arquivos do projeto.
+2. Identifique a estrutura do frontend, backend, rotas, componentes, serviços, APIs e integrações.
+3. Analise completamente a conexão com o Supabase.
+4. Identifique todas as tabelas, relacionamentos, políticas RLS, triggers, funções e operações existentes.
+5. Analise o funcionamento atual do perfil dos usuários, especialmente o registro de participação em eventos.
+6. Identifique como funcionam atualmente as contas de administradores, usuários comuns e convidados.
+7. Analise a implementação da IA integrada e todas as suas dependências.
+8. Verifique o funcionamento atual do mapa, autenticação, notificações, calendário e eventos.
+
+**REGRA FUNDAMENTAL:** Não crie tabelas duplicadas, não substitua estruturas existentes sem necessidade e não faça alterações destrutivas no banco de dados.
+
+Primeiro compreenda o que já existe. Depois, adapte a implementação à estrutura atual.
+
+Se forem necessárias novas tabelas, crie somente as que forem justificadas e compatíveis com o projeto.
+
+Antes de executar alterações no banco, apresente um diagnóstico das mudanças necessárias e utilize migrações seguras, idempotentes e compatíveis com os dados existentes.
+
+# ETAPA 2 — REDESIGN DA PÁGINA INICIAL
+
+Utilize a imagem de referência enviada como orientação visual para reorganizar a página inicial do EloEscola.
+
+Quero uma interface moderna, profissional, organizada, intuitiva e visualmente agradável.
+
+Preserve a identidade visual do projeto, principalmente a proposta de cores verdes, fundos claros, cartões arredondados, bordas suaves e tipografia elegante.
+
+## 2.1. Remover elementos
+
+Retire completamente da página inicial:
+
+- Indicador SOS.
+- Indicador de temperatura e localização climática.
+- Botão "Acessar o portal".
+
+Não deixe espaços vazios onde esses componentes estavam.
+
+Reorganize os elementos para que a página tenha um equilíbrio visual melhor.
+
+## 2.2. Novo slogan
+
+No texto principal, onde atualmente aparece:
+
+"Educação conectada com segurança, transparência e acolhimento."
+
+Substitua por:
+
+**"eloEscola — um portal para oportunidades e informações para todos."**
+
+Esse deverá ser o texto de maior destaque da página.
+
+Logo abaixo, utilize exatamente:
+
+"Encontre informações sobre eventos escolares e eventos por Araucária e Curitiba."
+
+Mantenha uma boa hierarquia visual entre título, subtítulo e os demais elementos.
+
+## 2.3. Cartões de funcionalidades
+
+Mantenha os quatro cartões de informações existentes:
+
+- Mural & Avisos.
+- Calendário Letivo.
+- Mapa & Localização.
+- Central SOS & Apoio.
+
+Não elimine os cartões nem suas respectivas funcionalidades.
+
+Ao clicar em qualquer um deles, o usuário deverá entrar automaticamente no aplicativo utilizando o modo convidado e ser encaminhado diretamente para a funcionalidade correspondente.
+
+Exemplo:
+
+Ao clicar em "Mapa & Localização", o sistema deverá iniciar uma sessão de convidado e abrir diretamente a aba de mapas.
+
+Ao clicar em "Calendário Letivo", deverá iniciar a sessão de convidado e abrir o calendário.
+
+Não solicite CGM, senha ou cadastro para esse acesso.
+
+O cartão Central SOS & Apoio permanece como funcionalidade interna do aplicativo. A remoção do indicador SOS da página inicial não significa eliminar a funcionalidade de apoio.
+
+# ETAPA 3 — NOVA SEÇÃO DE ESCOLAS DE ARAUCÁRIA
+
+Essa será uma das principais funcionalidades da nova página inicial.
+
+Adicione uma seção visual chamada:
+
+**"Conheça nossas escolas"**
+
+Subtítulo:
+
+"Informações, novidades e acontecimentos das instituições de ensino de Araucária."
+
+Essa seção deverá apresentar seis escolas:
+
+1. Colégio Estadual Professor Júlio Szymanski.
+2. Colégio Estadual Professora Helena Wysocki.
+3. Colégio Estadual Professora Maria da Graça Siqueira Silva e Lima.
+4. Colégio Estadual do Campo Guajuvira.
+5. Colégio Estadual Professora Marilze da Luz Brand.
+6. Colégio Estadual Cecília Meireles.
+
+## 3.1. Apresentação das escolas
+
+Crie um carrossel horizontal de escolas.
+
+O carrossel deverá possuir:
+
+- Rolagem automática entre as escolas.
+- Setas laterais para avançar e retornar manualmente.
+- Transições suaves.
+- Indicadores de posição.
+- Adaptação para celulares, tablets e computadores.
+- Cartões organizados e de tamanho consistente.
+- Nome da escola visível.
+- Fotografia correspondente.
+- Pequena identificação da localização.
+
+A rolagem automática deverá funcionar continuamente, mas ser pausada quando o usuário interagir com os cartões ou controles, respeitando também as configurações de acessibilidade para redução de movimento.
+
+**ATENÇÃO ÀS FOTOGRAFIAS:**
+
+Vou enviar seis fotografias diretamente ao Google AI Studio, juntamente com este prompt.
+
+Essas imagens devem ser utilizadas EXCLUSIVAMENTE nesta seção de seleção das escolas.
+
+Associe corretamente cada fotografia à respectiva instituição.
+
+Não utilize essas fotografias em outros lugares do aplicativo, não transforme nenhuma delas em plano de fundo e não substitua as fotografias por imagens genéricas da internet.
+
+Caso alguma imagem não esteja disponível, mantenha um espaço reservado para ela, sem associar a fotografia de outra instituição.
+
+## 3.2. Redirecionamento ao clicar em uma escola
+
+Ao clicar em qualquer cartão, o usuário deverá ser encaminhado para uma página individual daquela escola.
+
+Não abra apenas uma janela pequena ou um pop-up.
+
+Crie uma página completa, com rota própria e conteúdo organizado.
+
+Exemplo de estrutura:
+
+/escolas/julio-szymanski
+
+/escolas/helena-wysocki
+
+/escolas/maria-da-graca
+
+/escolas/guajuvira
+
+/escolas/marilze-da-luz-brand
+
+/escolas/cecilia-meireles
+
+Cada página deverá apresentar:
+
+**A. Apresentação institucional**
+
+- Nome completo.
+- Fotografia da escola.
+- Endereço.
+- Bairro.
+- Município.
+- Rede de ensino.
+- Tipo de instituição.
+- Níveis e modalidades de ensino.
+- Telefone institucional, quando confirmado.
+- E-mail institucional, quando confirmado.
+- Informações sobre sua estrutura.
+- Informações históricas relevantes.
+- Particularidades e projetos educacionais.
+
+**B. Notícias recentes**
+
+Criar uma área de notícias da própria escola.
+
+Apresentar acontecimentos recentes, comunicados, projetos, iniciativas, atividades pedagógicas, conquistas e outras informações relevantes.
+
+**C. Eventos e comemorações**
+
+Criar uma seção específica para:
+
+- Comemorações escolares.
+- Festas e eventos.
+- Feiras e exposições.
+- Projetos estudantis.
+- Atividades culturais.
+- Atividades esportivas.
+- Datas comemorativas.
+- Reuniões e acontecimentos relevantes.
+
+**D. Atualizações**
+
+As informações devem ser atualizadas dinamicamente, utilizando as fontes disponíveis e os registros publicados pelas próprias instituições.
+
+Não invente acontecimentos, notícias, datas ou comemorações.
+
+Cada publicação deverá possuir título, descrição, data, escola relacionada, imagem quando disponível e fonte da informação.
+
+Quando não houver notícias recentes verificáveis, apresentar uma mensagem informando que não existem publicações recentes disponíveis.
+
+Não apresentar notícias antigas como se fossem atuais.
+
+## 3.3. Informações iniciais verificadas sobre as seis escolas
+
+Utilize as informações abaixo como ponto de partida para construir os perfis institucionais.
+
+Não se limite a esses dados. Pesquise mais informações em fontes oficiais, principalmente Secretaria de Estado da Educação do Paraná, Consulta Escolas, Núcleo Regional de Educação da Área Metropolitana Sul, Conselho Estadual de Educação e canais oficiais das instituições.
+
+### 1. Colégio Estadual Professor Júlio Szymanski
+
+Localização: Rua São Vicente de Paulo, 76, Centro, Araucária/PR.
+
+CEP: 83702-050.
+
+Telefone divulgado: (41) 3642-4089.
+
+E-mail institucional: aucjulio@seed.pr.gov.br.
+
+Rede estadual de ensino.
+
+Pesquise seu histórico, trajetória educacional, modalidades de ensino, projetos, atividades, iniciativas estudantis e eventuais cursos de formação profissional atualmente ofertados.
+
+Existe documentação histórica do Conselho Estadual de Educação referente à oferta de curso técnico em Secretariado integrado ao Ensino Médio. Verifique a situação atual antes de apresentar esse curso como disponível.
+
+### 2. Colégio Estadual Professora Helena Wysocki
+
+Localização: Rua Maranhão, 2673, bairro Costeira, Araucária/PR.
+
+CEP: 83709-810.
+
+Telefone: (41) 3607-2899.
+
+E-mail: auchelena@seed.pr.gov.br.
+
+Rede estadual de ensino.
+
+Pesquise sua história, estrutura, modalidades de ensino, projetos pedagógicos, iniciativas culturais, atividades esportivas, eventos e informações institucionais.
+
+### 3. Colégio Estadual Professora Maria da Graça Siqueira Silva e Lima
+
+Localização: Rua Bernardino Lemos, 326, bairro Costeira, Araucária/PR.
+
+CEP: 83709-250.
+
+Telefone divulgado em cadastro público: (41) 3642-1614.
+
+E-mail divulgado: aucmariagssilva@seed.pr.gov.br.
+
+Rede estadual de ensino.
+
+Documentos do Conselho Estadual de Educação identificam a instituição como Colégio Estadual Professora Maria da Graça Siqueira Silva e Lima — Ensino Fundamental e Médio.
+
+Pesquise sua história, trajetória, estrutura, modalidades, projetos educacionais, atividades, comemorações e acontecimentos recentes.
+
+### 4. Colégio Estadual do Campo Guajuvira
+
+Localização registrada na consulta estadual: Rua Pedro Czanovski, 511, Guajuvira, Araucária/PR.
+
+CEP: 83725-000.
+
+Zona rural.
+
+Telefone: (41) 3647-1211.
+
+E-mail institucional: aucguajuvira@seed.pr.gov.br.
+
+Rede estadual de ensino.
+
+A instituição compartilha estrutura física com a Escola Municipal do Campo Rosa Picheth, conforme registro da consulta estadual.
+
+Pesquise principalmente:
+
+- Histórico da educação na comunidade do Guajuvira.
+- Características de uma escola do campo.
+- Projetos ligados à realidade rural.
+- Atividades pedagógicas.
+- Projetos ambientais e culturais.
+- Eventual oferta de cursos técnicos.
+- Eventos da comunidade escolar.
+
+Não confunda o Colégio Estadual do Campo Guajuvira com a Escola Municipal Rosa Picheth. São instituições diferentes, mesmo compartilhando estrutura física.
+
+### 5. Colégio Estadual Professora Marilze da Luz Brand
+
+Localização: Rua Barigui, 120, bairro Iguaçu, Araucária/PR.
+
+CEP: 83701-530.
+
+Telefone: (41) 3643-8134.
+
+E-mail: aucmarilzeluzbrand@seed.pr.gov.br.
+
+Rede estadual de ensino.
+
+Pesquise sua história, estrutura, modalidades de ensino, atividades pedagógicas, projetos, eventos, comemorações e iniciativas da comunidade escolar.
+
+### 6. Colégio Estadual Cecília Meireles
+
+Localização: Rua Gumercindo Rosa Pimenta, 76, bairro Cachoeira, Araucária/PR.
+
+CEP: 83708-550.
+
+Rede estadual de ensino.
+
+Existe documentação pública da Câmara Municipal de Araucária referente à Associação de Pais, Mestres e Funcionários do Colégio Estadual Cecília Meireles.
+
+Pesquise seu histórico, estrutura, modalidades, projetos, atividades pedagógicas, iniciativas estudantis, eventos e informações institucionais.
+
+Confirme os dados de contato em fontes oficiais antes de publicá-los.
+
+## 3.4. Pesquisa e qualidade das informações
+
+Faça uma pesquisa aprofundada sobre cada instituição.
+
+Priorize:
+
+1. Secretaria de Estado da Educação do Paraná.
+2. Consulta Escolas do Paraná.
+3. Núcleo Regional de Educação da Área Metropolitana Sul.
+4. Conselho Estadual de Educação.
+5. Prefeitura e Câmara Municipal de Araucária.
+6. Canais oficiais das escolas.
+7. Publicações institucionais e notícias locais confiáveis.
+
+Não confunda escolas com nomes semelhantes.
+
+Não invente datas de fundação, quantidade de estudantes, infraestrutura, cursos, direção ou acontecimentos.
+
+Diferencie informações confirmadas, informações históricas e informações que precisam de atualização.
+
+Sempre registre a fonte e a data da última verificação.
+
+O objetivo é construir seis perfis institucionais completos, confiáveis e úteis para a população.
+
+# ETAPA 4 — AUTENTICAÇÃO EXCLUSIVA PARA AS ESCOLAS
+
+Precisamos criar um novo tipo de acesso ao EloEscola: **Conta Institucional de Escola**.
+
+Essa funcionalidade será independente do login dos usuários comuns.
+
+## 4.1. Tela de acesso institucional
+
+Crie uma opção de login específica para escolas.
+
+A tela deverá conter:
+
+- Identificação "Acesso institucional".
+- Campo de identificação da escola ou usuário institucional.
+- Campo de senha.
+- Botão entrar.
+- Opção de recuperação de senha, se implementada com segurança.
+- Mensagens claras de erro.
+- Identificação da escola associada à conta após a autenticação.
+
+Não solicite CGM.
+
+## 4.2. Criação de contas institucionais
+
+As contas das escolas não poderão ser criadas por cadastro público.
+
+Somente o **ADM Chefe** poderá criar, editar, bloquear, desbloquear e excluir contas institucionais pelo painel de administração.
+
+Cada uma das seis escolas poderá possuir uma conta própria.
+
+A conta deverá estar vinculada a uma única instituição.
+
+O ADM Chefe deverá conseguir:
+
+- Selecionar a escola.
+- Definir o identificador de acesso.
+- Criar a credencial inicial.
+- Ativar ou desativar a conta.
+- Redefinir a senha.
+- Consultar o histórico de acesso.
+- Alterar a instituição associada, com registro da operação.
+
+A senha nunca deverá ser armazenada em texto puro no banco de dados.
+
+Utilize Supabase Auth para autenticação e uma tabela separada para o cadastro e relacionamento das contas institucionais.
+
+A criação de usuários com privilégios administrativos deverá ocorrer exclusivamente em ambiente seguro no servidor, por meio de função apropriada, sem expor a Service Role Key no frontend.
+
+## 4.3. Permissões das contas escolares
+
+A conta institucional poderá:
+
+- Publicar notícias da própria escola.
+- Cadastrar eventos da própria escola.
+- Publicar comemorações.
+- Atualizar informações institucionais autorizadas.
+- Adicionar comunicados.
+- Gerenciar as próprias publicações.
+- Visualizar o histórico de suas publicações.
+
+Uma escola nunca poderá editar ou excluir informações pertencentes a outra instituição.
+
+A autorização deverá ser validada no backend e no Supabase por políticas RLS, não apenas escondendo botões na interface.
+
+## 4.4. Segurança
+
+Implemente:
+
+- Autenticação real.
+- Proteção de rotas.
+- Verificação de sessão.
+- Controle de permissões.
+- Bloqueio de contas desativadas.
+- Proteção contra acesso direto a rotas administrativas.
+- Validação de propriedade dos registros.
+- Proteção contra tentativas repetidas de autenticação.
+- Registro de operações importantes.
+
+Não permita que usuários comuns alterem seu próprio tipo de conta para se tornarem escolas ou administradores.
+
+# ETAPA 5 — ALTERAÇÃO DO SISTEMA DE LOGIN DOS USUÁRIOS
+
+Na tela de login, retire a exigência de CGM.
+
+Substitua por uma opção:
+
+**"Entrar como convidado"**
+
+Essa opção deverá estar disponível tanto na página de login quanto nos pontos de entrada previstos na página inicial.
+
+O acesso de convidado deverá permitir utilizar as funcionalidades públicas do aplicativo.
+
+Não exija CGM, senha ou preenchimento de cadastro.
+
+Entretanto, funcionalidades pessoais, como salvar participação em eventos no perfil, deverão solicitar autenticação quando necessário.
+
+Se já existir autenticação anônima do Supabase, avalie sua utilização. Caso contrário, implemente um mecanismo seguro de sessão de convidado compatível com o projeto.
+
+Não permita que convidados acessem áreas administrativas, contas escolares ou dados pessoais de outros usuários.
+
+Mantenha a possibilidade de entrar com uma conta normal.
+
+# ETAPA 6 — REMOVER A ABA DASHBOARD APÓS O LOGIN
+
+Atualmente existe uma aba chamada Dashboard na navegação interna.
+
+Quero que ela seja retirada da lista de abas após a autenticação.
+
+A página inicial pública continuará existindo.
+
+O que deverá desaparecer é somente a aba Dashboard da navegação interna do aplicativo.
+
+Reorganize a navegação para que as demais abas permaneçam acessíveis e funcionais.
+
+Não remova funcionalidades que atualmente estão dentro de outras áreas do Dashboard sem antes identificar se precisam ser realocadas.
+
+# ETAPA 7 — FUNCIONAMENTO UNIVERSAL DO BOTÃO VOLTAR
+
+Precisamos corrigir a navegação do aplicativo.
+
+Atualmente, o retorno depende de determinadas setas internas. Quero que o sistema também reconheça os comandos de voltar do próprio navegador.
+
+Implemente uma navegação consistente utilizando:
+
+- Histórico de navegação do navegador.
+- Gerenciamento correto de rotas.
+- Suporte ao evento popstate.
+- Botões internos de voltar.
+- Preservação da rota anterior.
+- Tratamento adequado de páginas abertas diretamente por URL.
+
+O comportamento deverá funcionar quando o usuário:
+
+1. Clicar na seta interna de voltar.
+2. Utilizar o botão voltar do navegador.
+3. Utilizar o comando de voltar do dispositivo móvel.
+4. Entrar diretamente em uma página por link.
+5. Navegar entre escolas, notícias, eventos e demais funcionalidades.
+
+O botão voltar deverá retornar à página anterior real, respeitando o histórico de navegação.
+
+Não permita loops, duplicação de páginas no histórico ou retornos incorretos.
+
+Se o usuário abrir uma rota diretamente, o sistema deverá fornecer uma alternativa segura de navegação, sem deixá-lo preso em uma página.
+
+# ETAPA 8 — MAPA REAL DE ARAUCÁRIA E CURITIBA
+
+Na aba Mapa, quero um mapa geográfico real que apresente Araucária e Curitiba.
+
+Não quero uma tela simulada, imagem estática ou mapa fictício.
+
+Não quero que apareça a mensagem "API", "API KEY REQUIRED", "API KEY MISSING" ou qualquer erro técnico no lugar do mapa.
+
+Implemente um mapa funcional utilizando uma solução de mapas real, preferencialmente OpenStreetMap com Leaflet ou MapLibre, caso seja compatível com a arquitetura atual.
+
+O mapa deverá:
+
+- Exibir ruas reais.
+- Exibir bairros.
+- Permitir zoom.
+- Permitir movimentação.
+- Apresentar Araucária e Curitiba.
+- Permitir visualizar pontos de interesse.
+- Exibir escolas cadastradas.
+- Exibir eventos georreferenciados.
+- Permitir abrir informações dos marcadores.
+- Possibilitar alternar ou navegar entre as duas cidades.
+
+Utilize fontes reais de mapas e respeite suas condições de uso e atribuição.
+
+Caso alguma integração externa seja necessária, faça a configuração corretamente e mantenha as credenciais protegidas.
+
+O usuário final nunca deverá visualizar mensagens técnicas relacionadas a chaves ou APIs.
+
+Não substitua o mapa por uma imagem ou por um desenho ilustrativo.
+
+# ETAPA 9 — EXCLUSÃO AUTOMÁTICA DOS EVENTOS APÓS DOIS DIAS
+
+Precisamos implementar uma regra automática de gerenciamento dos eventos.
+
+**Regra: dois dias completos após o término de um evento, ele deverá deixar de existir na tabela operacional de eventos e não poderá mais aparecer na aba de eventos.**
+
+Exemplo:
+
+Evento termina no dia 10.
+
+O evento permanece disponível durante os dois dias seguintes.
+
+Após completar 48 horas do encerramento, deverá ser retirado da tabela operacional.
+
+Entretanto, existe uma exigência muito importante:
+
+**O histórico de participação do evento deverá permanecer salvo no perfil dos usuários.**
+
+## 9.1. Analisar o perfil existente
+
+Antes de implementar qualquer coisa, analise profundamente como o perfil atualmente registra:
+
+- Eventos inscritos.
+- Eventos confirmados.
+- Participação.
+- Presença.
+- Ausência.
+- Histórico.
+- Contagem de atividades.
+
+Preserve a estrutura e a lógica existentes sempre que possível.
+
+Não substitua o sistema atual por uma implementação genérica.
+
+## 9.2. Preservação dos dados históricos
+
+Antes da exclusão de um evento, assegure que todas as informações necessárias para o histórico tenham sido preservadas.
+
+O histórico deverá continuar apresentando, conforme as funcionalidades atuais:
+
+- Nome do evento.
+- Descrição.
+- Data.
+- Horário.
+- Local.
+- Escola ou instituição responsável.
+- Situação da participação do usuário.
+- Registro de presença ou ausência, quando disponível.
+
+Se necessário, implemente uma tabela de histórico ou uma estrutura de arquivamento.
+
+A exclusão da tabela operacional não poderá apagar os registros de participação.
+
+Analise cuidadosamente os relacionamentos e as regras ON DELETE para evitar exclusões em cascata indesejadas.
+
+## 9.3. Automatização
+
+A exclusão deverá acontecer automaticamente, sem depender de um administrador entrar no sistema.
+
+Implemente uma rotina confiável no backend, utilizando agendamento compatível com Supabase, como Cron e uma função segura.
+
+A rotina deverá:
+
+1. Identificar eventos encerrados há pelo menos 48 horas.
+2. Preservar os registros históricos.
+3. Garantir a integridade dos relacionamentos.
+4. Remover o evento da tabela operacional.
+5. Registrar a operação para auditoria.
+6. Evitar processar o mesmo evento repetidamente.
+7. Tratar falhas e permitir nova execução segura.
+
+Utilize horários e fusos de maneira consistente.
+
+Não use apenas filtros visuais no frontend para simular a exclusão.
+
+# ETAPA 10 — ATUALIZAÇÃO DOS EVENTOS DO APLICATIVO
+
+Quero que os eventos sejam atualizados.
+
+Faça uma revisão da base atual e identifique eventos:
+
+- Antigos.
+- Duplicados.
+- Cancelados.
+- Sem informações suficientes.
+- Com datas incorretas.
+- Que já deveriam ter sido arquivados.
+
+Depois, atualize a base com novos eventos reais de Araucária e Curitiba.
+
+Pesquise oportunidades e acontecimentos em:
+
+- Escolas.
+- Instituições educacionais.
+- Universidades.
+- Órgãos públicos.
+- Centros culturais.
+- Eventos comunitários.
+- Atividades esportivas.
+- Feiras.
+- Cursos.
+- Oficinas.
+- Atividades gratuitas.
+- Eventos com inscrição aberta.
+
+Utilize fontes confiáveis e informações atuais.
+
+Cada evento deverá ter, quando disponíveis:
+
+- Nome.
+- Descrição.
+- Data.
+- Horário.
+- Local.
+- Endereço.
+- Município.
+- Categoria.
+- Instituição responsável.
+- Gratuito ou pago.
+- Necessidade de inscrição.
+- Link oficial.
+- Situação das inscrições.
+- Imagem.
+- Coordenadas geográficas, quando aplicável.
+
+Não crie eventos fictícios para preencher a tela.
+
+Não invente inscrições, valores ou datas.
+
+Caso uma informação não possa ser confirmada, não a apresente como confirmada.
+
+Verifique também se a atualização dos eventos está corretamente conectada ao calendário, ao perfil, ao mapa e às notificações.
+
+# ETAPA 11 — REMOVER A IDENTIDADE EXCLUSIVA DO COLÉGIO HELENA WYSOCKI
+
+O EloEscola deverá ser um portal independente e abrangente.
+
+Faça uma busca completa em todos os arquivos e telas do aplicativo.
+
+Retire qualquer texto, referência, mensagem, descrição ou identificação que apresente explicitamente ou implicitamente o aplicativo como sendo exclusivo ou pertencente ao Colégio Estadual Helena Wysocki.
+
+Isso inclui:
+
+- Textos da página inicial.
+- Rodapés.
+- Cabeçalhos.
+- Descrições.
+- Mensagens automáticas.
+- Tela de login.
+- Configurações.
+- Metadados.
+- Notificações.
+- Informações institucionais.
+- Mensagens da IA.
+- Documentação visível ao usuário.
+
+O nome Helena Wysocki deverá continuar existindo normalmente na página específica dessa escola.
+
+Não apague as informações próprias da instituição. Apenas elimine a associação exclusiva entre ela e a plataforma.
+
+A identidade deverá ser:
+
+**eloEscola — um portal para oportunidades e informações para todos.**
+
+# ETAPA 12 — RENOMEAR E AUDITAR A INTELIGÊNCIA ARTIFICIAL
+
+Altere o nome da IA integrada.
+
+Nome anterior: Assistente atual do aplicativo.
+
+Novo nome:
+
+**Assistente Elo**
+
+Atualize o nome em todas as telas, botões, mensagens, cabeçalhos e identificações.
+
+Entretanto, não quero somente uma mudança de nome.
+
+Faça uma auditoria completa da IA integrada.
+
+Verifique:
+
+- Conexão com a API.
+- Funcionamento das requisições.
+- Autenticação e configuração.
+- Variáveis de ambiente.
+- Tratamento de erros.
+- Respostas vazias.
+- Mensagens de carregamento.
+- Histórico de conversas, se existente.
+- Comportamento em dispositivos móveis.
+- Limites de requisições.
+- Tratamento de indisponibilidade.
+- Proteção das credenciais.
+- Compatibilidade com as funcionalidades atuais.
+
+Verifique se a Assistente Elo consegue responder adequadamente sobre o funcionamento do aplicativo e sobre suas informações.
+
+Não invente informações sobre escolas ou eventos.
+
+Quando não souber alguma informação, deverá informar isso claramente.
+
+Preserve as funcionalidades já existentes da IA, corrigindo somente o que estiver errado ou incompleto.
+
+# ETAPA 13 — ATUALIZAÇÕES NO SUPABASE
+
+Esta etapa exige atenção especial.
+
+Quero uma análise completa do banco de dados antes de qualquer modificação.
+
+Além das tabelas existentes, será necessário criar uma tabela separada para as contas institucionais das escolas, administradas pelo ADM Chefe.
+
+A estrutura deverá contemplar, de maneira compatível com o banco atual:
+
+**Tabela de instituições/escolas:**
+- Identificador.
+- Nome.
+- Slug.
+- Endereço.
+- Contatos institucionais.
+- Informações públicas.
+- Situação.
+- Datas de criação e atualização.
+
+**Tabela de contas institucionais:**
+- Identificador.
+- Identificador da escola relacionada.
+- Identificador do usuário no Supabase Auth.
+- Nome ou identificador de login.
+- Situação da conta.
+- Responsável pela criação.
+- Data de criação.
+- Último acesso, quando disponível.
+
+**Estrutura de histórico de eventos:**
+
+Somente se a estrutura existente não atender adequadamente à preservação dos dados, crie ou adapte uma estrutura para guardar os eventos encerrados e os registros de participação.
+
+Não duplique tabelas que já cumprem essa finalidade.
+
+## Segurança do banco
+
+Revise todas as políticas RLS.
+
+Garanta que:
+
+- Usuários comuns não tenham acesso a dados privados de outros usuários.
+- Convidados não consigam acessar dados administrativos.
+- Escolas só possam administrar suas próprias publicações.
+- O ADM Chefe tenha os privilégios administrativos previstos.
+- Funcionários administradores não possam criar contas de escolas.
+- Contas bloqueadas não consigam continuar acessando o sistema.
+- Nenhum usuário consiga alterar seu próprio nível de permissão.
+- Operações sensíveis sejam validadas no backend.
+
+Proteja também todas as operações SELECT, INSERT, UPDATE e DELETE.
+
+Não exponha chaves secretas no frontend.
+
+# ETAPA 14 — AUDITORIA COMPLETA DE TODO O APLICATIVO
+
+Após concluir as implementações, realize uma auditoria funcional completa.
+
+Não quero uma simples análise superficial do código.
+
+Quero que você teste o funcionamento real de cada funcionalidade.
+
+Verifique:
+
+**Autenticação**
+- Login comum.
+- Login de convidado.
+- Login institucional.
+- Login de administradores.
+- Logout.
+- Persistência de sessão.
+- Expiração de sessão.
+- Bloqueio de contas.
+
+**Navegação**
+- Todas as abas.
+- Botões.
+- Links.
+- Setas.
+- Histórico do navegador.
+- Rotas diretas.
+- Redirecionamentos.
+- Navegação entre páginas.
+
+**Escolas**
+- Carrossel automático.
+- Setas manuais.
+- Imagens.
+- Redirecionamento.
+- Dados institucionais.
+- Notícias.
+- Eventos.
+- Publicações das contas escolares.
+
+**Eventos**
+- Listagem.
+- Pesquisa.
+- Filtros.
+- Inscrições.
+- Cancelamentos.
+- Atualização.
+- Integração com o perfil.
+- Integração com calendário.
+- Integração com mapa.
+- Exclusão automática após 48 horas.
+- Preservação do histórico.
+
+**Perfil**
+- Dados do usuário.
+- Histórico de eventos.
+- Participação.
+- Ausência.
+- Atualização dos registros.
+- Persistência após sair e entrar novamente.
+
+**Mapa**
+- Carregamento.
+- Zoom.
+- Movimentação.
+- Araucária.
+- Curitiba.
+- Marcadores.
+- Localização dos eventos.
+- Informações dos pontos.
+
+**Assistente Elo**
+- Conexão.
+- Respostas.
+- Erros.
+- Histórico.
+- Segurança.
+- Carregamento.
+
+**Supabase**
+- Conexão.
+- Autenticação.
+- Consultas.
+- Inserções.
+- Atualizações.
+- Exclusões.
+- Relacionamentos.
+- RLS.
+- Integridade dos dados.
+
+**Responsividade**
+- Celulares.
+- Tablets.
+- Notebooks.
+- Monitores grandes.
+
+Teste também cliques repetidos, operações simultâneas, carregamentos lentos, falhas de rede, dados ausentes e tentativas de acesso não autorizado.
+
+Corrija os erros encontrados.
+
+Não considere uma funcionalidade concluída somente porque o botão aparece na tela. Ela precisa realmente funcionar.
+
+# ETAPA 15 — PRESERVAÇÃO E QUALIDADE DO PROJETO
+
+Durante todo o processo:
+
+1. Preserve funcionalidades existentes que não foram solicitadas para remoção.
+2. Não altere desnecessariamente a identidade visual.
+3. Não crie componentes duplicados.
+4. Não deixe botões sem funcionamento.
+5. Não utilize dados fictícios como se fossem reais.
+6. Não substitua integrações reais por simulações.
+7. Não exponha credenciais.
+8. Não faça alterações destrutivas no banco.
+9. Não deixe erros no console.
+10. Não deixe páginas quebradas ou rotas inexistentes.
+
+Todas as novas funcionalidades deverão ser integradas à arquitetura atual.
+
+Garanta que o projeto continue executando corretamente após as alterações.
+
+# ETAPA 16 — RELATÓRIO FINAL OBRIGATÓRIO
+
+Quando terminar, apresente um relatório contendo:
+
+**1. Redesign**
+- Elementos removidos.
+- Elementos adicionados.
+- Modificações visuais.
+
+**2. Escolas**
+- Seis páginas institucionais.
+- Dados encontrados.
+- Fontes consultadas.
+- Notícias e eventos adicionados.
+- Informações que não puderam ser confirmadas.
+
+**3. Autenticação**
+- Funcionamento do login comum.
+- Funcionamento do convidado.
+- Funcionamento das contas escolares.
+- Permissões administrativas.
+
+**4. Banco de dados**
+- Tabelas analisadas.
+- Tabelas criadas ou modificadas.
+- Relacionamentos.
+- Políticas RLS.
+- Rotina automática de exclusão.
+- Preservação dos históricos.
+
+**5. Funcionalidades**
+- Mapa.
+- Assistente Elo.
+- Navegação.
+- Eventos.
+- Perfil.
+- Demais funcionalidades revisadas.
+
+**6. Testes**
+- Testes realizados.
+- Resultados.
+- Erros encontrados.
+- Correções realizadas.
+- Pendências.
+
+**7. Segurança**
+- Verificação das permissões.
+- Proteção das credenciais.
+- Verificação de acesso indevido.
+- Integridade do banco.
+
+Não declare que algo foi testado se não executou o teste.
+
+Não declare que uma API está funcionando sem verificar sua resposta real.
+
+Não declare que uma rotina automática foi configurada sem confirmar seu agendamento e funcionamento.
+
+---
+
+# ORIENTAÇÃO FINAL
+
+Quero que você execute todas essas etapas no projeto existente, e não crie um projeto novo separado.
+
+Trabalhe de forma cuidadosa, mas completa.
+
+A prioridade é entregar um EloEscola funcional, profissional, moderno, seguro, responsivo e com todas as funcionalidades integradas.
+
+**Não pare depois de implementar o design. Não pare depois de criar as tabelas. Não pare depois de corrigir os primeiros erros.**
+
+Continue até concluir as funcionalidades, integrar o banco de dados e realizar a auditoria final.
+
+Se alguma etapa depender de uma configuração externa, acesso ou credencial que não esteja disponível, identifique exatamente o que falta. Não simule uma implementação concluída.
+
+**RESULTADO ESPERADO: UM ELOESCOLA COMPLETAMENTE ATUALIZADO, COM SEIS ESCOLAS INTEGRADAS, CONTAS INSTITUCIONAIS, MAPA REAL, EVENTOS ATUALIZADOS, PERFIL PRESERVADO, ASSISTENTE ELO E TODAS AS FUNCIONALIDADES TESTADAS.**

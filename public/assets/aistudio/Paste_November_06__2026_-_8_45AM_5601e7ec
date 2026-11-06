@@ -1,0 +1,634 @@
+# IMPLEMENTAÇÃO COMPLETA — SISTEMA DE PRESENÇA E AUTORIZAÇÃO DE RESPONSÁVEIS (SUPABASE)
+
+Atue como um engenheiro de software Full Stack Sênior, especialista em React, TypeScript, Supabase, PostgreSQL, Supabase Storage, autenticação, segurança de aplicações e interfaces responsivas.
+
+Preciso implementar um sistema completo de confirmação de presença em eventos escolares, com autorização escrita e assinatura digital manuscrita dos pais ou responsáveis legais quando o usuário estiver conectado com uma conta de aluno.
+
+**IMPORTANTE: Não quero apenas uma implementação visual. Quero um sistema funcional, persistente, seguro, integrado ao Supabase e testado de ponta a ponta.**
+
+A implementação deverá respeitar integralmente a arquitetura, a identidade visual e as funcionalidades atuais do projeto.
+
+---
+
+# ETAPA 1 — AUDITORIA COMPLETA ANTES DE QUALQUER ALTERAÇÃO
+
+Antes de escrever ou modificar qualquer código:
+
+1. Analise a arquitetura atual do projeto.
+2. Identifique a tecnologia utilizada no frontend e backend.
+3. Analise a integração existente com o Supabase.
+4. Identifique como o login funciona.
+5. Identifique como o sistema determina se um usuário é aluno, professor, administrador ou outro perfil.
+6. Identifique a tabela de usuários e a tabela que armazena os eventos.
+7. Verifique os relacionamentos, os tipos das chaves primárias e estrangeiras e as políticas RLS existentes.
+8. Identifique como a confirmação de presença funciona atualmente.
+9. Verifique se já existe alguma tabela de inscrições, participantes ou presenças.
+10. Analise como o aplicativo carrega os eventos e atualiza os estados dos botões.
+
+**Não presuma nomes de tabelas ou colunas. Consulte a estrutura REAL do banco de dados antes de criar qualquer relacionamento.**
+
+Caso já exista uma tabela que desempenhe alguma dessas funções, avalie seu reaproveitamento antes de criar outra.
+
+Não duplique estruturas desnecessariamente.
+
+Não remova, exclua ou substitua dados existentes.
+
+Não faça alterações destrutivas no banco.
+
+# ETAPA 2 — CORREÇÃO DO ERRO DE API IDENTIFICADO
+
+No dashboard atual aparece o seguinte erro:
+
+`Unexpected token '<', "<html>..." is not valid JSON`
+
+Resolva a causa real desse problema antes de considerar a implementação concluída.
+
+Investigue:
+
+- Qual requisição está retornando HTML em vez de JSON.
+- Qual URL ou endpoint está sendo chamado.
+- Se existe algum endpoint inexistente.
+- Se alguma rota está retornando uma página HTML de erro.
+- Se o endereço do backend está configurado corretamente.
+- Se as variáveis de ambiente do Supabase estão corretas.
+- Se existem problemas de CORS, autenticação ou configuração do servidor.
+- Se alguma chamada está tentando interpretar uma resposta de erro como JSON.
+
+Implemente tratamento robusto de respostas:
+
+1. Verifique o status HTTP antes de processar os dados.
+2. Verifique o cabeçalho Content-Type.
+3. Não execute JSON.parse ou response.json() indiscriminadamente sobre respostas HTML.
+4. Faça o tratamento adequado de respostas vazias, JSON inválido e erros HTTP.
+5. Registre detalhes técnicos no console de desenvolvimento, sem expor dados sensíveis ao usuário.
+6. Mostre mensagens compreensíveis na interface.
+
+Quando a resposta for de erro, mostre uma mensagem como:
+
+"Não foi possível carregar as informações. Verifique sua conexão e tente novamente."
+
+**Não esconda o erro simplesmente removendo o toast. Corrija a origem da resposta incorreta.**
+
+Verifique se a falha está relacionada à API própria do projeto ou às chamadas do Supabase. Não altere configurações do Supabase sem necessidade.
+
+# ETAPA 3 — CRIAÇÃO DA ESTRUTURA NO SUPABASE
+
+Preciso de uma estrutura persistente para armazenar todas as autorizações de participação nos eventos.
+
+Após analisar as tabelas existentes, crie, caso ainda não exista uma estrutura equivalente, uma tabela chamada:
+
+`event_attendance_authorizations`
+
+Ela deverá armazenar uma autorização individual por aluno e evento.
+
+### Estrutura desejada
+
+A tabela deverá conter os seguintes dados, adaptados aos tipos e relacionamentos reais do banco:
+
+**Identificação:**
+- id: UUID, chave primária.
+- event_id: referência ao evento correspondente.
+- student_user_id: referência ao usuário aluno autenticado.
+- created_at: data e hora da criação.
+
+**Informações do responsável:**
+- guardian_full_name: nome completo do responsável.
+- guardian_relationship: parentesco ou relação com o aluno, como pai, mãe ou responsável legal.
+- guardian_contact: contato do responsável, somente se necessário para a finalidade ou para eventual verificação.
+
+**Informações da autorização:**
+- authorization_text: texto integral da autorização apresentada e aceita.
+- consent_version: versão do modelo de autorização.
+- declaration_accepted: confirmação explícita da declaração.
+- signed_at: data e horário registrados pelo servidor.
+- signature_path: caminho da imagem da assinatura armazenada no Supabase Storage.
+- verification_method: método utilizado para registrar a autorização.
+- verification_status: situação da verificação da identidade do responsável.
+- status: situação da autorização.
+
+**Dados complementares:**
+- event_snapshot: cópia dos dados essenciais do evento no momento da autorização, como nome, data, horário e local.
+- updated_at: data de atualização, quando aplicável.
+- revoked_at: data de eventual revogação, quando aplicável.
+
+Os estados deverão ser organizados de maneira consistente, por exemplo:
+
+- `pending_signature`: aguardando assinatura.
+- `awaiting_verification`: aguardando verificação adicional, quando configurada.
+- `authorized`: autorização registrada.
+- `denied`: autorização recusada.
+- `revoked`: autorização revogada.
+
+A escolha dos estados deve ser compatível com o fluxo efetivamente implementado.
+
+### Regras importantes do banco
+
+- Cada autorização precisa estar vinculada ao evento correto.
+- Cada autorização precisa estar vinculada ao aluno correto.
+- Impedir registros duplicados ou confirmações repetidas para o mesmo aluno e evento.
+- A autorização não pode ser transferida para outro aluno.
+- O horário da assinatura deve ser gerado pelo servidor, e não aceito livremente do navegador.
+- Não permitir que o aluno altere manualmente o status para autorizado.
+- Não permitir que uma autorização seja apagada pelo próprio aluno.
+- Preservar o registro anterior em eventuais correções ou novas autorizações, sem sobrescrever silenciosamente o histórico.
+- Criar índices para melhorar as consultas por evento, aluno e status.
+
+Entregue uma migration SQL organizada e idempotente, adaptada à estrutura encontrada.
+
+Não crie chaves estrangeiras presumindo que a tabela de eventos se chama `events`. Confirme os nomes e os tipos reais antes de executar o SQL.
+
+# ETAPA 4 — SUPABASE STORAGE PARA AS ASSINATURAS
+
+Crie ou configure um bucket chamado:
+
+`event-authorizations`
+
+Requisitos:
+
+1. O bucket deverá ser PRIVADO.
+2. Não poderá ser acessado publicamente.
+3. A assinatura deverá ser armazenada como imagem PNG.
+4. Não armazenar a imagem inteira em Base64 na tabela.
+5. Restringir os formatos e o tamanho dos arquivos.
+6. Utilizar nomes únicos para evitar sobrescritas.
+7. Organizar os caminhos dos arquivos por usuário e evento, utilizando UUIDs.
+
+Exemplo conceitual:
+
+`student_user_id/event_id/signature_uuid.png`
+
+### Segurança dos arquivos
+
+Configure as políticas de acesso:
+
+- O aluno poderá enviar apenas arquivos vinculados à própria conta.
+- O aluno não poderá consultar assinaturas de outros estudantes.
+- O aluno não poderá acessar assinaturas de outros responsáveis.
+- Somente funcionários e administradores expressamente autorizados poderão visualizar as assinaturas.
+- A visualização administrativa deverá utilizar acesso controlado, preferencialmente por URLs assinadas com validade limitada.
+- Nenhuma assinatura deverá ser disponibilizada por link público.
+
+Se o upload ocorrer antes da gravação da autorização, implemente limpeza de arquivos órfãos quando a operação no banco falhar.
+
+Não utilize a chave `service_role` no frontend.
+
+# ETAPA 5 — NOVO FLUXO DO BOTÃO DE CONFIRMAÇÃO
+
+Esta é uma das partes mais importantes.
+
+Atualmente, os eventos apresentam um botão semelhante a:
+
+"Confirmar presença" / "Presença Confirmada".
+
+A partir de agora, o comportamento deverá depender do perfil autenticado.
+
+### CENÁRIO A — USUÁRIO LOGADO COMO ALUNO
+
+Quando um aluno clicar em:
+
+**"Confirmar presença"**
+
+Não confirme imediatamente a presença.
+
+Abra uma janela modal ou uma página de autorização dentro do próprio aplicativo.
+
+A interface deverá apresentar o título:
+
+**Autorização dos pais ou responsável legal**
+
+Subtítulo:
+
+"Para confirmar sua participação neste evento, é necessário que seu pai, sua mãe ou responsável legal leia e autorize sua presença."
+
+Apresente um aviso destacado:
+
+"Entregue o aparelho ao seu responsável legal para que ele leia as informações, preencha os dados e realize a assinatura."
+
+### CENÁRIO B — USUÁRIO NÃO LOGADO COMO ALUNO
+
+Para professores, funcionários e administradores, preserve o fluxo atual de confirmação de presença, sem exigir autorização parental.
+
+Não modifique outras regras de participação que já existam no projeto.
+
+A identificação do perfil deve utilizar o sistema de permissões real do banco, nunca informações de perfil manipuláveis pelo frontend.
+
+# ETAPA 6 — FORMULÁRIO DE AUTORIZAÇÃO DOS RESPONSÁVEIS
+
+A janela de autorização deverá conter:
+
+**1. Identificação do aluno**
+
+Preencher automaticamente com os dados da conta autenticada:
+
+- Nome do aluno.
+- Escola.
+- Turma, caso essa informação já exista no banco.
+
+Essas informações deverão ser somente para visualização.
+
+**2. Identificação do evento**
+
+Carregar diretamente do Supabase:
+
+- Nome do evento.
+- Escola responsável.
+- Data.
+- Horário.
+- Local.
+- Informações relevantes disponibilizadas na página do evento.
+
+Não utilizar informações fictícias ou valores fixos.
+
+**3. Dados do responsável**
+
+Criar os seguintes campos:
+
+- Nome completo do pai, mãe ou responsável legal.
+- Relação com o estudante.
+
+O contato do responsável deverá ser solicitado somente quando necessário para algum mecanismo de verificação já suportado pelo projeto. Não solicitar CPF, documentos pessoais ou informações excessivas sem necessidade justificada.
+
+Todos os campos obrigatórios deverão possuir validação.
+
+# ETAPA 7 — TEXTO DA AUTORIZAÇÃO
+
+Apresente um texto formal, claro e específico para cada evento.
+
+Utilize o seguinte modelo dinâmico:
+
+"Eu, [NOME COMPLETO DO RESPONSÁVEL], na condição de [PARENTESCO OU RELAÇÃO], declaro ser responsável legal pelo(a) estudante [NOME DO ALUNO] e AUTORIZO sua participação no evento [NOME DO EVENTO], promovido por [NOME DA ESCOLA], que acontecerá no dia [DATA], às [HORÁRIO], no local [LOCAL].
+
+Declaro que tive acesso às informações disponibilizadas sobre o evento, que estou ciente das condições de participação apresentadas e que autorizo expressamente a participação do estudante nesta atividade específica.
+
+Estou ciente de que esta autorização se refere exclusivamente à participação neste evento e não representa autorização automática para uso de imagem, transporte ou outras finalidades não descritas neste documento."
+
+Abaixo do texto, apresentar:
+
+"Declaro que as informações fornecidas são verdadeiras, que sou pai, mãe ou responsável legal pelo estudante identificado acima e que autorizo sua participação no evento."
+
+Adicionar um checkbox desmarcado inicialmente:
+
+[ ] Li, compreendi e concordo com os termos desta autorização.
+
+O checkbox deverá ser obrigatório.
+
+A redação poderá ser ajustada às regras da instituição, mas não deverá incorporar autorizações adicionais que não tenham sido solicitadas.
+
+# ETAPA 8 — CAMPO DE ASSINATURA MANUSCRITA NA TELA
+
+Esta funcionalidade é indispensável.
+
+Crie uma área de assinatura que funcione diretamente na tela do dispositivo, sem exigir que o usuário baixe um aplicativo ou envie uma foto da assinatura.
+
+O responsável deverá conseguir assinar utilizando:
+
+- Dedo na tela de um celular.
+- Dedo na tela de um tablet.
+- Caneta digital ou stylus.
+- Mouse de um computador.
+- Trackpad de notebook.
+
+### Interface
+
+Título:
+
+**Assinatura do responsável legal**
+
+Instrução:
+
+"Assine no espaço abaixo, utilizando o dedo, uma caneta digital ou o mouse."
+
+Disponibilize uma área branca, limpa e com bordas suaves para a assinatura.
+
+A área deverá conter:
+
+- Espaço amplo para desenhar.
+- Identificação visual de que se trata do campo de assinatura.
+- Botão "Limpar assinatura".
+- Botão "Refazer", caso seja implementado histórico de traços.
+- Indicador visual de que existe uma assinatura registrada na área.
+
+### Implementação técnica
+
+Utilize HTML Canvas ou uma biblioteca já existente no projeto, caso seja adequada.
+
+Dê preferência à API Pointer Events, para utilizar o mesmo sistema de captura para mouse, toque e caneta digital.
+
+Implemente:
+
+- `pointerdown`
+- `pointermove`
+- `pointerup`
+- `pointercancel`
+- `setPointerCapture`, quando apropriado.
+
+Considere também:
+- Correção das coordenadas conforme o tamanho real do canvas.
+- Ajuste de resolução utilizando devicePixelRatio.
+- Redimensionamento responsivo.
+- Controle de traços interrompidos.
+- Prevenção de rolagem acidental somente enquanto o usuário desenha dentro da área de assinatura.
+- Compatibilidade com orientação vertical e horizontal.
+- Prevenção de assinaturas vazias.
+- Verificação de que realmente existem traços válidos antes de permitir o envio.
+
+O desenho não poderá ser apagado automaticamente ao redimensionar a tela.
+
+O botão de limpar deverá apagar a assinatura e permitir uma nova tentativa.
+
+A página inteira não deverá ficar bloqueada para rolagem apenas porque existe um canvas.
+
+A implementação deverá funcionar em diferentes navegadores e tamanhos de tela.
+
+Inclua uma alternativa acessível para pessoas que não conseguem utilizar o campo de desenho, seguindo uma modalidade de autorização formal aprovada pela instituição.
+
+# ETAPA 9 — FINALIZAÇÃO E ENVIO DA AUTORIZAÇÃO
+
+Abaixo do campo de assinatura, adicionar:
+
+**"Confirmar autorização e registrar presença"**
+
+Quando o responsável clicar:
+
+1. Verificar o preenchimento de todos os campos obrigatórios.
+2. Verificar a declaração de consentimento.
+3. Verificar se existe uma assinatura válida.
+4. Verificar se o evento ainda permite inscrições.
+5. Verificar se o aluno já possui autorização registrada.
+6. Bloquear cliques repetidos durante o processamento.
+7. Gerar a imagem PNG da assinatura.
+8. Fazer o upload para o bucket privado do Supabase.
+9. Registrar os dados da autorização na tabela.
+10. Associar o registro ao usuário e ao evento corretos.
+11. Gerar o horário da autorização no servidor.
+12. Verificar se o banco confirmou o salvamento.
+
+O processo deverá ser seguro e evitar inconsistências entre o arquivo enviado e o registro gravado no banco.
+
+Caso qualquer etapa falhe:
+- Não marcar a presença como confirmada.
+- Exibir uma mensagem de erro compreensível.
+- Preservar temporariamente os dados preenchidos e a assinatura para evitar que o responsável tenha de começar novamente.
+- Tentar remover arquivos enviados sem registro correspondente.
+- Permitir nova tentativa sem duplicar a autorização.
+
+**Somente depois da confirmação efetiva do salvamento no Supabase o estado da presença poderá ser atualizado na interface.**
+
+Mensagem de sucesso:
+
+"Autorização registrada com sucesso! A presença do estudante foi confirmada."
+
+O botão do evento deverá passar para um estado visual de conclusão, coerente com o design atual.
+
+# ETAPA 10 — SEGURANÇA E POLÍTICAS RLS
+
+Implemente segurança real no PostgreSQL.
+
+Habilite RLS nas tabelas expostas e crie políticas específicas para cada operação.
+
+### Alunos
+
+Um aluno poderá:
+- Consultar as próprias autorizações.
+- Registrar uma autorização vinculada à sua própria conta.
+- Consultar a situação da própria participação.
+
+Um aluno NÃO poderá:
+- Registrar autorização para outro aluno.
+- Alterar o status de autorização diretamente.
+- Consultar dados de outros responsáveis.
+- Acessar assinaturas de outros alunos.
+- Alterar o horário da assinatura.
+- Apagar registros de autorização.
+- Transformar uma autorização recusada ou inexistente em autorizada alterando dados no frontend.
+
+### Funcionários e administradores
+
+Utilize o sistema de permissões existente para liberar consultas administrativas apenas aos perfis autorizados.
+
+Respeite a hierarquia atual de usuários e não conceda acesso administrativo apenas porque um usuário enviou uma requisição pelo frontend.
+
+As políticas deverão ser verificadas no próprio banco, independentemente da interface.
+
+Utilize funções SQL ou Edge Functions quando forem necessárias para operações privilegiadas. Se utilizar SECURITY DEFINER, configure cuidadosamente search_path, permissões e verificações de identidade.
+
+Não confie em informações de role armazenadas em campos editáveis pelo próprio usuário.
+
+Não exponha segredos, tokens administrativos ou chaves privadas no código frontend.
+
+# ETAPA 11 — PAINEL ADMINISTRATIVO DE AUTORIZAÇÕES
+
+Integre a consulta de autorizações ao sistema administrativo que já existe.
+
+O administrador ou funcionário autorizado deverá conseguir visualizar as autorizações de cada evento.
+
+Criar uma área organizada que permita:
+
+- Consultar os alunos inscritos.
+- Identificar quais alunos já possuem autorização.
+- Identificar autorizações aguardando alguma verificação adicional.
+- Identificar autorizações recusadas ou revogadas.
+- Visualizar o nome do responsável.
+- Visualizar o parentesco declarado.
+- Visualizar a data e o horário de registro.
+- Abrir a assinatura correspondente de maneira privada e controlada.
+- Consultar as informações do evento às quais a autorização se refere.
+
+Disponibilize filtros por:
+- Evento.
+- Escola.
+- Turma, quando disponível.
+- Situação da autorização.
+
+Não disponibilize assinaturas para outros alunos ou usuários sem autorização administrativa.
+
+Diferencie claramente uma assinatura coletada de uma identidade efetivamente verificada. Não apresente uma assinatura feita no dispositivo do aluno como se a plataforma tivesse comprovado automaticamente a identidade do responsável.
+
+# ETAPA 12 — EXPERIÊNCIA VISUAL E RESPONSIVIDADE
+
+Toda a funcionalidade deverá seguir o design atual do projeto.
+
+Não quero uma interface que pareça pertencer a outro aplicativo.
+
+Preserve:
+- Paleta de cores atual.
+- Tipografia.
+- Bordas.
+- Sombras.
+- Botões.
+- Espaçamentos.
+- Identidade visual.
+- Organização dos cards de eventos.
+
+A janela de autorização deverá ser moderna, intuitiva e profissional.
+
+Em computadores:
+- Modal centralizado.
+- Área de assinatura ampla.
+- Boa distribuição dos campos.
+
+Em tablets:
+- Layout adaptado.
+- Campo de assinatura confortável para caneta digital ou toque.
+
+Em celulares:
+- Layout vertical.
+- Botões grandes.
+- Campos com largura adequada.
+- Assinatura ocupando boa parte da largura disponível.
+- Botões acessíveis sem necessidade de zoom.
+- Rolagem adequada.
+- Nenhum elemento cortado ou sobreposto.
+
+Considere também acessibilidade, contraste, navegação por teclado, instruções compreensíveis e identificação dos campos para leitores de tela.
+
+# ETAPA 13 — LGPD, PRIVACIDADE E REGISTRO
+
+Como o sistema envolve dados de estudantes e assinaturas de responsáveis, aplique os princípios de finalidade, necessidade, transparência, segurança e melhor interesse da criança e do adolescente.
+
+Não colete informações desnecessárias.
+
+Disponibilize uma informação clara sobre:
+- Quais dados são registrados.
+- Para que são utilizados.
+- Quem tem acesso.
+- Por quanto tempo são mantidos, conforme a política de retenção definida pela instituição.
+- Como solicitar correção ou atendimento relacionado aos dados.
+
+Não utilize as assinaturas para outras finalidades.
+
+Não compartilhe essas informações com terceiros.
+
+Não utilize a assinatura desenhada como prova automática de identidade.
+
+Caso exista contato previamente verificado do responsável no sistema, avalie a possibilidade de uma confirmação complementar por código de uso único. Não invente integrações de e-mail ou SMS e não torne essa função obrigatória sem uma infraestrutura existente e devidamente configurada.
+
+O sistema deverá distinguir:
+- Assinatura registrada no dispositivo.
+- Identidade do responsável verificada.
+- Autorização efetivamente aceita e registrada.
+
+# ETAPA 14 — TRATAMENTO DE SITUAÇÕES ESPECIAIS
+
+Teste e trate os seguintes cenários:
+
+1. Aluno clica em confirmar presença e fecha a janela sem assinar.
+2. Aluno tenta enviar autorização sem preencher o nome do responsável.
+3. Responsável esquece de marcar o checkbox.
+4. Responsável tenta enviar uma assinatura vazia.
+5. Aluno já possui autorização para o evento.
+6. Evento é cancelado após a autorização.
+7. Evento é alterado depois da autorização.
+8. Aluno tenta confirmar presença em um evento encerrado.
+9. O banco está temporariamente indisponível.
+10. O upload da assinatura falha.
+11. O banco falha depois que o upload foi concluído.
+12. O usuário perde a conexão durante o envio.
+13. Dois cliques consecutivos são realizados no botão de confirmação.
+14. Usuário tenta acessar diretamente uma autorização de outra pessoa.
+15. Usuário não possui sessão autenticada.
+16. Funcionário sem permissão tenta visualizar assinaturas.
+17. A sessão expira durante o preenchimento.
+18. O usuário atualiza a página após concluir a autorização.
+
+Não permita que uma falha momentânea transforme uma presença pendente em presença confirmada.
+
+Se os dados do evento forem alterados depois da assinatura, apresente a autorização com o retrato das informações que o responsável efetivamente aceitou. Caso a alteração seja material e exija nova autorização segundo as regras da escola, disponibilize um novo procedimento sem apagar o anterior.
+
+# ETAPA 15 — TESTES REAIS E VALIDAÇÃO FINAL
+
+Não considere o trabalho concluído apenas porque a página abriu.
+
+Execute uma bateria de testes funcionais.
+
+**Teste 1 — Aluno**
+
+Entrar com uma conta de aluno, acessar um evento e clicar em confirmar presença.
+
+Verificar se a autorização aparece corretamente.
+
+**Teste 2 — Assinatura**
+
+Testar a assinatura usando:
+- Mouse.
+- Toque em celular.
+- Toque em tablet.
+- Caneta digital, quando disponível.
+
+**Teste 3 — Banco de dados**
+
+Verificar se todos os dados foram gravados corretamente no Supabase.
+
+**Teste 4 — Storage**
+
+Verificar se a imagem está armazenada no bucket privado e se não existe acesso público.
+
+**Teste 5 — Permissões**
+
+Testar se o aluno não consegue visualizar ou alterar informações de outros estudantes.
+
+**Teste 6 — Administrador**
+
+Verificar se os funcionários e administradores autorizados conseguem consultar as autorizações correspondentes.
+
+**Teste 7 — Repetição**
+
+Verificar se cliques repetidos não geram inscrições duplicadas ou registros inconsistentes.
+
+**Teste 8 — Responsividade**
+
+Testar em diferentes resoluções de computador, celular e tablet.
+
+**Teste 9 — Persistência**
+
+Atualizar a página, sair da conta e entrar novamente. A autorização deverá continuar registrada.
+
+**Teste 10 — API**
+
+Verificar se o erro `Unexpected token '<'` foi realmente solucionado e se as requisições retornam respostas adequadas.
+
+# RESTRIÇÕES ABSOLUTAS
+
+- Não redesenhar o dashboard.
+- Não alterar a paleta de cores.
+- Não remover funcionalidades existentes.
+- Não modificar o sistema de login.
+- Não modificar os níveis de acesso existentes.
+- Não alterar a estrutura atual de usuários sem necessidade justificada.
+- Não apagar registros do Supabase.
+- Não criar tabelas redundantes.
+- Não utilizar dados fictícios para simular autorizações.
+- Não utilizar armazenamento local como substituto do banco de dados.
+- Não armazenar assinaturas em localStorage.
+- Não armazenar arquivos de assinatura em buckets públicos.
+- Não expor chaves administrativas.
+- Não marcar presença como confirmada antes da persistência dos dados.
+- Não considerar um teste bem-sucedido apenas porque não apareceu uma mensagem de erro.
+- Não substituir funcionalidades existentes por versões simplificadas.
+
+Todas as alterações deverão ser incrementais, compatíveis com o projeto atual e acompanhadas de validação.
+
+# ENTREGA FINAL
+
+Ao concluir, apresente um relatório técnico contendo:
+
+1. Diagnóstico do erro de API identificado no print e sua causa real.
+2. Estrutura da tabela criada no Supabase.
+3. Relacionamentos com as tabelas já existentes.
+4. Migration SQL executada ou disponibilizada.
+5. Políticas RLS implementadas.
+6. Configuração do Supabase Storage.
+7. Funcionamento do campo de assinatura em diferentes dispositivos.
+8. Funcionamento do fluxo de autorização.
+9. Funcionamento do painel administrativo.
+10. Testes executados e seus resultados.
+11. Problemas encontrados que não puderam ser corrigidos.
+12. Configurações externas que ainda dependem de alguma ação manual.
+
+**CRITÉRIO PRINCIPAL DE ACEITAÇÃO:**
+
+Um aluno deve conseguir acessar um evento, solicitar a confirmação de presença, entregar o dispositivo ao responsável legal, permitir que ele leia a autorização, preencha seus dados, assine na tela com o dedo ou mouse e finalize o procedimento.
+
+Depois disso, os dados devem ser efetivamente salvos no Supabase, a assinatura deve permanecer privada no Storage, a autorização deverá ser consultável pelos usuários administrativos autorizados e a confirmação deverá continuar existindo mesmo após sair da conta, atualizar o navegador ou acessar o aplicativo em outro dispositivo.
+
+Implemente a solução completa, sem deixar funcionalidades apenas visuais ou simuladas.

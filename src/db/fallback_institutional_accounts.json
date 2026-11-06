@@ -1,0 +1,70 @@
+[
+  {
+    "id": 1,
+    "escolaId": 1,
+    "escolaNome": "Colégio Estadual Professor Júlio Szymanski",
+    "identificador": "escola.szymanski",
+    "email": "aucjulio@seed.pr.gov.br",
+    "password": "senhaInstitucional123",
+    "status": "ativo",
+    "criadoPor": "ADM Chefe",
+    "createdAt": "2026-11-06T11:28:56.650Z",
+    "lastLogin": "2026-11-06T11:28:56.650Z"
+  },
+  {
+    "id": 2,
+    "escolaId": 2,
+    "escolaNome": "Colégio Estadual Professora Helena Wysocki",
+    "identificador": "escola.wysocki",
+    "email": "auchelena@seed.pr.gov.br",
+    "password": "senhaInstitucional123",
+    "status": "ativo",
+    "criadoPor": "ADM Chefe",
+    "createdAt": "2026-11-06T11:28:56.650Z",
+    "lastLogin": "2026-11-06T11:28:56.650Z"
+  },
+  {
+    "id": 3,
+    "escolaId": 3,
+    "escolaNome": "Colégio Estadual Professora Maria da Graça Siqueira Silva e Lima",
+    "identificador": "escola.mariadagraca",
+    "email": "aucmariagssilva@seed.pr.gov.br",
+    "password": "senhaInstitucional123",
+    "status": "ativo",
+    "criadoPor": "ADM Chefe",
+    "createdAt": "2026-11-06T11:28:56.650Z"
+  },
+  {
+    "id": 4,
+    "escolaId": 4,
+    "escolaNome": "Colégio Estadual do Campo Guajuvira",
+    "identificador": "escola.guajuvira",
+    "email": "aucguajuvira@seed.pr.gov.br",
+    "password": "senhaInstitucional123",
+    "status": "ativo",
+    "criadoPor": "ADM Chefe",
+    "createdAt": "2026-11-06T11:28:56.650Z"
+  },
+  {
+    "id": 5,
+    "escolaId": 5,
+    "escolaNome": "Colégio Estadual Professora Marilze da Luz Brand",
+    "identificador": "escola.marilze",
+    "email": "aucmarilzeluzbrand@seed.pr.gov.br",
+    "password": "senhaInstitucional123",
+    "status": "ativo",
+    "criadoPor": "ADM Chefe",
+    "createdAt": "2026-11-06T11:28:56.650Z"
+  },
+  {
+    "id": 6,
+    "escolaId": 6,
+    "escolaNome": "Colégio Estadual Cecília Meireles",
+    "identificador": "escola.cecilia",
+    "email": "aucceciliameireles@seed.pr.gov.br",
+    "password": "senhaInstitucional123",
+    "status": "ativo",
+    "criadoPor": "ADM Chefe",
+    "createdAt": "2026-11-06T11:28:56.650Z"
+  }
+]
