@@ -167,10 +167,10 @@ export default function Login({
               <School size={28} />
             </div>
             <h2 className="text-xl font-serif font-bold text-slate-900 dark:text-white">
-              Acesso Institucional da Escola
+              Portal das Escolas
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xs leading-relaxed">
-              Exclusivo para direções e equipes gestoras das escolas cadastradas em Araucária.
+              Acesse o ambiente exclusivo da sua instituição
             </p>
           </div>
 
@@ -184,7 +184,7 @@ export default function Login({
           <form onSubmit={handleInstitutionalSubmit} className="flex flex-col gap-4">
             <div className="flex flex-col gap-1">
               <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Identificador Institucional
+                Identificador Institucional ou E-mail
               </label>
               <div className="relative">
                 <School className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
@@ -198,7 +198,7 @@ export default function Login({
                 />
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Fornecido e configurado pelo Administrador Chefe do eloEscola.
+                Credencial institucional gerenciada pelo Administrador Chefe.
               </p>
             </div>
 
@@ -225,7 +225,7 @@ export default function Login({
               className="w-full h-11 mt-1 bg-emerald-800 text-white font-semibold rounded-xl flex items-center justify-center gap-2 hover:bg-emerald-900 active:scale-98 transition-all shadow-sm cursor-pointer text-xs disabled:opacity-50"
             >
               <ShieldCheck size={16} />
-              {instLoading ? "Verificando..." : "Entrar como Instituição"}
+              {instLoading ? "Verificando..." : "Entrar como Escola"}
             </button>
 
             <button
@@ -295,16 +295,6 @@ export default function Login({
             </p>
           </div>
 
-          {/* Guest One-Click Button (Etapa 5) */}
-          <button
-            type="button"
-            onClick={handleGuestEntry}
-            disabled={isLoading}
-            className="w-full mb-4 py-2.5 px-4 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-900 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold transition shadow-xs cursor-pointer active:scale-98"
-          >
-            <Compass size={16} className="text-emerald-700" />
-            <span>Entrar como Convidado (Modo Visitante)</span>
-          </button>
 
           {activeError && (
             <motion.div
@@ -418,15 +408,17 @@ export default function Login({
               <span>{isLoading ? "Conectando..." : "Continuar com Google"}</span>
             </button>
 
-            {/* Modo Visitante (Substitui Acesso Institucional conforme solicitado) */}
+            {/* Portal das Escolas */}
             <button
-              onClick={handleGuestEntry}
-              disabled={isLoading}
+              onClick={() => {
+                setActiveSubView("institutional");
+                handleClearError();
+              }}
               type="button"
-              className="w-full h-11 bg-white dark:bg-slate-800 text-emerald-800 dark:text-emerald-400 font-semibold border border-emerald-300 dark:border-emerald-800/50 rounded-xl flex items-center justify-center gap-2 hover:bg-emerald-50 dark:hover:bg-slate-750 active:scale-98 transition-all cursor-pointer text-xs disabled:opacity-50"
+              className="w-full h-11 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 font-semibold border border-emerald-300 dark:border-emerald-800 rounded-xl flex items-center justify-center gap-2 hover:bg-emerald-100/70 dark:hover:bg-emerald-900/40 active:scale-98 transition-all cursor-pointer text-xs"
             >
-              <Compass size={16} className="text-emerald-700" />
-              <span>Entrar como Visitante</span>
+              <School size={16} className="text-emerald-700 dark:text-emerald-400" />
+              <span>Portal das Escolas (Acesso Institucional)</span>
             </button>
           </div>
         </div>

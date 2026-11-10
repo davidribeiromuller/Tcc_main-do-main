@@ -8,8 +8,8 @@
     "password": "senhaInstitucional123",
     "status": "ativo",
     "criadoPor": "ADM Chefe",
-    "createdAt": "2026-11-06T11:28:56.650Z",
-    "lastLogin": "2026-11-06T11:28:56.650Z"
+    "createdAt": "2026-11-10T10:45:28.216Z",
+    "lastLogin": "2026-11-10T10:45:28.216Z"
   },
   {
     "id": 2,
@@ -20,8 +20,8 @@
     "password": "senhaInstitucional123",
     "status": "ativo",
     "criadoPor": "ADM Chefe",
-    "createdAt": "2026-11-06T11:28:56.650Z",
-    "lastLogin": "2026-11-06T11:28:56.650Z"
+    "createdAt": "2026-11-10T10:45:28.216Z",
+    "lastLogin": "2026-11-10T10:45:28.216Z"
   },
   {
     "id": 3,
@@ -32,7 +32,7 @@
     "password": "senhaInstitucional123",
     "status": "ativo",
     "criadoPor": "ADM Chefe",
-    "createdAt": "2026-11-06T11:28:56.650Z"
+    "createdAt": "2026-11-10T10:45:28.216Z"
   },
   {
     "id": 4,
@@ -43,7 +43,7 @@
     "password": "senhaInstitucional123",
     "status": "ativo",
     "criadoPor": "ADM Chefe",
-    "createdAt": "2026-11-06T11:28:56.650Z"
+    "createdAt": "2026-11-10T10:45:28.216Z"
   },
   {
     "id": 5,
@@ -54,7 +54,7 @@
     "password": "senhaInstitucional123",
     "status": "ativo",
     "criadoPor": "ADM Chefe",
-    "createdAt": "2026-11-06T11:28:56.650Z"
+    "createdAt": "2026-11-10T10:45:28.216Z"
   },
   {
     "id": 6,
@@ -65,6 +65,6 @@
     "password": "senhaInstitucional123",
     "status": "ativo",
     "criadoPor": "ADM Chefe",
-    "createdAt": "2026-11-06T11:28:56.650Z"
+    "createdAt": "2026-11-10T10:45:28.216Z"
   }
 ]

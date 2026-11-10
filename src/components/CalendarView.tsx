@@ -53,7 +53,7 @@ export default function CalendarView({
 
   const [currentMonth, setCurrentMonth] = useState<number>(todayMonth);
   const [currentYear, setCurrentYear] = useState<number>(todayYear);
-  const [selectedDay, setSelectedDay] = useState<number>(todayDay);
+  const [selectedDay, setSelectedDay] = useState<number | null>(todayDay);
   const [filterType, setFilterType] = useState<"all" | "free" | "paid">("all");
 
   // Notification Modal State
@@ -87,20 +87,27 @@ export default function CalendarView({
   };
 
   const previousMonth = () => {
-    if (currentMonth === 0) {
-      setCurrentMonth(11);
-      setCurrentYear(currentYear - 1);
+    const newMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+    const newYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+    setCurrentMonth(newMonth);
+    setCurrentYear(newYear);
+    // When changing month, deselect unless returning to today's month
+    if (newMonth === todayMonth && newYear === todayYear) {
+      setSelectedDay(todayDay);
     } else {
-      setCurrentMonth(currentMonth - 1);
+      setSelectedDay(null);
     }
   };
 
   const nextMonth = () => {
-    if (currentMonth === 11) {
-      setCurrentMonth(0);
-      setCurrentYear(currentYear + 1);
+    const newMonth = currentMonth === 11 ? 0 : currentMonth + 1;
+    const newYear = currentMonth === 11 ? currentYear + 1 : currentYear;
+    setCurrentMonth(newMonth);
+    setCurrentYear(newYear);
+    if (newMonth === todayMonth && newYear === todayYear) {
+      setSelectedDay(todayDay);
     } else {
-      setCurrentMonth(currentMonth + 1);
+      setSelectedDay(null);
     }
   };
 
@@ -151,16 +158,18 @@ export default function CalendarView({
     (e) => e.month === currentMonth && e.year === currentYear
   );
 
-  const dayEvents = filteredEvents.filter(
-    (e) => e.day === selectedDay && e.month === currentMonth && e.year === currentYear
-  );
+  const dayEvents = selectedDay !== null
+    ? filteredEvents.filter(
+        (e) => e.day === selectedDay && e.month === currentMonth && e.year === currentYear
+      )
+    : [];
 
-  const selectedDateObject = new Date(currentYear, currentMonth, selectedDay);
-  const selectedWeekdayName = WEEKDAYS_NAMES[selectedDateObject.getDay()];
-  const isSelectedDateToday = checkIsToday(selectedDay, currentMonth, currentYear);
+  const selectedDateObject = selectedDay !== null ? new Date(currentYear, currentMonth, selectedDay) : null;
+  const selectedWeekdayName = selectedDateObject ? WEEKDAYS_NAMES[selectedDateObject.getDay()] : "";
+  const isSelectedDateToday = selectedDay !== null ? checkIsToday(selectedDay, currentMonth, currentYear) : false;
 
   const openAddEventForSelectedDay = () => {
-    setEvtDay(selectedDay.toString());
+    setEvtDay((selectedDay || todayDay).toString());
     setEvtMonth(currentMonth);
     setEvtYear(currentYear);
     setFormOpen(true);
@@ -289,7 +298,9 @@ export default function CalendarView({
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                {selectedWeekdayName}, {selectedDay} de {MONTHS_NAMES[currentMonth]} de {currentYear}
+                {selectedDay !== null
+                  ? `${selectedWeekdayName}, ${selectedDay} de ${MONTHS_NAMES[currentMonth]} de ${currentYear}`
+                  : `Mês de ${MONTHS_NAMES[currentMonth]} de ${currentYear}`}
               </p>
             </div>
           </div>
@@ -453,7 +464,15 @@ export default function CalendarView({
               <div className="flex items-center gap-2">
                 <select
                   value={currentMonth}
-                  onChange={(e) => setCurrentMonth(parseInt(e.target.value))}
+                  onChange={(e) => {
+                    const m = parseInt(e.target.value);
+                    setCurrentMonth(m);
+                    if (m === todayMonth && currentYear === todayYear) {
+                      setSelectedDay(todayDay);
+                    } else {
+                      setSelectedDay(null);
+                    }
+                  }}
                   className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs font-display font-bold text-slate-800 dark:text-slate-100 focus:outline-none cursor-pointer"
                 >
                   {MONTHS_NAMES.map((monthName, idx) => (
@@ -465,7 +484,15 @@ export default function CalendarView({
 
                 <select
                   value={currentYear}
-                  onChange={(e) => setCurrentYear(parseInt(e.target.value))}
+                  onChange={(e) => {
+                    const y = parseInt(e.target.value);
+                    setCurrentYear(y);
+                    if (currentMonth === todayMonth && y === todayYear) {
+                      setSelectedDay(todayDay);
+                    } else {
+                      setSelectedDay(null);
+                    }
+                  }}
                   className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-xs font-mono font-bold text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer"
                 >
                   {yearsRange.map((y) => (
@@ -635,35 +662,41 @@ export default function CalendarView({
                 <h3 className="font-display font-bold text-base text-slate-800 dark:text-slate-100 flex items-center gap-2">
                   <CalendarDays size={18} className="text-emerald-600" />
                   <span>
-                    {selectedDay} de {MONTHS_NAMES[currentMonth]}
+                    {selectedDay !== null
+                      ? `${selectedDay} de ${MONTHS_NAMES[currentMonth]}`
+                      : `Eventos de ${MONTHS_NAMES[currentMonth]}`}
                   </span>
                 </h3>
                 <p className="text-xs text-slate-400 font-medium">
-                  {selectedWeekdayName} {isSelectedDateToday && "• Hoje"}
+                  {selectedDay !== null
+                    ? `${selectedWeekdayName} ${isSelectedDateToday ? "• Hoje" : ""}`
+                    : `Confira os ${monthEvents.length} eventos deste mês ou clique em um dia`}
                 </p>
               </div>
 
               <button
                 onClick={openAddEventForSelectedDay}
                 className="px-3 py-1.5 rounded-xl bg-brand-primary/10 hover:bg-brand-primary/20 text-brand-primary font-semibold text-xs flex items-center gap-1 transition-all cursor-pointer shadow-xs active:scale-95"
-                title="Adicionar evento para este dia"
+                title="Adicionar evento"
               >
                 <Plus size={14} />
                 <span>Adicionar</span>
               </button>
             </div>
 
-            {dayEvents.length === 0 ? (
+            {(selectedDay !== null ? dayEvents : monthEvents).length === 0 ? (
               <div className="bg-white dark:bg-brand-card-dark rounded-3xl py-10 px-5 text-center border border-dashed border-slate-200 dark:border-slate-800 flex flex-col items-center gap-3 shadow-xs">
                 <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center">
                   <CalendarIcon size={24} />
                 </div>
                 <div>
                   <h4 className="text-xs font-bold text-slate-700 dark:text-slate-200">
-                    Nenhum evento neste dia
+                    {selectedDay !== null ? "Nenhum evento neste dia" : `Nenhum evento em ${MONTHS_NAMES[currentMonth]}`}
                   </h4>
                   <p className="text-[11px] text-slate-400 mt-1 max-w-[200px]">
-                    Não há eventos cadastrados para o dia {selectedDay} de {MONTHS_NAMES[currentMonth].toLowerCase()}.
+                    {selectedDay !== null
+                      ? `Não há eventos cadastrados para o dia ${selectedDay} de ${MONTHS_NAMES[currentMonth].toLowerCase()}.`
+                      : `Não há eventos programados para o mês de ${MONTHS_NAMES[currentMonth].toLowerCase()}.`}
                   </p>
                 </div>
                 <button
@@ -671,16 +704,16 @@ export default function CalendarView({
                   className="mt-1 px-4 py-2 rounded-xl bg-brand-primary text-white text-xs font-semibold flex items-center gap-1.5 hover:bg-opacity-90 active:scale-95 shadow-sm transition-all cursor-pointer"
                 >
                   <Plus size={14} />
-                  <span>Cadastrar Evento Hoje</span>
+                  <span>Cadastrar Novo Evento</span>
                 </button>
               </div>
             ) : (
               <div className="flex flex-col gap-3">
                 <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wider">
-                  {dayEvents.length} evento(s) confirmado(s):
+                  {(selectedDay !== null ? dayEvents : monthEvents).length} evento(s) {selectedDay !== null ? "neste dia" : "no mês"}:
                 </span>
 
-                {dayEvents.map((event) => (
+                {(selectedDay !== null ? dayEvents : monthEvents).map((event) => (
                   <motion.div
                     key={event.id}
                     onClick={() => handleEventClick(event)}

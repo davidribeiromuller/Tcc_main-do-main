@@ -231,6 +231,10 @@ export default function MapView({
     return matchesSearch;
   });
 
+  const [mapLayerType, setMapLayerType] = useState<"m" | "s" | "y" | "p">("m");
+  const [showLayerMenu, setShowLayerMenu] = useState(false);
+  const baseTileRef = useRef<L.TileLayer | null>(null);
+
   // Initialize Map
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -243,15 +247,17 @@ export default function MapView({
         attributionControl: false,
       });
 
-      // CartoDB Voyager / OpenStreetMap Clean Tiles
+      // Real Google Maps Roadmap Tiles
       const baseTile = L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+        "https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
         {
-          maxZoom: 19,
-          subdomains: "abcd",
+          maxZoom: 20,
+          subdomains: ["0", "1", "2", "3"],
+          attribution: '&copy; Google Maps',
         }
       ).addTo(map);
 
+      baseTileRef.current = baseTile;
       (map as any)._customBaseTile = baseTile;
 
       const markersGroup = L.layerGroup().addTo(map);
@@ -275,6 +281,32 @@ export default function MapView({
       }
     };
   }, []);
+
+  // Switch Google Maps Layer Type (Roadmap, Satellite, Hybrid, Terrain)
+  const handleChangeMapLayer = (type: "m" | "s" | "y" | "p") => {
+    setMapLayerType(type);
+    setShowLayerMenu(false);
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    if (baseTileRef.current) {
+      map.removeLayer(baseTileRef.current);
+    }
+
+    const newTile = L.tileLayer(
+      `https://mt{s}.google.com/vt/lyrs=${type}&x={x}&y={y}&z={z}`,
+      {
+        maxZoom: 20,
+        subdomains: ["0", "1", "2", "3"],
+        attribution: '&copy; Google Maps',
+      }
+    ).addTo(map);
+
+    baseTileRef.current = newTile;
+    if (markersLayerRef.current) {
+      markersLayerRef.current.bringToFront();
+    }
+  };
 
   // Update Event & School Markers
   useEffect(() => {
@@ -762,6 +794,73 @@ export default function MapView({
         >
           <School size={18} />
         </button>
+
+        {/* Google Maps Layer Type Switcher */}
+        <div className="relative">
+          <button
+            onClick={() => setShowLayerMenu(!showLayerMenu)}
+            className={`w-10 h-10 md:w-11 md:h-11 rounded-full shadow-[0_2px_6px_rgba(0,0,0,0.2)] border flex items-center justify-center active:scale-95 transition-all cursor-pointer ${
+              showLayerMenu
+                ? "bg-emerald-600 text-white border-emerald-600"
+                : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800 hover:bg-slate-50"
+            }`}
+            title="Alterar Camadas do Google Maps"
+          >
+            <Layers size={18} />
+          </button>
+
+          {showLayerMenu && (
+            <div className="absolute right-0 top-12 w-48 bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 p-2 z-[1100] flex flex-col gap-1 text-xs">
+              <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Google Maps Oficial
+              </div>
+              <button
+                onClick={() => handleChangeMapLayer("m")}
+                className={`w-full px-2.5 py-1.5 rounded-xl text-left font-semibold transition-colors flex items-center justify-between ${
+                  mapLayerType === "m"
+                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                    : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                }`}
+              >
+                <span>Padrão Google Maps</span>
+                {mapLayerType === "m" && <span className="w-2 h-2 rounded-full bg-emerald-600" />}
+              </button>
+              <button
+                onClick={() => handleChangeMapLayer("y")}
+                className={`w-full px-2.5 py-1.5 rounded-xl text-left font-semibold transition-colors flex items-center justify-between ${
+                  mapLayerType === "y"
+                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                    : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                }`}
+              >
+                <span>Híbrido (Vias + Satélite)</span>
+                {mapLayerType === "y" && <span className="w-2 h-2 rounded-full bg-emerald-600" />}
+              </button>
+              <button
+                onClick={() => handleChangeMapLayer("s")}
+                className={`w-full px-2.5 py-1.5 rounded-xl text-left font-semibold transition-colors flex items-center justify-between ${
+                  mapLayerType === "s"
+                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                    : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                }`}
+              >
+                <span>Satélite Real</span>
+                {mapLayerType === "s" && <span className="w-2 h-2 rounded-full bg-emerald-600" />}
+              </button>
+              <button
+                onClick={() => handleChangeMapLayer("p")}
+                className={`w-full px-2.5 py-1.5 rounded-xl text-left font-semibold transition-colors flex items-center justify-between ${
+                  mapLayerType === "p"
+                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                    : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                }`}
+              >
+                <span>Relevo / Terreno</span>
+                {mapLayerType === "p" && <span className="w-2 h-2 rounded-full bg-emerald-600" />}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Floating Zoom In/Out Controls (Bottom Right - Google Maps UI) */}

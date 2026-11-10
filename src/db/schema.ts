@@ -151,6 +151,49 @@ export const eventAttendanceAuthorizations = pgTable('event_attendance_authoriza
   revokedAt: timestamp('revoked_at'),
 });
 
+// Define the 'school_accounts' table for multi-tenant institutional administration
+export const schoolAccounts = pgTable('school_accounts', {
+  id: serial('id').primaryKey(),
+  schoolId: integer('school_id').references(() => instituicoes.id).notNull(),
+  schoolName: text('school_name').notNull(),
+  schoolSlug: text('school_slug'),
+  loginIdentifier: text('login_identifier').notNull().unique(),
+  institutionalEmail: text('institutional_email').notNull(),
+  passwordHash: text('password_hash'),
+  representativeName: text('representative_name').notNull(),
+  institutionalContact: text('institutional_contact').notNull(),
+  verificationStatus: text('verification_status').default('verified').notNull(), // 'pending_verification', 'verified', 'rejected'
+  verificationMethod: text('verification_method').default('Verificação oficial pela direção e portaria NRE').notNull(),
+  verifiedBy: text('verified_by').default('ADM Chefe').notNull(),
+  verifiedAt: timestamp('verified_at').defaultNow(),
+  accountStatus: text('account_status').default('active').notNull(), // 'active', 'suspended', 'revoked'
+  createdBy: text('created_by').default('ADM Chefe').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+  lastLoginAt: timestamp('last_login_at'),
+});
+
+// Define the 'school_account_audit_logs' table
+export const schoolAccountAuditLogs = pgTable('school_account_audit_logs', {
+  id: serial('id').primaryKey(),
+  schoolId: integer('school_id').notNull(),
+  accountId: integer('account_id'),
+  action: text('action').notNull(),
+  resource: text('resource').notNull(),
+  details: text('details'),
+  performedBy: text('performed_by').notNull(),
+  performedAt: timestamp('performed_at').defaultNow(),
+});
+
+// Define the 'event_archive_logs' table for retention monitoring
+export const eventArchiveLogs = pgTable('event_archive_logs', {
+  id: serial('id').primaryKey(),
+  processedAt: timestamp('processed_at').defaultNow().notNull(),
+  archivedCount: integer('archived_count').default(0).notNull(),
+  details: text('details'),
+  status: text('status').default('success').notNull(),
+});
+
 // Define relationships for the 'users' table.
 export const usersRelations = relations(users, ({ many }) => ({
   events: many(events),

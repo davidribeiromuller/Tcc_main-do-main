@@ -1,4 +1,13 @@
-import { Event, User, InstitutionalAccount, EventParticipationHistory, EventAttendanceAuthorization } from '../types.ts';
+import {
+  Event,
+  User,
+  InstitutionalAccount,
+  EventParticipationHistory,
+  EventAttendanceAuthorization,
+  SchoolAccountAuditLog,
+  EventArchiveLog
+} from '../types.ts';
+import { EVENT_RETENTION_DAYS } from '../lib/eventLifecycle.ts';
 import fs from 'fs';
 import path from 'path';
 
@@ -10,6 +19,8 @@ const ACCOUNTS_FILE = path.join(DB_DIR, 'fallback_institutional_accounts.json');
 const ARCHIVE_FILE = path.join(DB_DIR, 'fallback_event_history.json');
 const PARTICIPATIONS_FILE = path.join(DB_DIR, 'fallback_participations.json');
 const AUTHORIZATIONS_FILE = path.join(DB_DIR, 'fallback_authorizations.json');
+const ARCHIVE_LOGS_FILE = path.join(DB_DIR, 'fallback_archive_logs.json');
+const SCHOOL_AUDIT_LOGS_FILE = path.join(DB_DIR, 'fallback_school_audit_logs.json');
 
 // Ensure database directory exists
 if (!fs.existsSync(DB_DIR)) {
@@ -506,10 +517,55 @@ function saveAuthorizations() {
   }
 }
 
-// --- AUTOMATIC 48-HOUR EVENT EXPIRATION & HISTORY PRESERVATION ROUTINE ---
+// Load / Initialize Event Archive Logs
+export let fallbackArchiveLogs: EventArchiveLog[] = [];
+try {
+  if (fs.existsSync(ARCHIVE_LOGS_FILE)) {
+    const raw = fs.readFileSync(ARCHIVE_LOGS_FILE, 'utf-8');
+    fallbackArchiveLogs = JSON.parse(raw);
+  } else {
+    fallbackArchiveLogs = [];
+    fs.writeFileSync(ARCHIVE_LOGS_FILE, JSON.stringify(fallbackArchiveLogs, null, 2), 'utf-8');
+  }
+} catch (err) {
+  fallbackArchiveLogs = [];
+}
+
+function saveArchiveLogs() {
+  try {
+    fs.writeFileSync(ARCHIVE_LOGS_FILE, JSON.stringify(fallbackArchiveLogs, null, 2), 'utf-8');
+  } catch (err) {
+    console.error("Error saving archive logs to file:", err);
+  }
+}
+
+// Load / Initialize School Account Audit Logs
+export let fallbackSchoolAuditLogs: SchoolAccountAuditLog[] = [];
+try {
+  if (fs.existsSync(SCHOOL_AUDIT_LOGS_FILE)) {
+    const raw = fs.readFileSync(SCHOOL_AUDIT_LOGS_FILE, 'utf-8');
+    fallbackSchoolAuditLogs = JSON.parse(raw);
+  } else {
+    fallbackSchoolAuditLogs = [];
+    fs.writeFileSync(SCHOOL_AUDIT_LOGS_FILE, JSON.stringify(fallbackSchoolAuditLogs, null, 2), 'utf-8');
+  }
+} catch (err) {
+  fallbackSchoolAuditLogs = [];
+}
+
+function saveSchoolAuditLogs() {
+  try {
+    fs.writeFileSync(SCHOOL_AUDIT_LOGS_FILE, JSON.stringify(fallbackSchoolAuditLogs, null, 2), 'utf-8');
+  } catch (err) {
+    console.error("Error saving school audit logs to file:", err);
+  }
+}
+
+// --- AUTOMATIC 30-DAY EVENT EXPIRATION & HISTORY PRESERVATION ROUTINE ---
+// Global retention policy: EVENT_RETENTION_DAYS = 30
 export function archiveAndPruneExpiredEvents(): { prunedCount: number; preservedCount: number } {
   const now = new Date();
-  const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
+  const RETENTION_MS = EVENT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
   let prunedCount = 0;
 
   const remainingEvents: Event[] = [];
@@ -525,31 +581,38 @@ export function archiveAndPruneExpiredEvents(): { prunedCount: number; preserved
     const eventEndDate = new Date(event.year, event.month, event.day, hours, minutes);
     const timeSinceEnd = now.getTime() - eventEndDate.getTime();
 
-    // If event concluded more than 48 hours ago:
-    if (timeSinceEnd > FORTY_EIGHT_HOURS_MS) {
-      prunedCount++;
-      // 1. Preserve in historical archive if not already archived
-      const alreadyArchived = fallbackEventHistory.some(h => h.id === event.id);
-      if (!alreadyArchived) {
-        fallbackEventHistory.push({
-          ...event,
-          isArchived: true,
-          archivedAt: new Date().toISOString()
-        });
-      }
-
-      // 2. Ensure all participations referencing this event have preserved snapshot details
-      for (const p of fallbackParticipations) {
-        if (p.eventId === event.id) {
-          if (!p.eventTitle) p.eventTitle = event.title;
-          if (!p.eventLocation) p.eventLocation = event.location;
-          if (!p.eventDate) p.eventDate = `${event.day}/${event.month + 1}/${event.year}`;
-          if (!p.eventTime) p.eventTime = event.time;
-          if (!p.eventSchool) p.eventSchool = event.schoolName || event.location;
-        }
-      }
-    } else {
+    // Do NOT archive future events or ongoing events
+    if (timeSinceEnd <= 0) {
       remainingEvents.push(event);
+      continue;
+    }
+
+    // Stage B: Event concluded within 30 days -> remains in operational events
+    if (timeSinceEnd < RETENTION_MS) {
+      remainingEvents.push(event);
+      continue;
+    }
+
+    // Stage C: Concluded more than 30 days ago -> Auto-archive!
+    prunedCount++;
+    const alreadyArchived = fallbackEventHistory.some(h => h.id === event.id);
+    if (!alreadyArchived) {
+      fallbackEventHistory.push({
+        ...event,
+        isArchived: true,
+        archivedAt: new Date().toISOString()
+      });
+    }
+
+    // Preserve all participations referencing this event
+    for (const p of fallbackParticipations) {
+      if (p.eventId === event.id) {
+        if (!p.eventTitle) p.eventTitle = event.title;
+        if (!p.eventLocation) p.eventLocation = event.location;
+        if (!p.eventDate) p.eventDate = `${event.day}/${event.month + 1}/${event.year}`;
+        if (!p.eventTime) p.eventTime = event.time;
+        if (!p.eventSchool) p.eventSchool = event.schoolName || event.location;
+      }
     }
   }
 
@@ -558,10 +621,50 @@ export function archiveAndPruneExpiredEvents(): { prunedCount: number; preserved
     saveEvents();
     saveEventHistory();
     saveParticipations();
-    console.log(`[EventLifecycle] Rotina automática: ${prunedCount} evento(s) encerrados há mais de 48h foram arquivados e removidos da tabela operacional com integridade preservada.`);
+
+    const logEntry: EventArchiveLog = {
+      id: Date.now(),
+      processedAt: new Date().toISOString(),
+      archivedCount: prunedCount,
+      details: `Rotina de retenção: ${prunedCount} evento(s) ultrapassando ${EVENT_RETENTION_DAYS} dias de encerramento arquivados com sucesso.`,
+      status: "success"
+    };
+    fallbackArchiveLogs.unshift(logEntry);
+    saveArchiveLogs();
+
+    console.log(`[EventLifecycle] Rotina automática: ${prunedCount} evento(s) encerrados há mais de ${EVENT_RETENTION_DAYS} dias foram arquivados com integridade preservada.`);
   }
 
   return { prunedCount, preservedCount: fallbackEventHistory.length };
+}
+
+export function restoreArchivedEventFallback(id: number): Event {
+  const archiveIndex = fallbackEventHistory.findIndex(e => e.id === id);
+  if (archiveIndex === -1) {
+    throw new Error("Evento arquivado não encontrado no histórico.");
+  }
+
+  const archived = fallbackEventHistory.splice(archiveIndex, 1)[0];
+  const restoredEvent: Event = {
+    ...archived,
+    isArchived: false,
+    archivedAt: undefined,
+  };
+
+  const existingIdx = fallbackEvents.findIndex(e => e.id === id);
+  if (existingIdx !== -1) {
+    fallbackEvents[existingIdx] = restoredEvent;
+  } else {
+    fallbackEvents.push(restoredEvent);
+  }
+
+  saveEvents();
+  saveEventHistory();
+  return restoredEvent;
+}
+
+export function getEventArchiveLogsFallback(): EventArchiveLog[] {
+  return [...fallbackArchiveLogs];
 }
 
 // Run cleanup immediately on load
@@ -752,15 +855,125 @@ export function createInstitutionalAccountFallback(data: {
     email: data.email.toLowerCase().trim(),
     password: data.password || "senhaInicial123",
     status: "ativo",
+    accountStatus: "active",
+    verificationStatus: "verified",
+    verificationMethod: "Verificação oficial pela direção escolar e portaria NRE",
+    verifiedBy: data.criadoPor || "ADM Chefe",
+    verifiedAt: new Date().toISOString(),
     criadoPor: data.criadoPor || "ADM Chefe",
     responsavel: data.responsavel,
+    representativeName: data.responsavel || "Representante Institucional",
+    institutionalContact: data.email || "(41) 3642-1000",
     cargo: data.cargo,
     createdAt: new Date().toISOString()
   };
 
   fallbackInstitutionalAccounts.push(newAccount);
   saveInstitutionalAccounts();
+
+  logSchoolActionFallback({
+    schoolId: data.escolaId,
+    accountId: newAccount.id,
+    action: "create_school_account",
+    resource: "school_account",
+    details: `Conta institucional criada para ${data.escolaNome} por ${data.criadoPor || "ADM Chefe"}.`,
+    performedBy: data.criadoPor || "ADM Chefe"
+  });
+
   return newAccount;
+}
+
+export function verifySchoolAccountFallback(
+  id: number,
+  status: "verified" | "rejected",
+  method: string,
+  verifiedBy: string
+): InstitutionalAccount {
+  const index = fallbackInstitutionalAccounts.findIndex(a => a.id === id);
+  if (index === -1) throw new Error("Conta institucional não encontrada.");
+
+  const account = fallbackInstitutionalAccounts[index];
+  account.verificationStatus = status;
+  account.verificationMethod = method;
+  account.verifiedBy = verifiedBy;
+  account.verifiedAt = new Date().toISOString();
+  account.updatedAt = new Date().toISOString();
+
+  if (status === "rejected") {
+    account.accountStatus = "suspended";
+    account.status = "bloqueado";
+  }
+
+  saveInstitutionalAccounts();
+
+  logSchoolActionFallback({
+    schoolId: account.escolaId,
+    accountId: account.id,
+    action: "verify_institution",
+    resource: "school_account",
+    details: `Verificação institucional definida como ${status} via '${method}' por ${verifiedBy}.`,
+    performedBy: verifiedBy
+  });
+
+  return account;
+}
+
+export function updateSchoolAccountStatusFallback(
+  id: number,
+  status: "active" | "suspended" | "revoked",
+  performedBy: string = "ADM Chefe"
+): InstitutionalAccount {
+  const index = fallbackInstitutionalAccounts.findIndex(a => a.id === id);
+  if (index === -1) throw new Error("Conta institucional não encontrada.");
+
+  const account = fallbackInstitutionalAccounts[index];
+  account.accountStatus = status;
+  account.status = status === "active" ? "ativo" : "bloqueado";
+  account.updatedAt = new Date().toISOString();
+
+  saveInstitutionalAccounts();
+
+  logSchoolActionFallback({
+    schoolId: account.escolaId,
+    accountId: account.id,
+    action: `account_status_${status}`,
+    resource: "school_account",
+    details: `Situação da conta alterada para ${status} por ${performedBy}.`,
+    performedBy
+  });
+
+  return account;
+}
+
+export function logSchoolActionFallback(entry: {
+  schoolId: number;
+  accountId?: number;
+  action: string;
+  resource: string;
+  details?: string;
+  performedBy: string;
+}): SchoolAccountAuditLog {
+  const log: SchoolAccountAuditLog = {
+    id: Date.now() + Math.floor(Math.random() * 100),
+    schoolId: entry.schoolId,
+    accountId: entry.accountId,
+    action: entry.action,
+    resource: entry.resource,
+    details: entry.details,
+    performedBy: entry.performedBy,
+    performedAt: new Date().toISOString()
+  };
+
+  fallbackSchoolAuditLogs.unshift(log);
+  saveSchoolAuditLogs();
+  return log;
+}
+
+export function getSchoolAccountAuditLogsFallback(schoolId?: number): SchoolAccountAuditLog[] {
+  if (schoolId) {
+    return fallbackSchoolAuditLogs.filter(l => l.schoolId === schoolId);
+  }
+  return [...fallbackSchoolAuditLogs];
 }
 
 export function toggleInstitutionalAccountFallback(id: number): InstitutionalAccount {
@@ -770,6 +983,7 @@ export function toggleInstitutionalAccountFallback(id: number): InstitutionalAcc
   }
   const current = fallbackInstitutionalAccounts[index];
   current.status = current.status === "ativo" ? "bloqueado" : "ativo";
+  current.accountStatus = current.status === "ativo" ? "active" : "suspended";
   saveInstitutionalAccounts();
   return current;
 }
@@ -801,13 +1015,37 @@ export function authenticateInstitutionalAccountFallback(identificadorOrEmail: s
   );
 
   if (!account) return null;
-  if (account.status === "bloqueado") {
-    throw new Error("Esta conta institucional está desativada ou bloqueada pela administração.");
+
+  if (account.accountStatus === "suspended" || account.status === "bloqueado") {
+    throw new Error("Esta conta institucional está suspensa ou desativada pela administração.");
+  }
+
+  if (account.accountStatus === "revoked") {
+    throw new Error("O acesso desta conta institucional foi revogado pelo Chefe ADM.");
+  }
+
+  if (account.verificationStatus === "pending_verification") {
+    throw new Error("Esta conta institucional está com a verificação de identidade pendente de validação pelo Chefe ADM.");
+  }
+
+  if (account.verificationStatus === "rejected") {
+    throw new Error("A verificação desta instituição foi recusada pelo Chefe ADM.");
   }
 
   if (account.password === password) {
     account.lastLogin = new Date().toISOString();
+    account.lastLoginAt = account.lastLogin;
     saveInstitutionalAccounts();
+
+    logSchoolActionFallback({
+      schoolId: account.escolaId,
+      accountId: account.id,
+      action: "school_login",
+      resource: "auth",
+      details: `Login institucional realizado com sucesso por ${account.escolaNome}.`,
+      performedBy: account.identificador
+    });
+
     return account;
   }
 

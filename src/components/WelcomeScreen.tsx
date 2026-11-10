@@ -37,10 +37,10 @@ export const PARTNERS_DATA: PartnerItem[] = [
     name: "Faculda+",
     category: "Projeto parceiro • Educação e tecnologia",
     description: "Iniciativa colaborativa e ecossistema de aprendizagem voltado ao desenvolvimento de soluções educacionais, capacitação e inovação tecnológica comunitária.",
-    url: "https://github.com/faculda1141/faculda-2.0",
+    url: "https://faculda-2-0.vercel.app/",
     badge: "Educação & Tecnologia",
     iconText: "F+",
-    repoName: "faculda1141/faculda-2.0"
+    repoName: "faculda-2-0.vercel.app"
   }
 ];
 

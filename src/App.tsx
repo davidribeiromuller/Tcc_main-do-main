@@ -20,6 +20,7 @@ import MobileHeader from "./components/MobileHeader.tsx";
 import WelcomeScreen from "./components/WelcomeScreen.tsx";
 import { SchoolDetail } from "./components/SchoolDetail.tsx";
 import { SchoolsCatalog } from "./components/SchoolsCatalog.tsx";
+import SchoolPortal from "./components/SchoolPortal.tsx";
 import AIChatAssistant from "./components/AIChatAssistant.tsx";
 import { getSchoolBySlug, ARAUCARIA_SCHOOLS, SchoolProfile } from "./lib/schoolsData.ts";
 import { motion, AnimatePresence } from "motion/react";
@@ -1906,6 +1907,25 @@ export default function App() {
                       onDeleteEvent={handleDeleteEvent}
                       onSelectEvent={setSelectedEvent}
                       currentUser={currentUser}
+                      onShowToast={showToast}
+                    />
+                  </motion.div>
+                )}
+
+                {activeScreen === "schoolPortal" && (
+                  <motion.div
+                    key="school-portal-tab"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="absolute inset-0 flex flex-col overflow-y-auto"
+                  >
+                    <SchoolPortal
+                      currentUser={currentUser}
+                      events={events}
+                      onNavigate={navigateTo}
+                      onLogout={handleLogout}
+                      onAddEvent={handleAddEvent}
                       onShowToast={showToast}
                     />
                   </motion.div>

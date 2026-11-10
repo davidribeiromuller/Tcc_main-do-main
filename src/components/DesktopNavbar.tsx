@@ -102,6 +102,19 @@ export default function DesktopNavbar({
             Painel Admin
           </button>
         )}
+
+        {currentUser?.role === "Escola" && (
+          <button 
+            onClick={() => onNavigate("schoolPortal")}
+            className={`flex items-center gap-1 text-sm font-medium transition-colors cursor-pointer ${
+              activeScreen === "schoolPortal" 
+                ? "text-emerald-700 dark:text-emerald-400 border-b-2 border-emerald-700 dark:border-emerald-400 pb-0.5 font-bold" 
+                : "text-slate-500 dark:text-slate-400 hover:text-emerald-700 dark:hover:text-emerald-400"
+            }`}
+          >
+            Portal da Escola
+          </button>
+        )}
       </nav>
 
       {/* Right side: Search, Theme Toggle, User profile, and Logout button */}

@@ -59,16 +59,24 @@ import {
 } from "./src/lib/schoolsData.ts";
 import {
   archiveAndPruneExpiredEvents,
+  restoreArchivedEventFallback,
+  getEventArchiveLogsFallback,
   listInstitutionalAccountsFallback,
   createInstitutionalAccountFallback,
   toggleInstitutionalAccountFallback,
   resetInstitutionalPasswordFallback,
   deleteInstitutionalAccountFallback,
   authenticateInstitutionalAccountFallback,
+  verifySchoolAccountFallback,
+  updateSchoolAccountStatusFallback,
+  getSchoolAccountAuditLogsFallback,
+  logSchoolActionFallback,
   recordParticipationFallback,
   listUserParticipationsFallback,
-  listArchivedEventsFallback
+  listArchivedEventsFallback,
+  listAllEventsFallback
 } from "./src/db/fallbackStore.ts";
+import { EVENT_RETENTION_DAYS } from "./src/lib/eventLifecycle.ts";
 import {
   createAuthorization,
   getAuthorizationByStudentAndEvent,
@@ -1573,13 +1581,22 @@ async function startServer() {
         id: a.id,
         escolaId: a.escolaId,
         escolaNome: a.escolaNome,
+        escolaSlug: a.escolaSlug,
         identificador: a.identificador,
         email: a.email,
         status: a.status,
+        accountStatus: a.accountStatus || (a.status === "ativo" ? "active" : "suspended"),
+        verificationStatus: a.verificationStatus || "verified",
+        verificationMethod: a.verificationMethod || "Verificação oficial pela direção escolar e portaria NRE",
+        verifiedBy: a.verifiedBy || "ADM Chefe",
+        verifiedAt: a.verifiedAt || a.createdAt,
         responsavel: a.responsavel,
+        representativeName: a.representativeName || a.responsavel || "Representante Institucional",
+        institutionalContact: a.institutionalContact || a.email || "(41) 3642-1000",
         cargo: a.cargo,
         createdAt: a.createdAt,
-        lastLogin: a.lastLogin
+        lastLogin: a.lastLogin,
+        lastLoginAt: a.lastLoginAt || a.lastLogin
       }));
 
       res.json({ accounts: sanitized });
@@ -1588,7 +1605,7 @@ async function startServer() {
     }
   });
 
-  // Criar nova conta institucional
+  // Criar nova conta institucional (Exclusivo ADM Chefe)
   app.post("/api/admin/institutional-accounts", requireAuth, async (req: AuthRequest, res) => {
     try {
       let dbUser = await getUserByUid(req.user!.uid);
@@ -1599,7 +1616,18 @@ async function startServer() {
         return res.status(403).json({ error: "Acesso restrito: Somente o Administrador Chefe pode criar contas institucionais." });
       }
 
-      const { escolaId, escolaNome, identificador, password, email, responsavel, cargo } = req.body;
+      const {
+        escolaId,
+        escolaNome,
+        identificador,
+        password,
+        email,
+        responsavel,
+        cargo,
+        institutionalContact,
+        verificationMethod
+      } = req.body;
+
       if (!escolaId || !escolaNome || !identificador || !password) {
         return res.status(400).json({ error: "ID da escola, nome, identificador e senha inicial são obrigatórios." });
       }
@@ -1614,9 +1642,77 @@ async function startServer() {
         cargo: cargo ? String(cargo).trim() : "Diretor(a)"
       });
 
+      if (institutionalContact) {
+        newAccount.institutionalContact = String(institutionalContact).trim();
+      }
+      if (verificationMethod) {
+        newAccount.verificationMethod = String(verificationMethod).trim();
+      }
+
       res.status(201).json({ success: true, account: newAccount });
     } catch (error: any) {
       res.status(400).json({ error: error.message || "Erro ao criar conta institucional." });
+    }
+  });
+
+  // Validar / Alterar Verificação de Identidade Institucional (Exclusivo ADM Chefe)
+  app.put("/api/admin/institutional-accounts/:id/verify", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      let dbUser = await getUserByUid(req.user!.uid);
+      if (!dbUser && req.user?.email) {
+        dbUser = await getUserByEmail(req.user.email);
+      }
+      if (!checkIsChefe(dbUser, req.user)) {
+        return res.status(403).json({ error: "Acesso restrito: Somente o Administrador Chefe pode verificar instituições." });
+      }
+
+      const id = parseInt(req.params.id, 10);
+      const { verificationStatus, verificationMethod } = req.body;
+
+      if (!verificationStatus || !["verified", "rejected", "pending_verification"].includes(verificationStatus)) {
+        return res.status(400).json({ error: "Status de verificação inválido ('verified', 'rejected' ou 'pending_verification')." });
+      }
+
+      const updated = verifySchoolAccountFallback(
+        id,
+        verificationStatus as any,
+        verificationMethod || "Verificação formal realizada pelo ADM Chefe",
+        dbUser?.nome || req.user?.name || "ADM Chefe"
+      );
+
+      res.json({ success: true, account: updated });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Erro ao verificar conta institucional." });
+    }
+  });
+
+  // Alterar Situação da Conta (Ativar / Suspender / Revogar) (Exclusivo ADM Chefe)
+  app.put("/api/admin/institutional-accounts/:id/status", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      let dbUser = await getUserByUid(req.user!.uid);
+      if (!dbUser && req.user?.email) {
+        dbUser = await getUserByEmail(req.user.email);
+      }
+      if (!checkIsChefe(dbUser, req.user)) {
+        return res.status(403).json({ error: "Acesso restrito: Somente o Administrador Chefe pode suspender ou ativar contas das escolas." });
+      }
+
+      const id = parseInt(req.params.id, 10);
+      const { accountStatus } = req.body;
+
+      if (!accountStatus || !["active", "suspended", "revoked"].includes(accountStatus)) {
+        return res.status(400).json({ error: "Situação da conta inválida ('active', 'suspended' ou 'revoked')." });
+      }
+
+      const updated = updateSchoolAccountStatusFallback(
+        id,
+        accountStatus as any,
+        dbUser?.nome || req.user?.name || "ADM Chefe"
+      );
+
+      res.json({ success: true, account: updated });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Erro ao atualizar status da conta institucional." });
     }
   });
 
@@ -1682,6 +1778,25 @@ async function startServer() {
     }
   });
 
+  // Consultar auditoria de atividades das contas escolares (Exclusivo ADM Chefe)
+  app.get("/api/admin/school-accounts/audit-logs", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      let dbUser = await getUserByUid(req.user!.uid);
+      if (!dbUser && req.user?.email) {
+        dbUser = await getUserByEmail(req.user.email);
+      }
+      if (!checkIsChefe(dbUser, req.user)) {
+        return res.status(403).json({ error: "Acesso restrito ao Chefe Administrador." });
+      }
+
+      const schoolId = req.query.schoolId ? parseInt(req.query.schoolId as string, 10) : undefined;
+      const logs = getSchoolAccountAuditLogsFallback(schoolId);
+      res.json({ logs });
+    } catch (error: any) {
+      res.status(500).json({ error: "Erro ao consultar logs de auditoria." });
+    }
+  });
+
   // --- HISTÓRICO DE PARTICIPAÇÕES EM EVENTOS (PRESERVAÇÃO PERMANENTE NO PERFIL) ---
 
   // Listar participações do usuário (ativas e arquivadas preservadas)
@@ -1724,17 +1839,45 @@ async function startServer() {
     }
   });
 
-  // Listar histórico geral de eventos arquivados (>48h)
+  // Listar histórico geral de eventos arquivados (>30 dias)
   app.get("/api/events/archived", (req, res) => {
     try {
       const archived = listArchivedEventsFallback();
-      res.json({ archived });
+      res.json({ archived, retentionDays: EVENT_RETENTION_DAYS });
     } catch (error: any) {
       res.status(500).json({ error: "Erro ao consultar histórico de eventos." });
     }
   });
 
-  // Executar rotina manual de expiração de eventos (>48h)
+  // Restaurar evento arquivado de volta aos eventos ativos (Painel ADM)
+  app.post("/api/events/:id/restore", (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: "ID de evento inválido." });
+      }
+      const restored = restoreArchivedEventFallback(id);
+      res.json({
+        success: true,
+        event: restored,
+        message: `Evento "${restored.title}" restaurado com sucesso para os eventos ativos.`
+      });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Erro ao restaurar evento arquivado." });
+    }
+  });
+
+  // Consultar logs da rotina de arquivamento automático
+  app.get("/api/events/archive-logs", (req, res) => {
+    try {
+      const logs = getEventArchiveLogsFallback();
+      res.json({ logs, retentionDays: EVENT_RETENTION_DAYS });
+    } catch (error: any) {
+      res.status(500).json({ error: "Erro ao consultar logs de arquivamento." });
+    }
+  });
+
+  // Executar rotina manual de expiração de eventos (>30 dias após encerramento)
   app.post("/api/events/cleanup-expired", (req, res) => {
     try {
       const result = archiveAndPruneExpiredEvents();
@@ -1742,10 +1885,140 @@ async function startServer() {
         success: true,
         prunedCount: result.prunedCount,
         preservedCount: result.preservedCount,
-        message: `Rotina concluída: ${result.prunedCount} eventos expirados foram arquivados e preservados no histórico.`
+        retentionDays: EVENT_RETENTION_DAYS,
+        message: `Rotina concluída: ${result.prunedCount} eventos ultrapassando ${EVENT_RETENTION_DAYS} dias de encerramento foram arquivados com integridade de dados preservada.`
       });
     } catch (error: any) {
       res.status(500).json({ error: "Erro ao executar rotina de expiração." });
+    }
+  });
+
+  // --- PORTAL DAS ESCOLAS (AMBIENTE ISOLADO MULTI-TENANT) ---
+  // Obter dados da escola autenticada (perfil institucional, notícias próprias e eventos próprios)
+  app.get("/api/school-portal/:schoolId/data", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const schoolId = parseInt(req.params.schoolId, 10);
+      const user = req.user;
+      
+      let dbUser = await getUserByUid(user?.uid || "");
+      if (!dbUser && user?.email) {
+        dbUser = await getUserByEmail(user.email);
+      }
+      const isChefe = checkIsChefe(dbUser, user);
+      
+      if (!isChefe && user?.role === "Escola" && user?.escolaId !== schoolId) {
+        return res.status(403).json({ error: "Acesso negado: Isolamento estrito da instituição violado." });
+      }
+
+      const school = getSchoolById(schoolId);
+      if (!school) {
+        return res.status(404).json({ error: "Instituição de ensino não encontrada." });
+      }
+
+      const allEvents = listAllEventsFallback();
+      const schoolEvents = allEvents.filter(e => 
+        (e.schoolId && e.schoolId === schoolId) || 
+        (e.schoolName && e.schoolName.toLowerCase().includes(school.name.toLowerCase())) ||
+        (e.location && e.location.toLowerCase().includes(school.name.toLowerCase()))
+      );
+
+      res.json({
+        school,
+        events: schoolEvents,
+        news: school.news || []
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Erro ao carregar ambiente da escola." });
+    }
+  });
+
+  // Atualizar informações de apresentação e perfil da própria escola
+  app.put("/api/school-portal/:schoolId/profile", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const schoolId = parseInt(req.params.schoolId, 10);
+      const user = req.user;
+      
+      let dbUser = await getUserByUid(user?.uid || "");
+      if (!dbUser && user?.email) {
+        dbUser = await getUserByEmail(user.email);
+      }
+      const isChefe = checkIsChefe(dbUser, user);
+
+      if (!isChefe && user?.role === "Escola" && user?.escolaId !== schoolId) {
+        return res.status(403).json({ error: "Acesso negado: Isolamento estrito da instituição violado." });
+      }
+
+      const school = getSchoolById(schoolId);
+      if (!school) {
+        return res.status(404).json({ error: "Instituição de ensino não encontrada." });
+      }
+
+      const { presentation, phone, email, address } = req.body;
+      if (presentation !== undefined) school.historicalOverview = presentation;
+      if (phone !== undefined) school.phone = phone;
+      if (email !== undefined) school.email = email;
+      if (address !== undefined) school.address = address;
+
+      logSchoolActionFallback({
+        schoolId,
+        action: "UPDATE_PROFILE",
+        resource: school.name,
+        details: "Atualização dos dados institucionais e apresentação",
+        performedBy: user?.name || "Representante Institucional"
+      });
+
+      res.json({ success: true, school });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Erro ao atualizar dados da instituição." });
+    }
+  });
+
+  // Publicar notícia institucional exclusiva da escola
+  app.post("/api/school-portal/:schoolId/news", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const schoolId = parseInt(req.params.schoolId, 10);
+      const user = req.user;
+
+      let dbUser = await getUserByUid(user?.uid || "");
+      if (!dbUser && user?.email) {
+        dbUser = await getUserByEmail(user.email);
+      }
+      const isChefe = checkIsChefe(dbUser, user);
+
+      if (!isChefe && user?.role === "Escola" && user?.escolaId !== schoolId) {
+        return res.status(403).json({ error: "Acesso negado: Isolamento estrito da instituição violado." });
+      }
+
+      const school = getSchoolById(schoolId);
+      if (!school) {
+        return res.status(404).json({ error: "Instituição de ensino não encontrada." });
+      }
+
+      const { title, summary, date, author, category } = req.body;
+      if (!title || !title.trim()) {
+        return res.status(400).json({ error: "Título da notícia é obrigatório." });
+      }
+
+      const createdNews = addSchoolNews(school.slug, {
+        title: title.trim(),
+        description: summary ? summary.trim() : "",
+        date: date || new Date().toLocaleDateString("pt-BR"),
+        author: author || school.name,
+        category: (category as any) || "Comunicado",
+        source: "Portal Institucional"
+      });
+
+      logSchoolActionFallback({
+        schoolId,
+        action: "PUBLISH_NEWS",
+        resource: school.name,
+        details: `Publicação de notícia institucional: "${title.trim()}"`,
+        performedBy: user?.name || "Representante Institucional"
+      });
+
+      res.status(201).json({ success: true, news: createdNews });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Erro ao publicar notícia institucional." });
     }
   });
 
@@ -1753,13 +2026,13 @@ async function startServer() {
   try {
     const initialPruned = archiveAndPruneExpiredEvents();
     if (initialPruned && initialPruned.prunedCount > 0) {
-      console.log(`[eloEscola Auto-Prune] ${initialPruned.prunedCount} eventos ultrapassando 48h foram arquivados com sucesso.`);
+      console.log(`[eloEscola Auto-Prune] ${initialPruned.prunedCount} eventos ultrapassando ${EVENT_RETENTION_DAYS} dias foram arquivados com sucesso.`);
     }
     setInterval(() => {
       try {
         const count = archiveAndPruneExpiredEvents();
         if (count && count.prunedCount > 0) {
-          console.log(`[eloEscola Auto-Prune Periódico] ${count.prunedCount} eventos expirados transferidos para o histórico.`);
+          console.log(`[eloEscola Auto-Prune Periódico] ${count.prunedCount} eventos ultrapassando ${EVENT_RETENTION_DAYS} dias transferidos para o histórico.`);
         }
       } catch (err) {
         console.warn("[eloEscola Auto-Prune] Erro na rotina periódica de arquivamento:", err);

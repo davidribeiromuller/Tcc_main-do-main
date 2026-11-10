@@ -28,15 +28,44 @@ export interface InstitutionalAccount {
   id: number;
   escolaId: number;
   escolaNome: string;
+  escolaSlug?: string;
   identificador: string;
   email: string;
   password?: string;
   status: "ativo" | "bloqueado";
-  criadoPor: string;
+  accountStatus?: "active" | "suspended" | "revoked";
+  verificationStatus?: "pending_verification" | "verified" | "rejected";
+  verificationMethod?: string;
+  verifiedBy?: string;
+  verifiedAt?: string;
   responsavel?: string;
+  representativeName?: string;
+  institutionalContact?: string;
   cargo?: string;
+  criadoPor: string;
   createdAt: string;
+  updatedAt?: string;
   lastLogin?: string;
+  lastLoginAt?: string;
+}
+
+export interface SchoolAccountAuditLog {
+  id: number;
+  schoolId: number;
+  accountId?: number;
+  action: string;
+  resource: string;
+  details?: string;
+  performedBy: string;
+  performedAt: string;
+}
+
+export interface EventArchiveLog {
+  id: number;
+  processedAt: string;
+  archivedCount: number;
+  details: string;
+  status: "success" | "error";
 }
 
 export interface Event {

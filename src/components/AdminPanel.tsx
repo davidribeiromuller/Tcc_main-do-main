@@ -123,6 +123,57 @@ export default function AdminPanel({
     cargo: "Diretor(a)"
   });
 
+  // Event Retention & History Archive state (30 dias)
+  const [eventViewFilter, setEventViewFilter] = useState<"active" | "archived">("active");
+  const [archivedEvents, setArchivedEvents] = useState<Event[]>([]);
+  const [loadingArchived, setLoadingArchived] = useState(false);
+  const [isRestoringEvent, setIsRestoringEvent] = useState<number | null>(null);
+
+  const fetchArchivedEvents = async () => {
+    setLoadingArchived(true);
+    try {
+      const res = await fetch("/api/events/archived");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.archived) {
+          setArchivedEvents(data.archived);
+        }
+      }
+    } catch (err) {
+      console.warn("Could not load archived events:", err);
+    } finally {
+      setLoadingArchived(false);
+    }
+  };
+
+  const handleRestoreEvent = async (eventId: number) => {
+    setIsRestoringEvent(eventId);
+    try {
+      const res = await fetch(`/api/events/${eventId}/restore`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erro ao restaurar evento.");
+      notifyAdmin(data.message || "Evento restaurado com sucesso!", "success");
+      fetchArchivedEvents();
+    } catch (err: any) {
+      notifyAdmin(err.message, "error");
+    } finally {
+      setIsRestoringEvent(null);
+    }
+  };
+
+  const handleTriggerRetentionRoutine = async () => {
+    try {
+      const res = await fetch("/api/events/cleanup-expired", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        notifyAdmin(data.message || "Rotina de retenção de 30 dias executada com sucesso!", "success");
+        fetchArchivedEvents();
+      }
+    } catch (err: any) {
+      notifyAdmin("Falha ao executar rotina de retenção.", "error");
+    }
+  };
+
   // Role modification modal state
   const [userToChangeRole, setUserToChangeRole] = useState<User | null>(null);
   const [selectedRoleOption, setSelectedRoleOption] = useState<"chefe" | "funcionario" | "user">("user");
@@ -546,6 +597,29 @@ export default function AdminPanel({
       loadInstitutionalAccounts();
     } catch (err: any) {
       notifyAdmin(err.message || "Erro ao alterar status da instituição.", "error");
+    }
+  };
+
+  const handleVerifySchoolAccount = async (accId: number, newStatus: "verified" | "pending_verification" | "rejected") => {
+    try {
+      const token = localStorage.getItem("token") || "";
+      const res = await fetch(`/api/admin/institutional-accounts/${accId}/verify`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          verificationStatus: newStatus,
+          verificationMethod: "Auditoria documental realizada pelo Administrador Chefe"
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Falha ao verificar identidade da escola.");
+      notifyAdmin(`Status de verificação alterado para "${newStatus === 'verified' ? 'Verificada' : newStatus === 'rejected' ? 'Rejeitada' : 'Pendente'}"!`, "success");
+      loadInstitutionalAccounts();
+    } catch (err: any) {
+      notifyAdmin(err.message, "error");
     }
   };
 
@@ -1475,19 +1549,132 @@ export default function AdminPanel({
         {/* ================= EVENTS TAB (FOR BOTH ADMINS) ================= */}
         {activeTab === "events" && (
           <>
-            <div className="bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 p-4 rounded-2xl flex items-start gap-3 shadow-xs">
-              <Calendar className="text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" size={18} />
-              <div className="text-xs text-blue-900 dark:text-blue-200 leading-relaxed">
-                <p className="font-semibold">Gestão Geral de Eventos das Escolas e Região:</p>
-                <p className="text-[11px] opacity-90 mt-0.5">
-                  {isChefe
-                    ? "Como Chefe Administrador, você pode criar novos eventos, editar ou excluir qualquer evento existente na agenda."
-                    : "Como Funcionário Administrador, você pode cadastrar novos eventos e editar/excluir apenas os eventos criados por você mesmo."}
-                </p>
+            <div className="bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+              <div className="flex items-start gap-3">
+                <Calendar className="text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" size={18} />
+                <div className="text-xs text-blue-900 dark:text-blue-200 leading-relaxed">
+                  <p className="font-semibold">Gestão de Eventos & Política de Retenção (30 dias):</p>
+                  <p className="text-[11px] opacity-90 mt-0.5">
+                    {isChefe
+                      ? "Eventos encerrados há mais de 30 dias são arquivados automaticamente pelo Supabase/Servidor com integridade total de participações e autorizações."
+                      : "Como Funcionário Administrador, você pode cadastrar e gerenciar seus eventos oficiais."}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setEventViewFilter("active")}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition ${
+                    eventViewFilter === "active"
+                      ? "bg-blue-600 text-white shadow-xs"
+                      : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700"
+                  }`}
+                >
+                  Ativos ({events.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEventViewFilter("archived");
+                    fetchArchivedEvents();
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition flex items-center gap-1.5 ${
+                    eventViewFilter === "archived"
+                      ? "bg-slate-800 text-white shadow-xs"
+                      : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700"
+                  }`}
+                >
+                  <Clock size={13} />
+                  <span>Arquivados &gt;30d ({archivedEvents.length})</span>
+                </button>
+                {isChefe && (
+                  <button
+                    type="button"
+                    onClick={handleTriggerRetentionRoutine}
+                    title="Executar verificação de expiração manual"
+                    className="p-1.5 rounded-xl bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 transition cursor-pointer"
+                  >
+                    <RefreshCw size={14} />
+                  </button>
+                )}
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {eventViewFilter === "archived" ? (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span>Histórico permanente de eventos arquivados após 30 dias do encerramento.</span>
+                  <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                    Dados de presença e assinaturas preservados
+                  </span>
+                </div>
+
+                {loadingArchived ? (
+                  <div className="text-center py-12 bg-white dark:bg-brand-card-dark rounded-3xl border border-dashed border-slate-200">
+                    <RefreshCw className="w-6 h-6 text-slate-400 animate-spin mx-auto mb-2" />
+                    <p className="text-xs text-slate-400">Consultando histórico de eventos arquivados...</p>
+                  </div>
+                ) : archivedEvents.length === 0 ? (
+                  <div className="text-center py-12 bg-white dark:bg-brand-card-dark rounded-3xl border border-dashed border-slate-200 text-slate-400">
+                    <Clock size={40} className="mx-auto mb-2 text-slate-300" />
+                    <p className="text-xs font-semibold">Nenhum evento arquivado no momento.</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Eventos encerrados há mais de 30 dias serão transferidos para cá automaticamente.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {archivedEvents.map((aEv) => (
+                      <div
+                        key={aEv.id}
+                        className="bg-white dark:bg-brand-card-dark rounded-2xl border border-slate-200 dark:border-slate-800 p-4 flex flex-col justify-between shadow-xs opacity-90 hover:opacity-100 transition"
+                      >
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                              Arquivado (&gt;30 dias)
+                            </span>
+                            <span className="text-[11px] font-mono text-slate-400">
+                              {aEv.day}/{aEv.month + 1}/{aEv.year}
+                            </span>
+                          </div>
+                          <h4 className="text-sm font-serif font-bold text-slate-900 dark:text-white leading-snug">
+                            {aEv.title}
+                          </h4>
+                          <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                            <MapPin size={12} className="text-slate-400" />
+                            <span className="truncate">{aEv.location}</span>
+                          </p>
+                          {aEv.archivedAt && (
+                            <p className="text-[10px] text-slate-400 mt-2">
+                              Arquivado em: {new Date(aEv.archivedAt).toLocaleDateString("pt-BR")}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                          <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold">
+                            Registros protegidos
+                          </span>
+                          {isChefe && (
+                            <button
+                              type="button"
+                              disabled={isRestoringEvent === aEv.id}
+                              onClick={() => handleRestoreEvent(aEv.id)}
+                              className="px-2.5 py-1 text-xs font-semibold bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition cursor-pointer flex items-center gap-1"
+                            >
+                              <RefreshCw size={12} className={isRestoringEvent === aEv.id ? "animate-spin" : ""} />
+                              <span>Restaurar</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredEvents.length === 0 ? (
                 <div className="col-span-full flex flex-col items-center justify-center py-16 text-center text-slate-400 bg-white dark:bg-brand-card-dark rounded-3xl border border-dashed border-slate-300 dark:border-white/10 p-8">
                   <Calendar size={48} className="text-slate-300 dark:text-slate-600 mb-3" />
@@ -1639,6 +1826,7 @@ export default function AdminPanel({
                 })
               )}
             </div>
+          )}
           </>
         )}
 
@@ -1698,15 +1886,33 @@ export default function AdminPanel({
                           </h4>
                         </div>
 
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
-                            isBlocked
-                              ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
-                              : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                          }`}
-                        >
-                          {isBlocked ? "Bloqueada" : "Ativa"}
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                              acc.verificationStatus === "verified"
+                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                                : acc.verificationStatus === "rejected"
+                                ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
+                                : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                            }`}
+                          >
+                            {acc.verificationStatus === "verified"
+                              ? "✓ Verificada"
+                              : acc.verificationStatus === "rejected"
+                              ? "✗ Rejeitada"
+                              : "⏳ Pendente"}
+                          </span>
+
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                              isBlocked
+                                ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
+                                : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                            }`}
+                          >
+                            {isBlocked ? "Bloqueada" : "Ativa"}
+                          </span>
+                        </div>
                       </div>
 
                       <div className="space-y-1 mb-3 text-xs text-slate-600 dark:text-slate-400">
@@ -1731,7 +1937,16 @@ export default function AdminPanel({
                         )}
                       </div>
 
-                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => handleVerifySchoolAccount(acc.id, acc.verificationStatus === "verified" ? "pending_verification" : "verified")}
+                          className="px-2.5 py-1 text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 rounded-lg transition cursor-pointer flex items-center gap-1"
+                        >
+                          <ShieldCheck size={12} />
+                          <span>{acc.verificationStatus === "verified" ? "Revogar" : "Verificar"}</span>
+                        </button>
+
                         <button
                           type="button"
                           onClick={() => {
