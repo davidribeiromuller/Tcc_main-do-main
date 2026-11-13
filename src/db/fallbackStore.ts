@@ -562,7 +562,7 @@ function saveSchoolAuditLogs() {
 }
 
 // --- AUTOMATIC 30-DAY EVENT EXPIRATION & HISTORY PRESERVATION ROUTINE ---
-// Global retention policy: EVENT_RETENTION_DAYS = 30
+// Global retention policy: EVENT_RETENTION_DAYS = 3 (migration 0004 / pg_cron)
 export function archiveAndPruneExpiredEvents(): { prunedCount: number; preservedCount: number } {
   const now = new Date();
   const RETENTION_MS = EVENT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
@@ -587,13 +587,13 @@ export function archiveAndPruneExpiredEvents(): { prunedCount: number; preserved
       continue;
     }
 
-    // Stage B: Event concluded within 30 days -> remains in operational events
+    // Stage B: Event concluded within 3 days -> remains in operational events
     if (timeSinceEnd < RETENTION_MS) {
       remainingEvents.push(event);
       continue;
     }
 
-    // Stage C: Concluded more than 30 days ago -> Auto-archive!
+    // Stage C: Concluded more than 3 days ago -> Auto-exclude (recoverable)!
     prunedCount++;
     const alreadyArchived = fallbackEventHistory.some(h => h.id === event.id);
     if (!alreadyArchived) {

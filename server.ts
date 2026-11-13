@@ -1839,7 +1839,7 @@ async function startServer() {
     }
   });
 
-  // Listar histórico geral de eventos arquivados (>30 dias)
+  // Listar histórico geral de eventos excluídos (retenção de 3 dias)
   app.get("/api/events/archived", (req, res) => {
     try {
       const archived = listArchivedEventsFallback();
@@ -1877,7 +1877,7 @@ async function startServer() {
     }
   });
 
-  // Executar rotina manual de expiração de eventos (>30 dias após encerramento)
+  // Executar rotina manual de expiração de eventos (3 dias após encerramento)
   app.post("/api/events/cleanup-expired", (req, res) => {
     try {
       const result = archiveAndPruneExpiredEvents();

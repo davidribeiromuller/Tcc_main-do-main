@@ -612,7 +612,7 @@ export default function SchoolPortal({
                   Eventos Vinculados à {schoolData.shortName || schoolData.name}
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Eventos oficiais integrados à política de ciclo de vida de 30 dias.
+                  Eventos oficiais integrados à política de ciclo de vida de 3 dias.
                 </p>
               </div>
               <button

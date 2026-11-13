@@ -41,6 +41,14 @@ import {
   CalendarDays
 } from "lucide-react";
 import { User, Event } from "../types";
+import {
+  fetchDeletedEvents,
+  restoreDeletedEvent,
+  purgeDeletedEvent,
+  runRetentionRoutine,
+  type DeletedEvent,
+} from "../lib/deletedEventsService";
+import EventSuggestionsTab from "./EventSuggestionsTab";
 import { formatLastActive, formatDateTimeBR } from "../lib/dateUtils";
 import { calculateRealUserStats } from "../lib/userStats";
 import EventAuthorizationsModal from "./EventAuthorizationsModal.tsx";
@@ -65,6 +73,8 @@ interface AdminPanelProps {
   onSelectEvent?: (event: Event) => void;
   currentUser: User | null;
   onShowToast?: (message: string, type?: "error" | "warning" | "success" | "info") => void;
+  /** Recarrega a agenda após restauração/expurgo de eventos. */
+  onRefreshEvents?: () => void | Promise<void>;
 }
 
 export default function AdminPanel({
@@ -80,7 +90,8 @@ export default function AdminPanel({
   onDeleteEvent,
   onSelectEvent,
   currentUser,
-  onShowToast
+  onShowToast,
+  onRefreshEvents
 }: AdminPanelProps) {
   const isChefe = isChefeAdmin(currentUser);
   const isFuncionario = isFuncionarioAdmin(currentUser);
@@ -92,7 +103,7 @@ export default function AdminPanel({
     }
   };
 
-  const [activeTab, setActiveTab] = useState<"users" | "blocked" | "events" | "schools">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "blocked" | "events" | "schools" | "suggestions">("users");
   const [viewMode, setViewMode] = useState<"table" | "cards">(() => {
     if (typeof window !== "undefined" && window.innerWidth < 768) {
       return "cards";
@@ -123,37 +134,35 @@ export default function AdminPanel({
     cargo: "Diretor(a)"
   });
 
-  // Event Retention & History Archive state (30 dias)
-  const [eventViewFilter, setEventViewFilter] = useState<"active" | "archived">("active");
-  const [archivedEvents, setArchivedEvents] = useState<Event[]>([]);
+  // Retenção e lista de eventos excluídos (3 dias após o término)
+  const [eventViewFilter, setEventViewFilter] = useState<"active" | "excluded">("active");
+  const [deletedEvents, setDeletedEvents] = useState<DeletedEvent[]>([]);
   const [loadingArchived, setLoadingArchived] = useState(false);
   const [isRestoringEvent, setIsRestoringEvent] = useState<number | null>(null);
+  const [isPurgingEvent, setIsPurgingEvent] = useState<number | null>(null);
+  const [isRunningRetention, setIsRunningRetention] = useState(false);
 
-  const fetchArchivedEvents = async () => {
+  const loadDeletedEvents = async () => {
     setLoadingArchived(true);
     try {
-      const res = await fetch("/api/events/archived");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.archived) {
-          setArchivedEvents(data.archived);
-        }
+      const { events: excluidos, error } = await fetchDeletedEvents({ limit: 200 });
+      if (error) {
+        console.warn("Falha ao carregar eventos excluídos:", error);
       }
-    } catch (err) {
-      console.warn("Could not load archived events:", err);
+      setDeletedEvents(excluidos);
     } finally {
       setLoadingArchived(false);
     }
   };
 
-  const handleRestoreEvent = async (eventId: number) => {
-    setIsRestoringEvent(eventId);
+  const handleRestoreEvent = async (deletedEventId: number) => {
+    setIsRestoringEvent(deletedEventId);
     try {
-      const res = await fetch(`/api/events/${eventId}/restore`, { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erro ao restaurar evento.");
-      notifyAdmin(data.message || "Evento restaurado com sucesso!", "success");
-      fetchArchivedEvents();
+      const { success, error } = await restoreDeletedEvent(deletedEventId);
+      if (!success) throw new Error(error?.message || "Erro ao restaurar evento.");
+      notifyAdmin("Evento restaurado e publicado novamente no app!", "success");
+      await loadDeletedEvents();
+      if (onRefreshEvents) onRefreshEvents();
     } catch (err: any) {
       notifyAdmin(err.message, "error");
     } finally {
@@ -161,16 +170,38 @@ export default function AdminPanel({
     }
   };
 
-  const handleTriggerRetentionRoutine = async () => {
+  const handlePurgeEvent = async (deletedEventId: number, title: string) => {
+    if (!window.confirm(`Excluir definitivamente "${title}"? Esta ação não pode ser desfeita.`)) {
+      return;
+    }
+    setIsPurgingEvent(deletedEventId);
     try {
-      const res = await fetch("/api/events/cleanup-expired", { method: "POST" });
-      const data = await res.json();
-      if (res.ok) {
-        notifyAdmin(data.message || "Rotina de retenção de 30 dias executada com sucesso!", "success");
-        fetchArchivedEvents();
-      }
+      const { success, error } = await purgeDeletedEvent(deletedEventId);
+      if (!success) throw new Error(error?.message || "Erro ao excluir definitivamente.");
+      notifyAdmin("Evento removido definitivamente.", "success");
+      await loadDeletedEvents();
     } catch (err: any) {
-      notifyAdmin("Falha ao executar rotina de retenção.", "error");
+      notifyAdmin(err.message, "error");
+    } finally {
+      setIsPurgingEvent(null);
+    }
+  };
+
+  const handleTriggerRetentionRoutine = async () => {
+    setIsRunningRetention(true);
+    try {
+      const { success, total, message, error } = await runRetentionRoutine();
+      if (!success) throw new Error(error?.message || "Falha na rotina de retenção.");
+      notifyAdmin(
+        message || `Rotina executada: ${total ?? 0} evento(s) movido(s) para excluídos.`,
+        "success"
+      );
+      await loadDeletedEvents();
+      if (onRefreshEvents) onRefreshEvents();
+    } catch (err: any) {
+      notifyAdmin(err.message, "error");
+    } finally {
+      setIsRunningRetention(false);
     }
   };
 
@@ -734,6 +765,19 @@ export default function AdminPanel({
                 <span>Eventos ({events.length})</span>
               </button>
 
+              <button
+                type="button"
+                onClick={() => setActiveTab("suggestions")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  activeTab === "suggestions"
+                    ? "bg-indigo-600 text-white shadow-xs"
+                    : "text-indigo-700 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/20"
+                }`}
+              >
+                <Sparkles size={14} />
+                <span>Sugestões</span>
+              </button>
+
               {isChefe && (
                 <button
                   type="button"
@@ -752,7 +796,7 @@ export default function AdminPanel({
           </div>
 
           {/* Search & Secondary Action Bar */}
-          {activeTab !== "events" ? (
+          {activeTab === "users" || activeTab === "blocked" ? (
             <>
               <div className="flex flex-col sm:flex-row items-center gap-3 mt-4">
                 <div className="relative flex-1 w-full">
@@ -1553,10 +1597,10 @@ export default function AdminPanel({
               <div className="flex items-start gap-3">
                 <Calendar className="text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" size={18} />
                 <div className="text-xs text-blue-900 dark:text-blue-200 leading-relaxed">
-                  <p className="font-semibold">Gestão de Eventos & Política de Retenção (30 dias):</p>
+                  <p className="font-semibold">Gestão de Eventos & Política de Retenção (3 dias):</p>
                   <p className="text-[11px] opacity-90 mt-0.5">
                     {isChefe
-                      ? "Eventos encerrados há mais de 30 dias são arquivados automaticamente pelo Supabase/Servidor com integridade total de participações e autorizações."
+                      ? "Eventos encerrados há mais de 3 dias saem do app automaticamente e passam para a lista de Excluídos, onde podem ser restaurados."
                       : "Como Funcionário Administrador, você pode cadastrar e gerenciar seus eventos oficiais."}
                   </p>
                 </div>
@@ -1577,99 +1621,127 @@ export default function AdminPanel({
                 <button
                   type="button"
                   onClick={() => {
-                    setEventViewFilter("archived");
-                    fetchArchivedEvents();
+                    setEventViewFilter("excluded");
+                    loadDeletedEvents();
                   }}
                   className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition flex items-center gap-1.5 ${
-                    eventViewFilter === "archived"
+                    eventViewFilter === "excluded"
                       ? "bg-slate-800 text-white shadow-xs"
                       : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700"
                   }`}
                 >
                   <Clock size={13} />
-                  <span>Arquivados &gt;30d ({archivedEvents.length})</span>
+                  <span>Excluídos ({deletedEvents.length})</span>
                 </button>
                 {isChefe && (
                   <button
                     type="button"
+                    disabled={isRunningRetention}
                     onClick={handleTriggerRetentionRoutine}
-                    title="Executar verificação de expiração manual"
-                    className="p-1.5 rounded-xl bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 transition cursor-pointer"
+                    title="Executar a rotina de retenção agora"
+                    className="p-1.5 rounded-xl bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 transition cursor-pointer disabled:opacity-50"
                   >
-                    <RefreshCw size={14} />
+                    <RefreshCw size={14} className={isRunningRetention ? "animate-spin" : ""} />
                   </button>
                 )}
               </div>
             </div>
 
-            {eventViewFilter === "archived" ? (
+            {eventViewFilter === "excluded" ? (
               <div className="space-y-4">
-                <div className="flex items-center justify-between text-xs text-slate-500">
-                  <span>Histórico permanente de eventos arquivados após 30 dias do encerramento.</span>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs text-slate-500">
+                  <span>Eventos que saíram do app 3 dias após o término. Podem ser restaurados a qualquer momento.</span>
                   <span className="font-semibold text-emerald-700 dark:text-emerald-400">
-                    Dados de presença e assinaturas preservados
+                    Exclusão recuperável
                   </span>
                 </div>
 
                 {loadingArchived ? (
                   <div className="text-center py-12 bg-white dark:bg-brand-card-dark rounded-3xl border border-dashed border-slate-200">
                     <RefreshCw className="w-6 h-6 text-slate-400 animate-spin mx-auto mb-2" />
-                    <p className="text-xs text-slate-400">Consultando histórico de eventos arquivados...</p>
+                    <p className="text-xs text-slate-400">Consultando a lista de eventos excluídos...</p>
                   </div>
-                ) : archivedEvents.length === 0 ? (
+                ) : deletedEvents.length === 0 ? (
                   <div className="text-center py-12 bg-white dark:bg-brand-card-dark rounded-3xl border border-dashed border-slate-200 text-slate-400">
                     <Clock size={40} className="mx-auto mb-2 text-slate-300" />
-                    <p className="text-xs font-semibold">Nenhum evento arquivado no momento.</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">Eventos encerrados há mais de 30 dias serão transferidos para cá automaticamente.</p>
+                    <p className="text-xs font-semibold">Nenhum evento excluído no momento.</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Eventos encerrados há mais de 3 dias serão transferidos para cá automaticamente.
+                    </p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {archivedEvents.map((aEv) => (
-                      <div
-                        key={aEv.id}
-                        className="bg-white dark:bg-brand-card-dark rounded-2xl border border-slate-200 dark:border-slate-800 p-4 flex flex-col justify-between shadow-xs opacity-90 hover:opacity-100 transition"
-                      >
-                        <div>
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                              Arquivado (&gt;30 dias)
-                            </span>
-                            <span className="text-[11px] font-mono text-slate-400">
-                              {aEv.day}/{aEv.month + 1}/{aEv.year}
-                            </span>
-                          </div>
-                          <h4 className="text-sm font-serif font-bold text-slate-900 dark:text-white leading-snug">
-                            {aEv.title}
-                          </h4>
-                          <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
-                            <MapPin size={12} className="text-slate-400" />
-                            <span className="truncate">{aEv.location}</span>
-                          </p>
-                          {aEv.archivedAt && (
-                            <p className="text-[10px] text-slate-400 mt-2">
-                              Arquivado em: {new Date(aEv.archivedAt).toLocaleDateString("pt-BR")}
-                            </p>
-                          )}
-                        </div>
+                    {deletedEvents.map((dEv) => {
+                      const payload: any = dEv.payload ?? {};
+                      const dia = payload.day ?? payload.data_inicio?.slice?.(8, 10);
+                      const mes = payload.month !== undefined ? payload.month + 1 : undefined;
+                      const ano = payload.year ?? payload.data_inicio?.slice?.(0, 4);
+                      const dataTexto =
+                        dia && mes && ano ? `${dia}/${mes}/${ano}` : "Data não informada";
+                      const localTexto = payload.location || payload.local || payload.cidade || "—";
 
-                        <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                          <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold">
-                            Registros protegidos
-                          </span>
-                          {isChefe && (
-                            <button
-                              type="button"
-                              disabled={isRestoringEvent === aEv.id}
-                              onClick={() => handleRestoreEvent(aEv.id)}
-                              className="px-2.5 py-1 text-xs font-semibold bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition cursor-pointer flex items-center gap-1"
-                            >
-                              <RefreshCw size={12} className={isRestoringEvent === aEv.id ? "animate-spin" : ""} />
-                              <span>Restaurar</span>
-                            </button>
-                          )}
+                      return (
+                        <div
+                          key={dEv.id}
+                          className="bg-white dark:bg-brand-card-dark rounded-2xl border border-slate-200 dark:border-slate-800 p-4 flex flex-col justify-between shadow-xs opacity-90 hover:opacity-100 transition"
+                        >
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                                {dEv.deletionReason === "auto_retention_3d"
+                                  ? "Excluído (retenção 3 dias)"
+                                  : "Excluído manualmente"}
+                              </span>
+                              <span className="text-[11px] font-mono text-slate-400">{dataTexto}</span>
+                            </div>
+                            <h4 className="text-sm font-serif font-bold text-slate-900 dark:text-white leading-snug">
+                              {dEv.title}
+                            </h4>
+                            <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                              <MapPin size={12} className="text-slate-400 shrink-0" />
+                              <span className="truncate">{localTexto}</span>
+                            </p>
+                            <p className="text-[10px] text-slate-400 mt-2">
+                              Excluído em: {new Date(dEv.deletedAt).toLocaleDateString("pt-BR")}
+                            </p>
+                            <p className="text-[10px] text-slate-400">
+                              Tabela de origem: {dEv.sourceTable} #{dEv.sourceId}
+                            </p>
+                          </div>
+
+                          <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                            <span className="text-[10px] text-slate-500 font-semibold">
+                              Snapshot preservado
+                            </span>
+                            {isChefe && (
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  disabled={isRestoringEvent === dEv.id}
+                                  onClick={() => handleRestoreEvent(dEv.id)}
+                                  className="px-2.5 py-1 text-xs font-semibold bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition cursor-pointer flex items-center gap-1 disabled:opacity-50"
+                                >
+                                  <RefreshCw
+                                    size={12}
+                                    className={isRestoringEvent === dEv.id ? "animate-spin" : ""}
+                                  />
+                                  <span>Restaurar</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isPurgingEvent === dEv.id}
+                                  onClick={() => handlePurgeEvent(dEv.id, dEv.title)}
+                                  title="Excluir definitivamente"
+                                  className="p-1.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg transition cursor-pointer disabled:opacity-50"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1828,6 +1900,16 @@ export default function AdminPanel({
             </div>
           )}
           </>
+        )}
+
+        {/* TAB: Sugestões de eventos geradas pela IA */}
+        {activeTab === "suggestions" && (
+          <EventSuggestionsTab
+            currentUser={currentUser}
+            canApprove={isChefe}
+            onShowToast={notifyAdmin}
+            onRefreshEvents={onRefreshEvents}
+          />
         )}
 
         {/* TAB 4: Gestão de Contas Institucionais das Escolas (Exclusivo ADM Chefe) */}

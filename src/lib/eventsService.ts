@@ -147,6 +147,8 @@ export async function fetchEventsDirectFromSupabase(): Promise<{ events: Event[]
       caughtError = errEventos;
     } else if (eventosRows && Array.isArray(eventosRows) && eventosRows.length > 0) {
       for (const row of eventosRows) {
+        // Eventos excluídos pela retenção (3 dias) não aparecem mais no app.
+        if (row?.is_archived === true || row?.status === "excluido") continue;
         const mapped = mapSupabaseEventoToEvent(row);
         const normTitle = (mapped.title || "").trim().toLowerCase();
         if (!seenIds.has(mapped.id) && !seenTitles.has(normTitle)) {
@@ -173,6 +175,8 @@ export async function fetchEventsDirectFromSupabase(): Promise<{ events: Event[]
       if (!caughtError) caughtError = errEvents;
     } else if (eventsRows && Array.isArray(eventsRows) && eventsRows.length > 0) {
       for (const row of eventsRows) {
+        // Eventos excluídos pela retenção (3 dias) não aparecem mais no app.
+        if (row?.is_archived === true || row?.status === "excluido") continue;
         const mapped = mapSupabaseEventsTableToEvent(row);
         const normTitle = (mapped.title || "").trim().toLowerCase();
         if (!seenIds.has(mapped.id) && !seenTitles.has(normTitle)) {
@@ -210,6 +214,11 @@ export async function createEventDirectInSupabase(eventData: {
   website?: string | null;
   image?: string;
   creatorId?: number;
+  /** Campos extras usados ao aplicar uma sugestão da IA. */
+  description?: string | null;
+  category?: string | null;
+  city?: string | null;
+  schoolName?: string | null;
 }): Promise<{ success: boolean; event: Event | null; error: any }> {
   if (!isSupabaseConfigured()) {
     return { success: false, event: null, error: new Error("Supabase não configurado") };
@@ -260,14 +269,14 @@ export async function createEventDirectInSupabase(eventData: {
   try {
     const rowEventos: Record<string, any> = {
       titulo: eventData.title,
-      descricao: eventData.requirements || "Evento da comunidade escolar",
-      categoria: "Escolar",
-      cidade: "Araucária",
+      descricao: eventData.description || eventData.requirements || "Evento da comunidade escolar",
+      categoria: eventData.category || "Escolar",
+      cidade: eventData.city || "Araucária",
       local: eventData.location,
       endereco: eventData.location,
       data_inicio: dataInicioIso,
       data_fim: dataInicioIso,
-      organizador: "Diretoria Helena Wysocki",
+      organizador: eventData.schoolName || "Diretoria Helena Wysocki",
       publico_alvo: eventData.requirements || "Comunidade Escolar",
       precisa_pagar: !!eventData.isPaid,
       valor: eventData.price ? parseFloat(eventData.price.replace(/[^\d.,]/g, "").replace(",", ".")) || 0 : 0,
