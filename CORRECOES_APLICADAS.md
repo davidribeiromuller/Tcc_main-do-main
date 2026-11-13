@@ -55,9 +55,52 @@ VALUES
    '52998224725', '2026-001234', 'Maria Silva', '2008-05-10', 'Aluno', 'secretaria');
 ```
 
-> **Enquanto a tabela estiver vazia, ninguém consegue concluir o cadastro.** Se a
-> migration ainda não tiver sido aplicada no ambiente, `verifyInstitutionalLink` devolve
-> `skipped: true` e o cadastro segue só com a validação de campos — para não travar o TCC.
+> **Modelo alterado na Rodada 6 (ver abaixo):** o vínculo passou a ser **opcional**.
+> O cadastro é aberto, e a `institutional_links` só entra quando a secretaria a preenche.
+
+---
+
+## 2b. Rodada 6 — cadastro aberto, RPC de vínculo corrigida e proteção de dados
+
+### O que o print mostrava
+A tela do print tinha só **Nascimento, Gênero e Instituição**, sem os campos Matrícula e
+E-mail pessoal. Cruzando o horário do print (08:31 local) com o histórico de deploys,
+o build no ar naquele momento era o de `f8d00c1` (02:25Z), **anterior** ao PR #10 (12:36Z).
+Naquele build não existiam `staticHosting.ts` nem `schoolAccountService.ts`, então
+`fetch("/api/auth/register")` recebia o `index.html` do GitHub Pages com status 200 e caía
+na mensagem genérica. **Isso já estava corrigido** — era só um build antigo no navegador.
+
+### Três defeitos reais encontrados ao investigar
+
+| # | Defeito | Impacto | Correção |
+|---|---|---|---|
+| 1 | `verify_institutional_link` declarava `RETURNS public.institutional_links` (tipo composto) | Função SQL devolve **uma linha de NULLs** quando não acha nada. O cliente fazia `data[0]` e concluía `found: true` sem vínculo existir. Agora devolve `TABLE(institution, role)` → zero linhas. O cliente também exige `row.institution`. |
+| 2 | Policies de `institutional_links` eram `USING (true)` para SELECT/INSERT/UPDATE com a chave **pública** | Qualquer visitante lia **CPF, matrícula, nome, data de nascimento e a senha provisória** de todos os alunos, e podia inserir/alterar linhas. Verificado com `SET ROLE anon`. | Policies removidas e `REVOKE ALL` da tabela para `anon`/`authenticated`. A conferência e a ativação passam por funções `SECURITY DEFINER`. |
+| 3 | A senha digitada no cadastro não chegava ao banco | `registerUserDirectInSupabase` inseria `password` apenas se ela viesse… e o app autentica nessa coluna. Aluno criado com senha desconhecida. | A senha provisória agora é gravada; `must_change_password = true` continua. |
+
+Ajuste adicional: `handleRegister` não limpava `loginError` após sucesso, então o `Register`
+reintroduzia a mensagem antiga ao remontar (`registerError` → `useEffect` → `setError`).
+
+### Modelo atual do cadastro (decisão do autor)
+- **Aberto**: qualquer pessoa com e-mail institucional válido, CPF com dígito verificador,
+  matrícula e e-mail pessoal cria a própria conta.
+- **Vínculo opcional**: se a secretaria cadastrou CPF + matrícula em `institutional_links`,
+  a matrícula é conferida e a `role` vem do vínculo. Se não cadastrou, entra como `Aluno`.
+- Quem quiser o modelo fechado pode passar `requireLink: true` em `registerSchoolAccount`.
+
+### Migration
+`src/db/migrations/0008_open_school_registration.sql` — **aplicada** no projeto.
+
+### Validação executada
+- `verify_institutional_link` sem vínculo: **0 linhas** (antes: 1 linha de NULLs).
+- Com vínculo: retorna `institution` e `role` corretamente.
+- `SELECT` direto em `institutional_links` como `anon`: **permission denied**.
+- Cadastro aberto como `anon` (`BEGIN`/`ROLLBACK`): insert OK com `role=Aluno`,
+  `must_change_password=true`, instituição gravada. Banco conferido depois: 23 usuários,
+  0 vínculos, nenhum registro de teste.
+- Regras de campo: cadastro aberto **PASS** · e-mail duplicado **PASS** · Gmail recusado
+  **PASS** · CPF inválido recusado **PASS**.
+- `tsc --noEmit`: 0 erros · `npm run build`: ok (5,22 s) · `sync` e `bundle:edge:check`: ok.
 
 ### Verificação já feita
 - `verify_institutional_link` pela chave anon: **200** com vínculo correto.

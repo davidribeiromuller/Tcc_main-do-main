@@ -64,7 +64,10 @@ export async function verifyInstitutionalLink(
     }
 
     const row = Array.isArray(data) ? data[0] : data;
-    if (!row) return { found: false };
+    // Uma função que devolve tipo composto retorna UMA linha de NULLs quando não
+    // acha nada. Sem esta checagem o vínculo era considerado encontrado sem
+    // existir. Exigimos que a instituição venha preenchida.
+    if (!row || !row.institution) return { found: false };
 
     return { found: true, role: row.role || "Aluno" };
   } catch (err: any) {
@@ -82,7 +85,8 @@ export async function verifyInstitutionalLink(
  * Fluxo:
  *  1. Valida os campos (CPF com dígito verificador, matrícula, data de
  *     nascimento, e-mail institucional, e-mail pessoal, senha provisória).
- *  2. Confere o vínculo prévio CPF + matrícula na instituição.
+ *  2. Consulta o vínculo CPF + matrícula na instituição (opcional: quando a
+ *     secretaria cadastrou, confere a matrícula e define a `role`).
  *  3. Cria o usuário com `must_change_password = true`.
  */
 export async function registerSchoolAccount(
@@ -114,22 +118,25 @@ export async function registerSchoolAccount(
     };
   }
 
-  // 3. Vínculo prévio (falta grave de segurança pular essa etapa)
-  const shouldRequireLink = data.requireLink !== false;
+  // 3. Vínculo prévio — OPCIONAL.
+  //
+  // Decisão do autor do TCC: o cadastro é aberto; quem tem e-mail institucional
+  // e dados coerentes cria a própria conta. O vínculo só é usado quando a
+  // secretaria o cadastrou, para conferir a matrícula e definir a `role`.
+  // `requireLink: true` continua disponível para quem quiser o modelo fechado.
   const link = await verifyInstitutionalLink(data.institution, data.cpf, data.matricula);
+  const shouldRequireLink = data.requireLink === true;
 
-  if (shouldRequireLink && !link.skipped) {
-    if (!link.found) {
-      return {
-        success: false,
-        error:
-          "Não encontramos seu vínculo escolar. Confira a matrícula e o CPF ou procure a secretaria da escola para liberar seu primeiro acesso.",
-        fieldErrors: {
-          matricula: "Matrícula não confere com o vínculo cadastrado pela escola.",
-          cpf: "CPF não confere com o vínculo cadastrado pela escola.",
-        },
-      };
-    }
+  if (shouldRequireLink && !link.skipped && !link.found) {
+    return {
+      success: false,
+      error:
+        "Não encontramos seu vínculo escolar. Confira a matrícula e o CPF ou procure a secretaria da escola para liberar seu primeiro acesso.",
+      fieldErrors: {
+        matricula: "Matrícula não confere com o vínculo cadastrado pela escola.",
+        cpf: "CPF não confere com o vínculo cadastrado pela escola.",
+      },
+    };
   }
 
   // 4. Criação do usuário
@@ -154,19 +161,16 @@ export async function registerSchoolAccount(
   }
 
   // 5. Marca o vínculo como ativado (best effort).
+  //    A tabela não é mais legível/gravável pelo cliente (tem CPF e senha
+  //    provisória), então a atualização passa por uma função SECURITY DEFINER.
   if (link.found) {
     try {
-      await getSupabaseClient()
-        .from("institutional_links")
-        .update({
-          status: "active",
-          activated_by_user_id: user.id,
-          activated_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("institution", data.institution)
-        .eq("cpf", normalizeCPF(data.cpf))
-        .eq("matricula", data.matricula.trim());
+      await getSupabaseClient().rpc("activate_institutional_link", {
+        p_institution: data.institution,
+        p_cpf: normalizeCPF(data.cpf),
+        p_matricula: data.matricula.trim(),
+        p_user_id: user.id,
+      });
     } catch (err) {
       console.warn("[schoolAccount] Falha ao marcar vínculo como ativado:", err);
     }
