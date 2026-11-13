@@ -211,10 +211,7 @@ export default function WelcomeScreen({
         {/* EDITORIAL HERO SECTION */}
         <section className="mb-6 sm:mb-8 max-w-3xl text-left">
           <h1 className="font-serif text-3xl sm:text-4xl lg:text-5xl font-medium tracking-tight text-[#153820] dark:text-[#e4f3e6] leading-[1.2]">
-            <span className="text-5xl sm:text-6xl font-bold font-serif float-left leading-[0.85] mr-3 mt-1 text-[#11311b] dark:text-[#9ed4a8] select-none">
-              e
-            </span>
-            loEscola — um portal para oportunidades e informações para todos.
+            Um portal para oportunidades e informações para todos.
           </h1>
 
           <p className="mt-3 sm:mt-4 text-sm sm:text-base text-[#385940] dark:text-[#a8c9b0] leading-relaxed max-w-2xl font-normal">
