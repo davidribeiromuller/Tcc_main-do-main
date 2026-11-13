@@ -13,6 +13,11 @@ import {
   Route
 } from "lucide-react";
 import { Event } from "../types";
+import {
+  requestCurrentCoords,
+  saveCoords,
+  geolocationFalhou,
+} from "../lib/geolocation.ts";
 
 interface EventLocationModalProps {
   isOpen: boolean;
@@ -39,38 +44,26 @@ export default function EventLocationModal({
 
   if (!isOpen || !event) return null;
 
-  const handleRequestLocation = () => {
+  const handleRequestLocation = async () => {
     setIsLocating(true);
     setLocError(null);
 
-    if (!("geolocation" in navigator)) {
+    const resultado = await requestCurrentCoords();
+
+    if (geolocationFalhou(resultado)) {
       setIsLocating(false);
+      // Sem posição real, seguir para o detalhe do evento sem rota.
       onSkip(event);
       return;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const coords = {
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        };
-        try {
-          localStorage.setItem("user_geolocation_coords", JSON.stringify(coords));
-        } catch (e) {
-          console.warn("Could not cache user coords:", e);
-        }
-        setIsLocating(false);
-        onAuthorize(event, coords);
-      },
-      (err) => {
-        console.warn("Geolocation permission error or rejected:", err);
-        setIsLocating(false);
-        // If rejected, still proceed smoothly to the event detail view
-        onSkip(event);
-      },
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
-    );
+    const coords = resultado.coords;
+    // `saveCoords` grava o carimbo de tempo. Antes este trecho salvava só
+    // {lat,lng}, e `readSavedCoords` descarta o que não tem `ts` — a posição
+    // recém-obtida era ignorada na tela seguinte.
+    saveCoords(coords);
+    setIsLocating(false);
+    onAuthorize(event, coords);
   };
 
   const handleSkip = () => {

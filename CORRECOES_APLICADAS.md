@@ -476,3 +476,81 @@ Como a function bundlada é válida foi verificada sem deploy: o bundle foi carr
 - Medição estrutural: 6 colunas na tabela, wrapper com `overflow-x-auto`,
   último cabeçalho = "Ações Administrativas".
 - `tsc --noEmit`: 0 erros · `npm run build`: ok (5,01 s).
+
+---
+
+## 8. Sugestões (500) e localização do usuário
+
+### 8.1 O 500 da Edge Function `ai-event-scout` — regressão da Rodada 5
+
+O log do navegador mostrava:
+
+```
+POST .../functions/v1/ai-event-scout → 500 (Internal Server Error)
+```
+
+Causa reproduzida no banco:
+
+```sql
+INSERT ... ON CONFLICT (fingerprint) DO NOTHING;
+-- ERROR: 42P10: there is no unique or exclusion constraint
+--        matching the ON CONFLICT specification
+```
+
+O índice `idx_event_suggestions_fingerprint` é **parcial**
+(`WHERE fingerprint IS NOT NULL`). O Postgres só aceita `ON CONFLICT (coluna)`
+com constraint **completa** na coluna, então o `upsert(onConflict: "fingerprint")`
+que eu havia reintroduzido na Rodada 5 derrubava a função. A versão anterior em
+produção fazia deduplicação manual e não usava `upsert` — por isso funcionava.
+
+**Correção** (`supabase/functions/ai-event-scout/index.ts`):
+- gravação passa a ser `insert` simples — a deduplicação já ocorre em memória,
+  comparando fingerprint **e** similaridade semântica (`mesmoEvento`), que é mais
+  rigorosa que o índice;
+- `23505` (corrida com outra execução) e `42P10` deixam de virar 500: a resposta
+  é `200` com `inseridas: 0`, porque não é falha para o usuário;
+- 500 permanece só para erro real de banco.
+
+**Deploy: v13 ACTIVE.** Verificado executando o bundle num `Deno` simulado:
+- insert normal → `200`, `inseridas: 3`
+- duplicata `23505` → `200`, `success: true`, `inseridas: 0`
+- erro real → `500`
+
+### 8.2 Localização do cliente saindo errada ("aleatória")
+
+Três defeitos distintos, todos corrigidos:
+
+| # | Defeito | Efeito |
+|---|---|---|
+| 1 | Botões "Usar Centro de Araucária (Padrão)" em `EventDetail` e `MapView` gravavam `{-25.5925, -49.4085}` como se fosse a posição do cliente | Rota e distância partiam do centro da cidade em vez de onde a pessoa está |
+| 2 | `App.tsx` restaurava `user_geolocation_coords` **sem validar a idade** (o `EventDetail` validava) | Abrir o app em outro lugar mantinha a coordenada de ontem como atual |
+| 3 | `EventLocationModal` gravava `{lat,lng}` **sem carimbo de tempo**, e `maximumAge: 60000` aceitava leitura de 1 minuto | A posição recém-obtida era descartada na tela seguinte |
+
+**Correção**: a regra passou a viver num único módulo, `src/lib/geolocation.ts`:
+
+- `readSavedCoords()` — descarta posição vencida (>10 min), sem `ts`, malformada
+  ou não numérica, e limpa o storage;
+- `saveCoords()` / `clearSavedCoords()` — sempre com carimbo de tempo;
+- `requestCurrentCoords()` — alta precisão (timeout 15 s, `maximumAge: 0`), e uma
+  segunda tentativa com precisão menor **apenas** se a falha não foi permissão
+  negada; nunca reaproveita posição do cache do navegador;
+- `geolocationFalhou()` — type guard, porque o `tsconfig` não usa `strict` e a
+  união não era estreitada.
+
+Os botões de ponto fixo foram **removidos**. Se o GPS falhar, o app mostra o motivo
+real (permissão negada / sinal / tempo) em vez de substituir a posição.
+
+`App.tsx`, `EventDetail.tsx`, `MapView.tsx` e `EventLocationModal.tsx` passaram a
+usar o módulo — não há mais `getCurrentPosition` nem gravação direta no storage
+fora dele.
+
+### Validação executada
+- Geolocalização: **16/16** — posição recém-salva aceita, vencida (11 min)
+  descartada e removida do storage, limite de 9 min aceito, sem `ts` descartada,
+  lat não numérico descartado, JSON inválido não estoura; GPS: sucesso, timeout
+  com 2ª tentativa, permissão negada sem insistir (1 chamada), indisponível sem
+  inventar posição, `unsupported` sem geolocalização, `maximumAge: 0` respeitado.
+- Nenhuma ocorrência de `maximumAge` > 0, de gravação direta em
+  `user_geolocation_coords` ou de coordenada fixa como posição do usuário.
+- Edge Function v13: os três cenários de gravação conferidos; bundle sincronizado.
+- `tsc --noEmit`: 0 erros · `npm run build`: ok (5,43 s).

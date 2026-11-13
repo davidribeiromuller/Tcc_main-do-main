@@ -30,6 +30,14 @@ import { Event, User, EventAttendanceAuthorization } from "../types";
 import { fetchStreetRoute } from "../lib/routing.ts";
 import { recordEventParticipation, recordRouteCalculation } from "../lib/userStats.ts";
 import ParentalAuthorizationModal from "./ParentalAuthorizationModal.tsx";
+import {
+  saveCoords,
+  readSavedCoords,
+  clearSavedCoords,
+  requestCurrentCoords,
+  geolocationFalhou,
+  type UserCoords,
+} from "../lib/geolocation.ts";
 import AuthorizationReceiptModal from "./AuthorizationReceiptModal.tsx";
 
 interface EventDetailProps {
@@ -51,7 +59,6 @@ const DEFAULT_LNG = -49.1925;
 
 // Quanto tempo uma posição obtida continua sendo considerada válida.
 // Evita reutilizar coordenadas antigas e traçar rotas de um ponto errado.
-const GEOLOCATION_MAX_AGE_MS = 10 * 60 * 1000; // 10 minutos
 
 // Calculate distance in km
 function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -195,26 +202,9 @@ export default function EventDetail({
   }, [event]);
 
   const [isMapExpanded, setIsMapExpanded] = useState(false);
-  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(() => {
-    if (propUserCoords) return propUserCoords;
-    try {
-      const saved = localStorage.getItem("user_geolocation_coords");
-      if (!saved) return null;
-      const parsed = JSON.parse(saved);
-      if (typeof parsed?.lat !== "number" || typeof parsed?.lng !== "number") return null;
-
-      // A posição salva expira: um ponto de dias atrás não representa onde o
-      // usuário está agora e gerava rotas partindo de um local errado.
-      const ageMs = parsed.ts ? Date.now() - parsed.ts : Infinity;
-      if (!Number.isFinite(ageMs) || ageMs > GEOLOCATION_MAX_AGE_MS) {
-        localStorage.removeItem("user_geolocation_coords");
-        return null;
-      }
-      return { lat: parsed.lat, lng: parsed.lng };
-    } catch {
-      return null;
-    }
-  });
+  const [userCoords, setUserCoords] = useState<UserCoords | null>(
+    () => propUserCoords ?? readSavedCoords()
+  );
 
   useEffect(() => {
     if (propUserCoords) {
@@ -277,98 +267,39 @@ export default function EventDetail({
     }
   };
 
-  const handleAuthorizeLocation = (fallbackPreset?: { lat: number; lng: number }) => {
-    if (fallbackPreset) {
-      setUserCoords(fallbackPreset);
-      try {
-        localStorage.setItem("user_geolocation_coords", JSON.stringify(fallbackPreset));
-      } catch {}
-      if (onUserCoordsChange) {
-        onUserCoordsChange(fallbackPreset);
-      }
-      setShowLocationPermissionModal(false);
-      if (mapInstanceRef.current) {
-        const bounds = L.latLngBounds([
-          [fallbackPreset.lat, fallbackPreset.lng],
-          [eventLat, eventLng],
-        ]);
-        mapInstanceRef.current.fitBounds(bounds, { padding: [40, 40] });
-      }
-      return;
-    }
-
+  const handleAuthorizeLocation = async () => {
     setIsLocating(true);
     setLocationError(null);
 
-    if (!("geolocation" in navigator)) {
+    // A posição vem sempre do GPS. Não existe mais o caminho de "usar um ponto
+    // fixo como posição do cliente": isso colocava o usuário no centro da
+    // cidade e fazia a rota e a distância saírem de um lugar errado.
+    const resultado = await requestCurrentCoords();
+
+    if (geolocationFalhou(resultado)) {
+      clearSavedCoords();
       setIsLocating(false);
       setShowLocationPermissionModal(false);
-      setLocationError("Este navegador não oferece suporte a geolocalização.");
+      setLocationError(resultado.message);
       return;
     }
 
-    const applyCoords = (coords: { lat: number; lng: number }) => {
-      setUserCoords(coords);
-      try {
-        localStorage.setItem(
-          "user_geolocation_coords",
-          JSON.stringify({ ...coords, ts: Date.now() })
-        );
-      } catch {}
-      if (onUserCoordsChange) {
-        onUserCoordsChange(coords);
-      }
-      setIsLocating(false);
-      setLocationError(null);
-      setShowLocationPermissionModal(false);
+    const coords = resultado.coords;
+    setUserCoords(coords);
+    saveCoords(coords);
+    if (onUserCoordsChange) onUserCoordsChange(coords);
 
-      if (mapInstanceRef.current) {
-        const bounds = L.latLngBounds([
-          [coords.lat, coords.lng],
-          [eventLat, eventLng],
-        ]);
-        mapInstanceRef.current.fitBounds(bounds, { padding: [40, 40] });
-      }
-    };
+    setIsLocating(false);
+    setLocationError(null);
+    setShowLocationPermissionModal(false);
 
-    // Falha real: nunca inventar a posição do usuário. Traçar uma rota a partir
-    // de um ponto arbitrário (ex.: centro de Araucária) produzia distâncias e
-    // trajetos errados sem que o usuário soubesse.
-    const handleFailure = (err: GeolocationPositionError) => {
-      console.warn("Geolocalização indisponível:", err.message);
-      setIsLocating(false);
-      setShowLocationPermissionModal(false);
-
-      const messages: Record<number, string> = {
-        1: "Permissão de localização negada. Autorize o acesso nas configurações do navegador para calcular a rota real.",
-        2: "Não foi possível determinar sua localização no momento. Verifique o GPS/sinal e tente novamente.",
-        3: "Tempo esgotado ao obter sua localização. Tente novamente em local aberto.",
-      };
-      setLocationError(messages[err.code] || "Não foi possível obter sua localização.");
-    };
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        applyCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-      },
-      (err) => {
-        console.warn("Alta precisão falhou, tentando baixa precisão:", err.message);
-        // Segunda tentativa apenas para erro de timeout/sinal (código 2 e 3).
-        // Se a permissão foi negada (código 1), insistir não adianta.
-        if (err.code === 1) {
-          handleFailure(err);
-          return;
-        }
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            applyCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-          },
-          handleFailure,
-          { enableHighAccuracy: false, timeout: 8000, maximumAge: 30000 }
-        );
-      },
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
-    );
+    if (mapInstanceRef.current) {
+      const bounds = L.latLngBounds([
+        [coords.lat, coords.lng],
+        [eventLat, eventLng],
+      ]);
+      mapInstanceRef.current.fitBounds(bounds, { padding: [40, 40] });
+    }
   };
 
   // Initialize In-Event Leaflet Map
@@ -951,14 +882,6 @@ export default function EventDetail({
                 >
                   <ShieldCheck size={16} />
                   <span>{isLocating ? "Obtendo Localização..." : "Autorizar Localização (GPS)"}</span>
-                </button>
-
-                <button
-                  onClick={() => handleAuthorizeLocation({ lat: -25.5925, lng: -49.4085 })}
-                  className="w-full h-9 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <MapPin size={14} className="text-brand-accent" />
-                  <span>Usar Centro de Araucária (Padrão)</span>
                 </button>
 
                 <button
