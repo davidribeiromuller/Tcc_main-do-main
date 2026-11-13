@@ -219,6 +219,8 @@ export async function triggerAiEventScout(
   message?: string;
   /** Aviso não-fatal (ex.: IA sem chave, caiu para o motor local). */
   aviso?: string | null;
+  /** Diagnóstico estruturado quando a IA falhou (mas o motor local rodou). */
+  falhaIa?: { tipo: string; mensagem: string; sugestao: string | null } | null;
   /** Quais fontes rodaram nesta execução. */
   fontes?: string[];
   resumo?: { local_engine: number; ai: number };
@@ -258,6 +260,7 @@ export async function triggerAiEventScout(
       inseridas: data?.inseridas ?? 0,
       message: data?.message,
       aviso: data?.aviso ?? null,
+      falhaIa: data?.falha_ia ?? null,
       fontes: data?.fontes ?? [],
       resumo: data?.resumo,
       provider: data?.provider ?? null,

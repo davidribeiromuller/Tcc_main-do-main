@@ -167,7 +167,12 @@ const PROVIDERS: ProviderDef[] = [
     id: "gemini",
     label: "Google Gemini",
     envKeys: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
-    defaultModel: "gemini-2.5-flash",
+    // ATENÇÃO: gemini-2.5-flash foi APOSENTADO para contas novas
+    // ("no longer available to new users"). Testado em 13/11/2026:
+    //   gemini-2.5-flash      -> 404 (descontinuado)
+    //   gemini-3.8-flash      -> 503 (alta demanda, instável)
+    //   gemini-3.1-flash-lite -> 200 (estável, respondeu JSON estruturado)
+    defaultModel: "gemini-3.1-flash-lite",
     signupUrl: "https://aistudio.google.com/apikey",
   },
   {
@@ -188,7 +193,7 @@ const PROVIDERS: ProviderDef[] = [
     id: "openrouter",
     label: "OpenRouter",
     envKeys: ["OPENROUTER_API_KEY"],
-    defaultModel: "google/gemini-2.0-flash-001",
+    defaultModel: "google/gemini-2.5-flash-lite",
     signupUrl: "https://openrouter.ai/keys",
   },
   {
@@ -381,6 +386,67 @@ function fingerprint(s: {
   return `${norm(s.title)}|${s.year}-${s.month}-${s.day}|${norm(s.city || "")}`;
 }
 
+/**
+ * Traduz o erro cru do provedor numa mensagem acionável.
+ *
+ * Descoberta em produção: o Google aposentou o gemini-2.5-flash para contas
+ * novas e responde 404 "no longer available to new users". Sem este mapa, o
+ * admin veria só "A IA falhou" e não saberia que precisava trocar o modelo.
+ */
+function diagnosticarFalhaIa(
+  bruto: string,
+  provedorLabel: string,
+  modelo: string
+): { tipo: string; mensagem: string; sugestao: string | null } {
+  const texto = bruto.toLowerCase();
+
+  if (texto.includes("no longer available") || (texto.includes("404") && texto.includes("model"))) {
+    return {
+      tipo: "MODELO_DESCONTINUADO",
+      mensagem:
+        `O modelo "${modelo}" não está mais disponível para contas novas. ` +
+        `A IA (${provedorLabel}) não pôde ser usada.`,
+      sugestao:
+        "Defina o secret AI_MODEL com um modelo atual, por exemplo gemini-3.1-flash-lite.",
+    };
+  }
+
+  if (texto.includes("high demand") || texto.includes("unavailable") || texto.includes("503")) {
+    return {
+      tipo: "ALTA_DEMANDA",
+      mensagem: `O modelo "${modelo}" está com alta demanda no momento (${provedorLabel}).`,
+      sugestao: "Tente novamente em alguns minutos ou troque o AI_MODEL.",
+    };
+  }
+
+  if (texto.includes("quota") || texto.includes("429") || texto.includes("resource_exhausted")) {
+    return {
+      tipo: "COTA_EXCEDIDA",
+      mensagem: `A cota gratuita da IA (${provedorLabel}) foi atingida por agora.`,
+      sugestao: "Aguarde a renovação da cota ou configure outra chave.",
+    };
+  }
+
+  if (
+    texto.includes("api key not valid") ||
+    texto.includes("api_key_invalid") ||
+    texto.includes("401") ||
+    texto.includes("permission")
+  ) {
+    return {
+      tipo: "CHAVE_INVALIDA",
+      mensagem: `A chave da IA (${provedorLabel}) foi rejeitada.`,
+      sugestao: "Confira o secret da chave em Supabase → Edge Functions → Secrets.",
+    };
+  }
+
+  return {
+    tipo: "ERRO_DESCONHECIDO",
+    mensagem: `A IA (${provedorLabel}) falhou: ${bruto.slice(0, 180)}`,
+    sugestao: null,
+  };
+}
+
 function respostaJson(payload: any, status = 200): Response {
   return new Response(JSON.stringify(payload), {
     status,
@@ -451,11 +517,14 @@ Deno.serve(async (req: Request) => {
     // ---------- 3b. IA (opcional) ----------
     const provedor = resolveProvider();
     let iaInfo: { provider: string; model: string } | null = null;
+    let modelUsado = "";
+    let falhaIa: { tipo: string; mensagem: string; sugestao: string | null } | null = null;
 
     if (provedor) {
       try {
         const { def, apiKey } = provedor;
         const model = (Deno.env.get("AI_MODEL") || "").trim() || def.defaultModel;
+        modelUsado = model;
 
         const resultado = await chamarModelo(def, apiKey, model, buildPrompt(count, focus));
         const sugestoesIa = Array.isArray(resultado?.suggestions) ? resultado.suggestions : [];
@@ -515,9 +584,10 @@ Deno.serve(async (req: Request) => {
       } catch (err) {
         // A IA falhou, mas o motor local já produziu resultados.
         // Não derrubamos a requisição por causa disso.
-        avisoIa = `A IA (${provedor.def.label}) falhou: ${String(
-          (err as any)?.message ?? err
-        ).slice(0, 200)}. As sugestões do motor local foram mantidas.`;
+        const bruto = String((err as any)?.message ?? err);
+        const info = diagnosticarFalhaIa(bruto, provedor.def.label, modelUsado);
+        avisoIa = `${info.mensagem} As sugestões do motor local foram mantidas.`;
+        falhaIa = info;
       }
     } else {
       avisoIa =
@@ -547,6 +617,7 @@ Deno.serve(async (req: Request) => {
         provider: iaInfo?.provider ?? null,
         model: iaInfo?.model ?? null,
         aviso: avisoIa,
+        falha_ia: falhaIa,
         message: "Nenhuma sugestão válida encontrada nesta rodada.",
       });
     }
@@ -575,6 +646,7 @@ Deno.serve(async (req: Request) => {
       model: iaInfo?.model ?? null,
       resumo: { local_engine: origemLocal, ai: origemIa },
       aviso: avisoIa,
+      falha_ia: falhaIa,
       message:
         totalInseridas > 0
           ? `${totalInseridas} sugestão(ões) adicionada(s) para revisão.`
