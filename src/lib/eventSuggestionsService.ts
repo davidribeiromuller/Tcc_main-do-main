@@ -238,6 +238,12 @@ export async function triggerAiEventScout(
 ): Promise<{
   success: boolean;
   inseridas?: number;
+  /** Quantas sugestões eram duplicatas dentro da própria rodada. */
+  duplicadas?: number;
+  /** Quantas já haviam sido rejeitadas/aprovadas e foram descartadas. */
+  repetidas?: number;
+  /** Quantas foram barradas por conteúdo proibido (balada, rave, show, festa). */
+  bloqueadasPorConteudo?: number;
   message?: string;
   /** Aviso não-fatal (ex.: IA sem chave, caiu para o motor local). */
   aviso?: string | null;
@@ -280,6 +286,9 @@ export async function triggerAiEventScout(
     return {
       success: data?.success === true,
       inseridas: data?.inseridas ?? 0,
+      duplicadas: data?.duplicatas ?? 0,
+      repetidas: data?.repetidas ?? 0,
+      bloqueadasPorConteudo: data?.bloqueadas_por_conteudo ?? 0,
       message: data?.message,
       aviso: data?.aviso ?? null,
       falhaIa: data?.falha_ia ?? null,

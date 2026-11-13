@@ -277,3 +277,128 @@ Regra de produto aplicada: **gestão de perfis e dados pessoais = Chefe Administ
   definitiva é hash + `must_change_password`, que exige migração e mudança no fluxo de login.
 - Os handlers de `App.tsx` são defesa em profundidade: a autoridade real é o backend, que já
   responde 403 corretamente para funcionários.
+
+---
+
+# Rodada 5 — Contas de escola, filtros por localidade e IA que não repete
+
+## 1. Conta administrativa de escola (não existia na interface)
+
+O endpoint `POST /api/admin/institutional-accounts` existia desde antes, mas
+**nunca houve botão nem modal** — o estado `showAddInstModal`/`newInstForm` estava
+no componente e nunca era renderizado. Pior: no GitHub Pages o Express não existe,
+então `/api/*` devolvia HTML com status 200 e o fluxo estava morto na versão publicada.
+
+**Correções**
+- Novo `src/lib/institutionalAdminService.ts`: valida o formulário e grava a conta
+  **direto no Supabase** como usuário `role: "Escola"` — mesmo formato que o login
+  institucional já consulta, então funciona no Pages e no ambiente local.
+  Fallback pelo Express com detecção de HTML-200 para não confundir falha com sucesso.
+- `AdminPanel`: botões "Nova conta" no cabeçalho e no estado vazio, e modal completo
+  (escola entre as 6 de Araucária, identificador, e-mail, responsável, cargo, senha
+  inicial) com erros por campo.
+- `loadInstitutionalAccounts` passou a ler do banco quando o Express não responde,
+  em vez de mostrar a aba vazia como se nenhuma escola tivesse conta.
+- Texto do estado vazio deixou de sugerir cadastro automático (era enganoso).
+- A conta é criada com `must_change_password = true` (a coluna já existia no banco).
+
+Validado ponta a ponta: chefe cria → **201**; funcionário tenta → **403**;
+login institucional com a conta criada → **200** com `role: "Escola"`.
+
+## 2. Sugestões rejeitadas voltando (causa raiz confirmada nos dados)
+
+Comparação entre as rejeições e as pendentes reais do banco:
+
+| Rejeitada | Voltou como |
+|---|---|
+| "OBMEP 2027 - Primeira Fase" (2027-5-2) | "Prova da 1ª Fase da OBMEP 2027" (2027-5-2) |
+| "Feira de Profissões da PUCPR" (2027-8-15) | "Feira de Profissões da PUCPR" (2027-7-12) |
+
+O `fingerprint` era `título normalizado|ano-mês-dia|cidade`. A IA inventa variação de
+título **e** de data, então cada tentativa gerava fingerprint novo e passava pelo
+`upsert ... ignoreDuplicates`. A Edge Function também nunca consultava o histórico.
+
+**Correções na Edge Function**
+- **Memória de decisões**: lê as sugestões `rejected` e `approved` (500 mais recentes)
+  e as `pending`, e descarta qualquer candidato equivalente.
+- **Dedup semântica** (`mesmoEvento`) em vez de igualdade exata:
+  - título com similaridade ≥ 0,85 vale com até **180 dias** de diferença (a data é
+    chutada pela IA, não serve como critério principal);
+  - título parecido (≥ 0,6) exige data dentro de **30 dias**;
+  - **contenção** cobre "Vestibular UFPR 2027/2028" vs "... - Prova da 1ª Fase";
+  - ordinais unificados ("1ª" = "primeira");
+  - **ano explícito diferente nunca é o mesmo evento** (OBMEP 2027 ≠ OBMEP 2028).
+- Resposta passou a informar `repetidas` e `bloqueadas_por_conteudo`, e a aba
+  Sugestões explica ao admin *por que* nada entrou — antes só dizia "nenhuma sugestão nova".
+
+## 3. Balada e rave não são permitidos
+
+Prompt sozinho não garante nada, então o bloqueio é **determinístico** no código
+(`src/lib/eventClassification.ts` + Edge Function + `server.ts`):
+- termos barrados: balada, rave, boate, open bar, show, festival de música, micareta,
+  carnaval, festa, bebida, álcool, entre outros;
+- **exceções preservadas**: festa junina/julina, festival de dança, show de talentos,
+  feira de ciências — eventos escolares clássicos que contêm os termos;
+- o prompt da IA ganhou uma seção PROIBIDO explícita;
+- a API Express devolve **400** ("Conteúdo não permitido em app escolar: balada").
+
+## 4. Eventos de Curitiba e Araucária + filtros na aba Eventos
+
+**Bug de dados encontrado:** `mapSupabaseEventoToEvent` e `mapSupabaseEventsTableToEvent`
+**descartavam `city`, `category` e `schoolName`** ao converter para `Event`, embora o tipo
+tivesse os campos e a tabela `eventos` gravasse `cidade`/`categoria`. O insert gravava e a
+leitura jogava fora — por isso qualquer filtro por localidade sairia vazio.
+
+**Correções**
+- Os dois mapeadores passaram a preservar `city` (com inferência pelo local/endereço),
+  `category`, `schoolName` e `isSchool`.
+- `eventsService.ts` gravava `cidade: eventData.city || "Araucária"` — todo evento sem
+  cidade virava Araucária silenciosamente. Agora grava `null` quando não dá para inferir.
+- Filtros na aba Eventos: **Cidade** (Todas / Araucária / Curitiba) e **Tipo**
+  (Todos / Escolar / Aberto ao público), com contador e "Limpar filtros".
+- Cards ganharam badges de localidade e de tipo.
+- Dado corrigido no banco: `eventos` id 1 tinha `categoria: "Araucária"` e
+  `cidade: "Escolar"` (campos invertidos) — saneado para Escolar/Araucária.
+
+**Decisão de produto (escolhida pelo usuário):** a home prioriza eventos escolares;
+"não escolar" traz eventos abertos ao público de Curitiba e Araucária (vestibular, feira
+de profissões, mostra cultural). A IA agora busca os dois tipos e marca `is_school`.
+
+## Validação executada
+- `npx tsc --noEmit`: **0 erros** · `npm run build`: **ok (6,30 s)** · motor local sincronizado.
+- Classificação (`eventClassification`): **22/22** — cidade explícita/inferida, sem assumir
+  Araucária por padrão, escolar vs público, bloqueio e exceções de conteúdo.
+- Dedup com os **casos reais do banco**: **11/11**; falsos positivos: **7/7**
+  (edições de anos diferentes, fases diferentes, disciplinas diferentes não se confundem).
+- Validação do formulário de conta: **10/10**.
+- Render dos filtros no Feed (jsdom): **21/21** — combinações de cidade, tipo, contador e limpar.
+- Render do modal de conta no AdminPanel (jsdom): **16/16**.
+- API real: balada/rave → **400**; festa junina → **201**; conta institucional chefe → **201**,
+  funcionário → **403**, login institucional → **200**.
+- Dedup contra os **9 registros reais** de `event_suggestions` (4 aprovadas + 5 rejeitadas):
+  as 3 rejeitadas que o motor voltou a gerar (JEPS, ONHB, OBI) foram **bloqueadas**;
+  aprovadas coincidentes também. Nenhuma rejeitada volta à fila.
+- Bundle da Edge Function executado em `Deno` simulado: handler registrado, resposta **200**.
+
+## Deploy da Edge Function (v12)
+O painel do Supabase aceita **um único arquivo** por função, então os módulos da função
+são achatados por `scripts/bundle-edge-function.mjs`:
+- `index.ts` importa `./local_engine.ts`, que importa `./eventClassification.ts`;
+- a v11 foi publicada **sem** esse achatamento e quebrou em runtime
+  (`detectForbiddenContent is not defined`) — o motor local nunca rodava;
+- o bundler agora resolve imports **recursivamente**, preserva imports de pacote
+  (`npm:@supabase/supabase-js@2`), rejeita bundles com import sem definição e confere que
+  `eventClassification.ts` da função está idêntico ao de `src/`;
+- `index.ts` passou a **reutilizar** `detectForbiddenContent` em vez de manter uma cópia
+  das listas (`TERMOS_PROIBIDOS` duplicado causava erro de símbolo repetido no bundle).
+
+Comandos: `npm run bundle:edge` (gera) e `npm run bundle:edge:check` (valida, use no CI).
+A versão em produção é a **v12, ACTIVE**, publicada com o bundle corrigido.
+
+Como a function bundlada é válida foi verificada sem deploy: o bundle foi carregado num
+`Deno` simulado, o handler registrou e respondeu **200** com `fontes: ["local_engine"]`.
+
+## Pendências conhecidas
+- `school_accounts` continua inexistente no banco; a solução atual usa `users` com
+  `role: "Escola"`, que é o que o login já consulta.
+- Senhas seguem em texto claro em `users.password` (risco herdado da rodada 3).

@@ -19,6 +19,7 @@ import {
   MAX_LOCAL_CONFIDENCE,
   type LocalEventTemplate,
 } from "./localEventCatalog.ts";
+import { detectForbiddenContent, classifyEventAsSchool } from "./eventClassification.ts";
 
 /** Candidato gerado pelo motor, no mesmo formato aceito por `event_suggestions`. */
 export interface LocalCandidate {
@@ -29,6 +30,8 @@ export interface LocalCandidate {
   city: "Araucária" | "Curitiba";
   category: string;
   school_name: string | null;
+  /** true = evento escolar; false = aberto ao público. */
+  is_school: boolean;
   day: number;
   month: number;
   year: number;
@@ -165,6 +168,18 @@ export function runLocalEventEngine(options?: {
   for (const template of LOCAL_EVENT_TEMPLATES) {
     if (cities.length > 0 && !cities.includes(template.city)) continue;
 
+    // Balada, rave, festa e show não entram no catálogo do app escolar.
+    if (
+      detectForbiddenContent({
+        title: template.title,
+        description: template.description,
+        category: template.category,
+        requirements: template.requirements,
+      }).proibido
+    ) {
+      continue;
+    }
+
     const ocorrencia = computeNextOccurrence(template, referenceDate);
     if (!ocorrencia) continue;
 
@@ -179,6 +194,12 @@ export function runLocalEventEngine(options?: {
       city: template.city,
       category: template.category,
       school_name: null,
+      is_school: classifyEventAsSchool({
+        category: template.category,
+        title: template.title,
+        description: template.description,
+        location: template.location,
+      }),
       day: ocorrencia.day,
       month: ocorrencia.month,
       year: ocorrencia.year,

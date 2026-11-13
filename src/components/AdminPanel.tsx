@@ -55,6 +55,8 @@ import {
   type DeletedEvent,
 } from "../lib/deletedEventsService";
 import EventSuggestionsTab from "./EventSuggestionsTab";
+import { criarContaInstitucional, listarContasInstitucionais } from "../lib/institutionalAdminService.ts";
+import { ARAUCARIA_SCHOOLS } from "../lib/schoolsData.ts";
 import { formatLastActive, formatDateTimeBR } from "../lib/dateUtils";
 import { calculateRealUserStats } from "../lib/userStats";
 import EventAuthorizationsModal from "./EventAuthorizationsModal.tsx";
@@ -137,14 +139,16 @@ export default function AdminPanel({
   const [newPasswordValue, setNewPasswordValue] = useState("");
   const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [newInstForm, setNewInstForm] = useState({
-    escolaId: 1,
-    escolaNome: "Colégio Estadual Professor Júlio Szymanski",
-    identificador: "escola.szymanski",
-    password: "senha123",
-    email: "julioszymanski@escola.pr.gov.br",
-    responsavel: "Direção Geral",
-    cargo: "Diretor(a)"
+    escolaSlug: "julio-szymanski",
+    identificador: "",
+    password: "",
+    email: "",
+    responsavel: "",
+    cargo: "Diretor(a)",
+    telefone: ""
   });
+  const [newInstErrors, setNewInstErrors] = useState<Record<string, string>>({});
+  const [isCreatingInst, setIsCreatingInst] = useState(false);
 
   // Retenção e lista de eventos excluídos (3 dias após o término)
   const [eventViewFilter, setEventViewFilter] = useState<"active" | "excluded">("active");
@@ -646,6 +650,58 @@ export default function AdminPanel({
     }
   }, [activeTab, isChefe]);
 
+  /**
+   * Cria a conta institucional da escola.
+   *
+   * Antes o estado do modal existia mas o modal nunca foi renderizado — não
+   * havia como criar conta pela interface, nem no ambiente local. Agora grava
+   * direto no Supabase (funciona no GitHub Pages) com fallback pelo Express.
+   */
+  const handleCreateInstitutionalAccount = async () => {
+    setIsCreatingInst(true);
+    setNewInstErrors({});
+    try {
+      const resultado = await criarContaInstitucional({
+        escolaSlug: newInstForm.escolaSlug,
+        identificador: newInstForm.identificador,
+        email: newInstForm.email,
+        password: newInstForm.password,
+        responsavel: newInstForm.responsavel,
+        cargo: newInstForm.cargo,
+        telefone: newInstForm.telefone,
+      });
+
+      if (!resultado.success) {
+        if (resultado.fieldErrors) setNewInstErrors(resultado.fieldErrors);
+        notifyAdmin(resultado.error || "Não foi possível criar a conta institucional.", "error");
+        return;
+      }
+
+      notifyAdmin(
+        resultado.viaBackend
+          ? "Conta institucional criada no servidor local."
+          : "Conta institucional criada! A escola já pode acessar com este e-mail e senha.",
+        "success"
+      );
+
+      setShowAddInstModal(false);
+      setNewInstForm({
+        escolaSlug: "julio-szymanski",
+        identificador: "",
+        password: "",
+        email: "",
+        responsavel: "",
+        cargo: "Diretor(a)",
+        telefone: "",
+      });
+      await loadInstitutionalAccounts();
+    } catch (err: any) {
+      notifyAdmin(err?.message || "Erro ao criar a conta institucional.", "error");
+    } finally {
+      setIsCreatingInst(false);
+    }
+  };
+
   const loadInstitutionalAccounts = async () => {
     setLoadingAccounts(true);
     try {
@@ -660,10 +716,36 @@ export default function AdminPanel({
         const data = await res.json().catch(() => ({}));
         if (Array.isArray(data?.accounts)) {
           setInstitutionalAccounts(data.accounts);
+          return;
         }
       }
     } catch (err) {
-      console.warn("[AdminPanel] Contas institucionais indisponíveis:", err);
+      console.warn("[AdminPanel] Contas institucionais (Express) indisponíveis:", err);
+    }
+
+    // Hospedagem estática: o Express não existe. Lê as contas direto do banco
+    // em vez de deixar a aba vazia como se nenhuma escola tivesse conta.
+    try {
+      const { contas, error } = await listarContasInstitucionais();
+      if (error) {
+        console.warn("[AdminPanel] Contas institucionais (Supabase):", error);
+      }
+      setInstitutionalAccounts(
+        contas.map((c) => ({
+          id: c.id,
+          escolaId: undefined,
+          escolaNome: c.institution || "Escola",
+          identificador: c.email,
+          email: c.email,
+          status: c.ativo === false ? "bloqueado" : "ativo",
+          accountStatus: c.ativo === false ? "suspended" : "active",
+          responsavel: c.nome,
+          createdAt: c.createdAt,
+          lastLoginAt: c.lastLogin,
+        }))
+      );
+    } catch (err) {
+      console.warn("[AdminPanel] Falha ao listar contas do banco:", err);
     } finally {
       setLoadingAccounts(false);
     }
@@ -2055,14 +2137,25 @@ export default function AdminPanel({
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={loadInstitutionalAccounts}
-                className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 rounded-xl text-xs font-semibold text-emerald-900 dark:text-emerald-300 hover:bg-emerald-100/50 transition flex items-center gap-1.5 cursor-pointer shrink-0"
-              >
-                <RefreshCw size={13} className={loadingAccounts ? "animate-spin" : ""} />
-                <span>Atualizar</span>
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => { setShowAddInstModal(true); setNewInstErrors({}); }}
+                  className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
+                >
+                  <Plus size={13} />
+                  <span>Nova conta</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={loadInstitutionalAccounts}
+                  className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 rounded-xl text-xs font-semibold text-emerald-900 dark:text-emerald-300 hover:bg-emerald-100/50 transition flex items-center gap-1.5 cursor-pointer shrink-0"
+                >
+                  <RefreshCw size={13} className={loadingAccounts ? "animate-spin" : ""} />
+                  <span>Atualizar</span>
+                </button>
+              </div>
             </div>
 
             {loadingAccounts ? (
@@ -2079,15 +2172,18 @@ export default function AdminPanel({
                   Nenhuma conta institucional ativa
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 max-w-md mx-auto leading-relaxed">
-                  As contas de gestão das escolas de Araucária aparecem aqui depois que a
-                  instituição é verificada pela direção. O cadastro de alunos e professores é
-                  feito em paralelo, na lista de vínculos (CPF + matrícula).
+                  Nenhuma escola tem conta de acesso ainda. Clique em{" "}
+                  <strong className="text-slate-700 dark:text-slate-200">Nova conta</strong> para
+                  criar as credenciais de uma das 6 escolas de Araucária.
                 </p>
-                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-3 max-w-md mx-auto leading-relaxed">
-                  Esta lista é carregada do servidor. Em hospedagem estática (GitHub Pages) o
-                  endpoint <code className="font-mono">/api/admin/institutional-accounts</code> não
-                  existe — por isso ela pode aparecer vazia mesmo havendo escolas cadastradas.
-                </p>
+                <button
+                  type="button"
+                  onClick={() => { setShowAddInstModal(true); setNewInstErrors({}); }}
+                  className="mt-4 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer active:scale-95 mx-auto"
+                >
+                  <Plus size={14} />
+                  <span>Criar conta institucional</span>
+                </button>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
@@ -2206,6 +2302,189 @@ export default function AdminPanel({
           </div>
         )}
       </div>
+
+      {/* MODAL INSTITUCIONAL: Criar conta de acesso de uma escola (exclusivo Chefe) */}
+      <AnimatePresence>
+        {showAddInstModal && isChefe && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              className="bg-white dark:bg-brand-card-dark rounded-3xl p-5 sm:p-6 w-full max-w-lg border border-emerald-200/60 dark:border-white/10 shadow-2xl my-auto"
+            >
+              <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-white/10">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400">
+                    <Building2 size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                      Nova conta institucional
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Credenciais de acesso da equipe gestora da escola
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAddInstModal(false)}
+                  className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-white/10 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                  aria-label="Fechar"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-3 py-4">
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                    Escola
+                  </label>
+                  <select
+                    value={newInstForm.escolaSlug}
+                    onChange={(e) => {
+                      const escola = ARAUCARIA_SCHOOLS.find((x) => x.slug === e.target.value);
+                      setNewInstForm((f) => ({
+                        ...f,
+                        escolaSlug: e.target.value,
+                        // E-mail institucional sugerido a partir do slug.
+                        email: f.email || `${e.target.value.replace(/-/g, ".")}@escola.pr.gov.br`,
+                        identificador: f.identificador || `${escola?.slug || ""}`,
+                      }));
+                    }}
+                    className="w-full mt-1 h-10 px-3 text-xs rounded-xl bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 text-slate-800 dark:text-slate-100"
+                  >
+                    {ARAUCARIA_SCHOOLS.map((escola) => (
+                      <option key={escola.slug} value={escola.slug}>
+                        {escola.name}
+                      </option>
+                    ))}
+                  </select>
+                  {newInstErrors.escolaSlug && (
+                    <p className="text-[11px] text-red-600 mt-1">{newInstErrors.escolaSlug}</p>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      Identificador de acesso
+                    </label>
+                    <input
+                      type="text"
+                      value={newInstForm.identificador}
+                      onChange={(e) => setNewInstForm((f) => ({ ...f, identificador: e.target.value }))}
+                      placeholder="escola.szymanski"
+                      className="w-full mt-1 h-10 px-3 text-xs rounded-xl bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 text-slate-800 dark:text-slate-100 font-mono"
+                    />
+                    {newInstErrors.identificador && (
+                      <p className="text-[11px] text-red-600 mt-1">{newInstErrors.identificador}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      E-mail institucional
+                    </label>
+                    <input
+                      type="email"
+                      value={newInstForm.email}
+                      onChange={(e) => setNewInstForm((f) => ({ ...f, email: e.target.value }))}
+                      placeholder="escola@escola.pr.gov.br"
+                      className="w-full mt-1 h-10 px-3 text-xs rounded-xl bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 text-slate-800 dark:text-slate-100"
+                    />
+                    {newInstErrors.email && (
+                      <p className="text-[11px] text-red-600 mt-1">{newInstErrors.email}</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      Responsável
+                    </label>
+                    <input
+                      type="text"
+                      value={newInstForm.responsavel}
+                      onChange={(e) => setNewInstForm((f) => ({ ...f, responsavel: e.target.value }))}
+                      placeholder="Nome do diretor(a)"
+                      className="w-full mt-1 h-10 px-3 text-xs rounded-xl bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 text-slate-800 dark:text-slate-100"
+                    />
+                    {newInstErrors.responsavel && (
+                      <p className="text-[11px] text-red-600 mt-1">{newInstErrors.responsavel}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      Cargo
+                    </label>
+                    <input
+                      type="text"
+                      value={newInstForm.cargo}
+                      onChange={(e) => setNewInstForm((f) => ({ ...f, cargo: e.target.value }))}
+                      placeholder="Diretor(a)"
+                      className="w-full mt-1 h-10 px-3 text-xs rounded-xl bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 text-slate-800 dark:text-slate-100"
+                    />
+                    {newInstErrors.cargo && (
+                      <p className="text-[11px] text-red-600 mt-1">{newInstErrors.cargo}</p>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                    Senha inicial
+                  </label>
+                  <input
+                    type="text"
+                    value={newInstForm.password}
+                    onChange={(e) => setNewInstForm((f) => ({ ...f, password: e.target.value }))}
+                    placeholder="Mínimo 6 caracteres"
+                    className="w-full mt-1 h-10 px-3 text-xs rounded-xl bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 text-slate-800 dark:text-slate-100 font-mono"
+                  />
+                  {newInstErrors.password && (
+                    <p className="text-[11px] text-red-600 mt-1">{newInstErrors.password}</p>
+                  )}
+                  <p className="text-[10px] text-amber-700 dark:text-amber-400 mt-1.5 leading-snug">
+                    Anote e entregue à escola. A conta é criada com troca de senha obrigatória no
+                    primeiro acesso.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-3 border-t border-slate-100 dark:border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setShowAddInstModal(false)}
+                  className="flex-1 h-10 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCreateInstitutionalAccount}
+                  disabled={isCreatingInst}
+                  className="flex-1 h-10 rounded-xl text-xs font-bold bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white transition-colors cursor-pointer flex items-center justify-center gap-2"
+                >
+                  {isCreatingInst ? (
+                    <>
+                      <RefreshCw size={14} className="animate-spin" /> Criando...
+                    </>
+                  ) : (
+                    <>
+                      <Plus size={14} /> Criar conta
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* MODAL INSTITUCIONAL: Redefinir Senha da Escola */}
       <AnimatePresence>
