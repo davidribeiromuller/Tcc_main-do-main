@@ -207,3 +207,73 @@ A barra de filtros virou um bloco com borda, alinhada à barra de busca, em vez 
 - Confirmado no HTML renderizado: **6 cards** com o novo wrapper, KPIs, e o campo de senha
   mascarado que só revela ao clicar.
 - `password` presente no payload do PostgREST (verificado via chamada real: status 206).
+
+---
+
+# Rodada 4 — Hierarquia de permissões: dados de usuário são exclusivos do Chefe
+
+Regra de produto aplicada: **gestão de perfis e dados pessoais = Chefe Administrador**.
+**Funcionário Administrador** pode apenas cadastrar **eventos** e **sugestões de eventos**.
+
+## Matriz implementada
+
+| Ação | Chefe | Funcionário |
+|---|---|---|
+| Ver ficha, CPF, telefone, senha | sim | **não** |
+| Alterar permissão, editar, bloquear, desbloquear, excluir conta | sim | **não** |
+| Ver diretório (nome, e-mail institucional, função, status) | sim | leitura |
+| Criar evento / sugestão de evento | sim | **sim** |
+| Editar/excluir evento | todos | só os próprios |
+
+## Correções no frontend (`AdminPanel.tsx`)
+- O botão **"Visualizar"** e o modal da ficha agora existem apenas dentro de `isChefe`. Para o
+  funcionário, o rodapé do card mostra "Dados pessoais restritos ao Chefe Administrador".
+- O bloco da **senha** na ficha ficou sob `{isChefe && ...}` — antes era visível a qualquer admin.
+- **CPF** na tabela e nos cartões (2 visões × 2 pontos) passou a exigir `isChefe && u.cpf`.
+- Busca por **CPF** só vale para o Chefe; para funcionários o placeholder e as mensagens de
+  "nada encontrado" falam apenas em nome, e-mail, função e instituição. Sem isso, digitar números
+  na busca funcionaria como oráculo para descobrir CPF.
+- Banner da aba deixou de prometer "consulta ao diretório completo" e descreve o limite real.
+
+## Defesa no cliente (`App.tsx`)
+- Helper `ensureChefeAdmin(acao)` aplicado a `handleAdminUpdateUser`, `handleAdminDeleteUser`,
+  `handleAdminUnblockUser` e `handleAdminPermanentDeleteUser`: se a UI for burlada, a ação é
+  recusada com toast em vez de executar.
+
+## Segurança do cache local (`src/lib/userCache.ts`, novo)
+- `local_users_db` passou a ser gravado por `saveUsersCache()`, que remove **`password`, `cpf`,
+  `phone` e `personalEmail`** antes de persistir. Antes, o cadastro gravava a senha em texto claro
+  no `localStorage`, e a ficha a exibia a partir do cache.
+- `readUsersCache()` higieniza na leitura: caches antigos já gravados são limpos automaticamente
+  na próxima carga do app.
+- O login offline não valida mais nada "por presença de e-mail": se havia senha digitada e nem o
+  backend nem o Supabase a validaram, o acesso é recusado com aviso para conectar à internet
+  (antes, o fallback autenticava só pelo e-mail encontrado no cache).
+
+## Erros de runtime corrigidos
+- **Excluir evento devolvia 500** em qualquer exclusão no modo JSON/offline. `deleteEventById`
+  chamava `deleteEventByIdFallback` duas vezes: a segunda estourava
+  `Evento não encontrado para excluir na memória` porque o item já havia saído. Agora o modo
+  offline executa **uma única** exclusão (`src/db/events.ts`).
+- **Datas passadas eram aceitas pela API**: `POST /api/events` com ano 2020 devolvia **201**.
+  `validateEventDate` (`src/lib/dateGuards.ts`) agora roda em `POST` e `PUT /api/events/:id`,
+  devolvendo 400. Antes a guarda existia só no formulário.
+
+## Validação executada
+- `npx tsc --noEmit`: **0 erros** · `npm run build`: **ok (4,81 s)** · motor local sincronizado.
+- API real (Express em modo fallback JSON):
+  - `DELETE /api/events/:id` → **200** (era 500); segunda exclusão → 404.
+  - `POST /api/events` com `year: 2020` → **400** (era 201) com mensagem de validação.
+  - Funcionário: `GET /api/users` não devolve `password`/`cpf`/`phone`; `PUT`, `block` e `DELETE`
+    em `users` → **403**; `POST /api/events` → **201** (permitido).
+  - Aluno: `POST /api/events` → **403**.
+- Render do painel em jsdom (Chefe vs Funcionário): **13/13** verificações.
+  Funcionário não vê "Visualizar", "Ações", senha, CPF nem telefone. Chefe abre a ficha, vê
+  "Senha:" mascarada com `••••` e revela apenas ao clicar.
+- Cache local: **7/7** — não grava senha/CPF/telefone/e-mail pessoal e higieniza caches legados.
+
+## Risco residual (não resolvido nesta rodada)
+- Senhas seguem em **texto claro** na coluna `users.password` (17 de 23 contas). A correção
+  definitiva é hash + `must_change_password`, que exige migração e mudança no fluxo de login.
+- Os handlers de `App.tsx` são defesa em profundidade: a autoridade real é o backend, que já
+  responde 403 corretamente para funcionários.
