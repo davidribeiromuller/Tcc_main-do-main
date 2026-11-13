@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { getUserDisplayName, getUserInitials, isGuestSession } from "../lib/userDisplay.ts";
 import { 
   User, 
   Bell, 
@@ -67,6 +68,9 @@ export default function Settings({
       onShowToast(message, type);
     }
   };
+
+  const displayName = getUserDisplayName(user);
+  const guestSession = isGuestSession(user);
 
   const [editMode, setEditMode] = useState(false);
   const [nome, setNome] = useState(user?.nome || "");
@@ -309,14 +313,14 @@ export default function Settings({
             <div className="bg-brand-secondary/30 dark:bg-brand-card-dark rounded-3xl p-4 flex items-center gap-4 border border-brand-primary/10">
               <div className="w-14 h-14 rounded-full bg-yellow-400 border-2 border-white flex items-center justify-center font-display font-medium text-white text-xl uppercase overflow-hidden">
                 {user?.foto_perfil ? (
-                  <img src={user.foto_perfil} alt={user.nome} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                  <img src={user.foto_perfil} alt={displayName} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                 ) : (
-                  (user?.nome || user?.email || "U").slice(0, 2)
+                  getUserInitials(user)
                 )}
               </div>
               <div className="flex-1 min-w-0">
                 <h4 className="font-display font-semibold text-base leading-tight truncate">
-                  {user?.nome || " Hudson W."}
+                  {displayName}
                 </h4>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 uppercase font-mono tracking-wider">
                   {user?.role || "Aluno"}
@@ -440,8 +444,19 @@ export default function Settings({
             {/* List Menu Options */}
             <div className="flex flex-col gap-2">
               <button
-                onClick={() => setEditMode(true)}
-                className="w-full h-14 px-4 rounded-2xl bg-white dark:bg-brand-card-dark border border-brand-primary/10 flex items-center justify-between hover:bg-brand-primary/10 active:scale-99 transition-all cursor-pointer"
+                onClick={() => {
+                  if (guestSession) {
+                    notifySettings(
+                      "Sessão de convidado: crie uma conta para editar seu perfil.",
+                      "info"
+                    );
+                    return;
+                  }
+                  setEditMode(true);
+                }}
+                className={`w-full h-14 px-4 rounded-2xl bg-white dark:bg-brand-card-dark border border-brand-primary/10 flex items-center justify-between hover:bg-brand-primary/10 active:scale-99 transition-all cursor-pointer ${
+                  guestSession ? "opacity-60" : ""
+                }`}
               >
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-xl bg-orange-50 text-orange-600 dark:bg-orange-950/30 dark:text-orange-400">
@@ -449,7 +464,13 @@ export default function Settings({
                   </div>
                   <span className="text-sm font-semibold">Editar Perfil</span>
                 </div>
-                <ChevronRight size={18} className="text-slate-400" />
+                {guestSession ? (
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Convidado
+                  </span>
+                ) : (
+                  <ChevronRight size={18} className="text-slate-400" />
+                )}
               </button>
 
               {/* Modo Escuro / Modo Claro Toggle */}

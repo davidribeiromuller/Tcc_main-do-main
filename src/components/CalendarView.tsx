@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { Event } from "../types";
 import EventNotificationModal, { NotificationSchedule } from "./EventNotificationModal";
+import { getEventYearOptions, validateEventDate } from "../lib/dateGuards.ts";
 
 interface CalendarViewProps {
   events: Event[];
@@ -231,6 +232,13 @@ export default function CalendarView({
     }
     if (evtIsPaid && !evtPrice.trim()) {
       setFormError("Por favor, especifique o valor/preço da inscrição do evento.");
+      return;
+    }
+
+    // O app só trabalha com datas de hoje em diante.
+    const dateError = validateEventDate(dayNum, evtMonth, evtYear);
+    if (dateError) {
+      setFormError(dateError);
       return;
     }
 
@@ -913,7 +921,7 @@ export default function CalendarView({
                   />
                 </div>
 
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <div className="flex flex-col gap-1">
                     <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Dia*</label>
                     <input
@@ -937,6 +945,21 @@ export default function CalendarView({
                       {MONTHS_NAMES.map((m, i) => (
                         <option key={m} value={i}>
                           {m.slice(0, 3)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Ano*</label>
+                    <select
+                      value={evtYear}
+                      onChange={(e) => setEvtYear(parseInt(e.target.value))}
+                      className="w-full h-11 px-2 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold"
+                    >
+                      {getEventYearOptions().map((y) => (
+                        <option key={y} value={y}>
+                          {y}
                         </option>
                       ))}
                     </select>

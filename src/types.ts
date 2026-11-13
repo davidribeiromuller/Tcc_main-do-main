@@ -18,6 +18,14 @@ export interface User {
   birthdate?: string;
   gender?: string;
   institution?: string;
+  /** Matrícula/RA fornecida pela instituição (vínculo escolar). */
+  matricula?: string;
+  /** E-mail pessoal de recuperação (não institucional). */
+  personalEmail?: string;
+  /** true quando a conta foi criada com senha provisória. */
+  mustChangePassword?: boolean;
+  /** Quando o vínculo CPF + matrícula foi confirmado. */
+  linkVerifiedAt?: string;
   createdAt?: string;
   updatedAt?: string;
   lastActiveAt?: string;

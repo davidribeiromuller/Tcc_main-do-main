@@ -29,6 +29,10 @@ export function mapSupabaseUserToUser(row: any): User {
     birthdate: row.birthdate || undefined,
     gender: row.gender || undefined,
     institution: row.institution || "Escola estadual Helena Wysocki",
+    matricula: row.matricula || undefined,
+    personalEmail: row.personal_email || undefined,
+    mustChangePassword: row.must_change_password === true,
+    linkVerifiedAt: row.link_verified_at || undefined,
     password: row.password || undefined,
     lastActiveAt: row.last_active_at || row.lastActiveAt || row.updated_at || row.created_at || new Date().toISOString(),
     lastLogin: row.last_login || row.lastLogin || row.created_at || new Date().toISOString(),
@@ -406,6 +410,9 @@ export async function registerUserDirectInSupabase(
       birthdate: userData.birthdate || null,
       gender: userData.gender || null,
       institution: userData.institution || "Escola estadual Helena Wysocki",
+      matricula: (userData as any).matricula || null,
+      personal_email: (userData as any).personal_email || null,
+      must_change_password: (userData as any).must_change_password === true,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       last_login: new Date().toISOString(),
@@ -416,7 +423,15 @@ export async function registerUserDirectInSupabase(
 
     if (error) {
       console.error("[usersService] Erro ao inserir novo usuário:", error);
-      return { user: null, error: "Erro ao gravar dados no banco: " + error.message };
+      // Não vazar detalhe técnico para o usuário final.
+      const code = (error as any)?.code;
+      if (code === "23505") {
+        return { user: null, error: "Este e-mail já está cadastrado no sistema escolar." };
+      }
+      return {
+        user: null,
+        error: "Não foi possível criar sua conta agora. Verifique sua conexão e tente novamente.",
+      };
     }
 
     if (data && data.length > 0) {
@@ -426,7 +441,10 @@ export async function registerUserDirectInSupabase(
     return { user: null, error: "Falha ao confirmar inserção no banco de dados." };
   } catch (err: any) {
     console.error("[usersService] Exceção ao registrar usuário:", err);
-    return { user: null, error: err?.message || "Erro inesperado ao registrar usuário." };
+    return {
+      user: null,
+      error: "Não foi possível criar sua conta agora. Verifique sua conexão e tente novamente.",
+    };
   }
 }
 
