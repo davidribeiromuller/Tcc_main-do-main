@@ -11,6 +11,8 @@ import {
   Trash2,
   Loader2,
   ShieldCheck,
+  Cpu,
+  AlertTriangle,
 } from "lucide-react";
 import {
   fetchEventSuggestions,
@@ -27,6 +29,15 @@ interface EventSuggestionsTabProps {
   onShowToast?: (message: string, type?: "error" | "warning" | "success" | "info") => void;
   onRefreshEvents?: () => void | Promise<void>;
 }
+
+/** Opções de IA aceitas pela Edge Function (espelha os provedores do backend). */
+const PROVEDORES_IA = [
+  { label: "Google Gemini", chave: "GEMINI_API_KEY", ondeObter: "https://aistudio.google.com/apikey" },
+  { label: "Claude (Anthropic)", chave: "ANTHROPIC_API_KEY", ondeObter: "https://console.anthropic.com/settings/keys" },
+  { label: "ChatGPT (OpenAI)", chave: "OPENAI_API_KEY", ondeObter: "https://platform.openai.com/api-keys" },
+  { label: "OpenRouter", chave: "OPENROUTER_API_KEY", ondeObter: "https://openrouter.ai/keys" },
+  { label: "Groq", chave: "GROQ_API_KEY", ondeObter: "https://console.groq.com/keys" },
+];
 
 const MESES = [
   "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
@@ -49,10 +60,16 @@ export default function EventSuggestionsTab({
   const [processingId, setProcessingId] = useState<number | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [needsApiKey, setNeedsApiKey] = useState(false);
-  const [providerOptions, setProviderOptions] = useState<
-    Array<{ label: string; chave: string; ondeObter: string }>
-  >([]);
+  /** Aviso não-fatal da última execução (ex.: IA sem chave). */
+  const [avisoExecucao, setAvisoExecucao] = useState<string | null>(null);
+  /** Resumo de fontes da última execução. */
+  const [ultimaExecucao, setUltimaExecucao] = useState<{
+    fontes: string[];
+    provider: string | null;
+    model: string | null;
+    resumo?: { local_engine: number; ai: number };
+  } | null>(null);
+  const [mostrarConfigIA, setMostrarConfigIA] = useState(false);
 
   const notify = (message: string, type: "error" | "warning" | "success" | "info" = "warning") => {
     if (onShowToast) onShowToast(message, type);
@@ -72,21 +89,33 @@ export default function EventSuggestionsTab({
 
   const handleRunScout = async () => {
     setRunning(true);
+    setAvisoExecucao(null);
     try {
-      const { success, inseridas, message, error, needsApiKey: noKey, availableProviders } =
-        await triggerAiEventScout({ count: 5 });
+      const { success, inseridas, message, error, aviso, fontes, resumo, provider, model } =
+        await triggerAiEventScout({ count: 8 });
 
       if (!success) {
-        setNeedsApiKey(!!noKey);
-        if (availableProviders?.length) setProviderOptions(availableProviders);
-        throw new Error(error?.message || "A IA não conseguiu gerar sugestões.");
+        throw new Error(error?.message || "A descoberta de eventos não pôde ser executada.");
       }
 
-      setNeedsApiKey(false);
-      notify(message || `${inseridas ?? 0} nova(s) sugestão(ões) recebida(s).`, "success");
+      // Aviso não-fatal: a execução funcionou, mas a IA não participou.
+      setAvisoExecucao(aviso ?? null);
+      setUltimaExecucao({
+        fontes: fontes ?? [],
+        provider: provider ?? null,
+        model: model ?? null,
+        resumo,
+      });
+
+      if (inseridas && inseridas > 0) {
+        notify(message || `${inseridas} nova(s) sugestão(ões) recebida(s).`, "success");
+      } else {
+        notify(message || "Nenhuma sugestão nova: os eventos já estão na lista.", "info");
+      }
+
       await load();
     } catch (err: any) {
-      notify(err.message || "Falha ao executar a IA.", "error");
+      notify(err.message || "Falha ao executar a descoberta de eventos.", "error");
     } finally {
       setRunning(false);
     }
@@ -97,6 +126,26 @@ export default function EventSuggestionsTab({
       notify("Apenas o administrador chefe pode publicar sugestões.", "warning");
       return;
     }
+
+    // Datas calculadas exigem confirmação explícita: proteger os alunos de
+    // receber uma data errada no calendário do app.
+    if (s.isEstimated || s.origin === "local_engine") {
+      const dataTexto =
+        s.day !== null && s.month !== null && s.year !== null
+          ? `${String(s.day).padStart(2, "0")}/${String(s.month + 1).padStart(2, "0")}/${s.year}`
+          : "data desconhecida";
+
+      const confirmou = window.confirm(
+        `ATENÇÃO: data estimada (${dataTexto}).\n\n` +
+          `"${s.title}"\n\n` +
+          "Esta data foi CALCULADA a partir de um padrão anual — não foi confirmada em fonte oficial.\n\n" +
+          "Confirme no site oficial antes de publicar. Publicar uma data errada divulga informação " +
+          "incorreta para todos os estudantes.\n\n" +
+          "Deseja publicar mesmo assim?"
+      );
+      if (!confirmou) return;
+    }
+
     setProcessingId(s.id);
     try {
       const { success, error } = await approveEventSuggestion(
@@ -154,10 +203,12 @@ export default function EventSuggestionsTab({
         <div className="flex items-start gap-3">
           <Sparkles className="text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" size={18} />
           <div className="text-xs text-indigo-900 dark:text-indigo-200 leading-relaxed">
-            <p className="font-semibold">Sugestões de eventos geradas pela IA</p>
+            <p className="font-semibold">Sugestões de eventos</p>
             <p className="text-[11px] opacity-90 mt-0.5">
-              A IA pesquisa e propõe eventos escolares de forma autônoma. Nada é publicado sem
-              aprovação: revise e clique em <strong>Publicar</strong> para criar o evento no app e no banco.
+              Duas fontes trabalham juntas: o <strong>motor local</strong> cobre o calendário
+              recorrente (olimpíadas, feiras, vestibulares, eventos culturais e esportivos) e a{" "}
+              <strong>IA</strong> complementa com eventos inéditos, quando há chave configurada.
+              Nada é publicado sem aprovação.
             </p>
             {!canApprove && (
               <p className="text-[11px] mt-1 font-semibold flex items-center gap-1">
@@ -195,45 +246,77 @@ export default function EventSuggestionsTab({
         </div>
       )}
 
-      {needsApiKey && (
-        <div className="bg-white dark:bg-brand-card-dark border border-indigo-200 dark:border-indigo-800/40 rounded-2xl p-4">
-          <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-            <Sparkles size={13} className="text-indigo-600 dark:text-indigo-400" />
-            Escolha uma IA para ativar as sugestões
-          </h4>
-          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-            A aba já está pronta e funcionando. Falta apenas conectar uma IA: qualquer uma das
-            opções abaixo serve, basta criar uma chave gratuita e salvá-la nos segredos do
-            Supabase (Edge Functions → Secrets). O app detecta sozinho qual está configurada.
-          </p>
-          <div className="mt-2.5 space-y-1.5">
-            {(providerOptions.length > 0
-              ? providerOptions
-              : [
-                  { label: "Google Gemini", chave: "GEMINI_API_KEY", ondeObter: "https://aistudio.google.com/apikey" },
-                  { label: "Claude (Anthropic)", chave: "ANTHROPIC_API_KEY", ondeObter: "https://console.anthropic.com/settings/keys" },
-                  { label: "ChatGPT (OpenAI)", chave: "OPENAI_API_KEY", ondeObter: "https://platform.openai.com/api-keys" },
-                  { label: "OpenRouter", chave: "OPENROUTER_API_KEY", ondeObter: "https://openrouter.ai/keys" },
-                  { label: "Groq", chave: "GROQ_API_KEY", ondeObter: "https://console.groq.com/keys" },
-                ]
-            ).map((op) => (
-              <div
-                key={op.chave}
-                className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-[11px] bg-slate-50 dark:bg-slate-800/60 rounded-lg px-2.5 py-1.5"
+      {avisoExecucao && (
+        <div className="bg-white dark:bg-brand-card-dark border border-amber-200 dark:border-amber-800/40 rounded-2xl p-3.5">
+          <div className="flex items-start gap-2">
+            <Info size={14} className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+            <div className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300 flex-1">
+              <p>{avisoExecucao}</p>
+              <button
+                type="button"
+                onClick={() => setMostrarConfigIA((v) => !v)}
+                className="mt-1 text-indigo-600 dark:text-indigo-400 font-semibold hover:underline cursor-pointer"
               >
-                <span className="font-semibold text-slate-700 dark:text-slate-200">{op.label}</span>
-                <code className="text-[10px] text-indigo-700 dark:text-indigo-300">{op.chave}</code>
-                <a
-                  href={op.ondeObter}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:underline"
-                >
-                  <ExternalLink size={10} /> obter chave
-                </a>
-              </div>
-            ))}
+                {mostrarConfigIA ? "Ocultar opções de IA" : "Como ativar a IA"}
+              </button>
+
+              {mostrarConfigIA && (
+                <div className="mt-2 space-y-1.5">
+                  <p className="text-slate-500 dark:text-slate-400">
+                    Crie uma chave gratuita em qualquer uma das opções abaixo e salve em{" "}
+                    <strong>Supabase → Edge Functions → Secrets</strong>. A função detecta
+                    sozinha qual está configurada.
+                  </p>
+                  {PROVEDORES_IA.map((op) => (
+                    <div
+                      key={op.chave}
+                      className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 bg-slate-50 dark:bg-slate-800/60 rounded-lg px-2.5 py-1.5"
+                    >
+                      <span className="font-semibold text-slate-700 dark:text-slate-200">
+                        {op.label}
+                      </span>
+                      <code className="text-[10px] text-indigo-700 dark:text-indigo-300">
+                        {op.chave}
+                      </code>
+                      <a
+                        href={op.ondeObter}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:underline"
+                      >
+                        <ExternalLink size={10} /> obter chave
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
+        </div>
+      )}
+
+      {/* Status das fontes na última execução */}
+      {ultimaExecucao && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400 px-1">
+          <span className="font-semibold text-slate-600 dark:text-slate-300">Última busca:</span>
+          <span className="flex items-center gap-1">
+            <Cpu size={11} className="text-emerald-600 dark:text-emerald-400" />
+            motor local
+            {ultimaExecucao.resumo && ` (${ultimaExecucao.resumo.local_engine})`}
+          </span>
+          <span className="flex items-center gap-1">
+            <Sparkles
+              size={11}
+              className={
+                ultimaExecucao.provider
+                  ? "text-indigo-600 dark:text-indigo-400"
+                  : "text-slate-300 dark:text-slate-600"
+              }
+            />
+            {ultimaExecucao.provider
+              ? `IA · ${ultimaExecucao.provider}${ultimaExecucao.model ? ` (${ultimaExecucao.model})` : ""}`
+              : "IA não configurada"}
+          </span>
         </div>
       )}
 
@@ -264,12 +347,28 @@ export default function EventSuggestionsTab({
               >
                 <div>
                   <div className="flex items-center justify-between gap-2 mb-2">
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300">
-                      Sugestão da IA
-                    </span>
+                    {s.origin === "local_engine" ? (
+                      <span
+                        className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 flex items-center gap-1"
+                        title="Gerado pelo motor local, sem uso de IA externa"
+                      >
+                        <Cpu size={10} /> Motor local
+                      </span>
+                    ) : (
+                      <span
+                        className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 flex items-center gap-1"
+                        title="Descoberto por IA externa"
+                      >
+                        <Sparkles size={10} /> IA
+                      </span>
+                    )}
                     <span
                       className={`text-[10px] font-bold px-2 py-0.5 rounded ${confidenceColor(s.aiConfidence)}`}
-                      title="Confiança estimada pela IA"
+                      title={
+                        s.origin === "local_engine"
+                          ? "Confiança do motor local (datas recorrentes são estimativas)"
+                          : "Confiança estimada pela IA"
+                      }
                     >
                       {s.aiConfidence !== null ? `${Math.round(s.aiConfidence * 100)}% confiança` : "Sem score"}
                     </span>
@@ -283,6 +382,13 @@ export default function EventSuggestionsTab({
                     <Calendar size={12} className="text-slate-400 shrink-0" />
                     <span>{formatDate(s)}</span>
                   </p>
+
+                  {s.isEstimated && (
+                    <p className="mt-1 text-[10px] font-semibold text-amber-700 dark:text-amber-400 flex items-start gap-1">
+                      <AlertTriangle size={10} className="shrink-0 mt-0.5" />
+                      <span>Data estimada — confirme na fonte oficial antes de publicar.</span>
+                    </p>
+                  )}
 
                   <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
                     <MapPin size={12} className="text-slate-400 shrink-0" />

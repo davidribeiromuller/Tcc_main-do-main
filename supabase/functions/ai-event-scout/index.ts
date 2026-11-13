@@ -25,6 +25,7 @@
 // Deno runtime.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { runLocalEventEngine } from "./local_engine.ts";
 
 const DEFAULT_COUNT = 5;
 const MAX_COUNT = 8;
@@ -426,111 +427,131 @@ Deno.serve(async (req: Request) => {
     const count = Math.min(Math.max(Number(payload?.count) || DEFAULT_COUNT, 1), MAX_COUNT);
     const focus = typeof payload?.focus === "string" ? payload.focus : undefined;
 
-    // --- 3. Qual IA está disponível? ---
-    const provedor = resolveProvider();
-    if (!provedor) {
-      return respostaJson(
-        {
-          error:
-            "Nenhuma IA configurada. Adicione uma chave em Supabase → Edge Functions → " +
-            "Secrets (uma destas: GEMINI_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, " +
-            "OPENROUTER_API_KEY ou GROQ_API_KEY).",
-          code: "NO_AI_KEY",
-          opcoes: PROVIDERS.map((p) => ({
-            id: p.id,
-            label: p.label,
-            chave: p.envKeys[0],
-            ondeObter: p.signupUrl,
-          })),
-        },
-        503
-      );
-    }
-
-    const { def, apiKey } = provedor;
-    const model = Deno.env.get("AI_MODEL")?.trim() || def.defaultModel;
-
-    // --- 4. Chamada à IA ---
-    const resultado = await chamarModelo(def, apiKey, model, buildPrompt(count, focus));
-    const suggestions = Array.isArray(resultado?.suggestions) ? resultado.suggestions : [];
-
-    // --- 5. Validação ---
+    // --- 3. FONTES DE DESCOBERTA ---
+    // O motor local SEMPRE roda (não precisa de chave).
+    // A IA complementa quando houver chave configurada.
     const serviceClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
     const agora = new Date();
-    const validas: any[] = [];
+    const candidatos: any[] = [];
+    const fontesUsadas: string[] = [];
     let descartadas = 0;
+    let avisoIa: string | null = null;
 
-    for (const s of suggestions) {
-      if (
-        !s?.title ||
-        !Number.isFinite(s?.day) ||
-        !Number.isFinite(s?.month) ||
-        !Number.isFinite(s?.year)
-      ) {
-        descartadas++;
-        continue;
+    // ---------- 3a. Motor local (sem chave) ----------
+    const locais = runLocalEventEngine({ referenceDate: agora, limit: count });
+    for (const candidato of locais) {
+      candidatos.push(candidato);
+    }
+    if (locais.length > 0) fontesUsadas.push("local_engine");
+
+    // ---------- 3b. IA (opcional) ----------
+    const provedor = resolveProvider();
+    let iaInfo: { provider: string; model: string } | null = null;
+
+    if (provedor) {
+      try {
+        const { def, apiKey } = provedor;
+        const model = (Deno.env.get("AI_MODEL") || "").trim() || def.defaultModel;
+
+        const resultado = await chamarModelo(def, apiKey, model, buildPrompt(count, focus));
+        const sugestoesIa = Array.isArray(resultado?.suggestions) ? resultado.suggestions : [];
+
+        for (const s of sugestoesIa) {
+          if (
+            !s?.title ||
+            !Number.isFinite(s?.day) ||
+            !Number.isFinite(s?.month) ||
+            !Number.isFinite(s?.year)
+          ) {
+            descartadas++;
+            continue;
+          }
+
+          const dataEvento = new Date(s.year, s.month, s.day);
+          if (isNaN(dataEvento.getTime()) || dataEvento.getTime() < agora.getTime()) {
+            descartadas++; // nunca sugerir evento no passado
+            continue;
+          }
+
+          candidatos.push({
+            title: String(s.title).slice(0, 200),
+            description: s.description ?? null,
+            location: s.location ?? null,
+            address: s.address ?? null,
+            city: s.city === "Curitiba" ? "Curitiba" : "Araucária",
+            category: s.category ?? null,
+            school_name: s.school_name ?? null,
+            day: s.day,
+            month: s.month,
+            year: s.year,
+            time: s.time ?? "08:00",
+            is_paid: Boolean(s.is_paid),
+            price: s.price ?? null,
+            requirements: s.requirements ?? null,
+            website: s.website || s.source_url || null,
+            source_name: s.source_name ?? null,
+            source_url: s.source_url ?? null,
+            ai_confidence: Number(s.confidence) || 0.5,
+            ai_reasoning: s.reasoning ?? null,
+            fingerprint: fingerprint({
+              title: s.title,
+              day: s.day,
+              month: s.month,
+              year: s.year,
+              city: s.city,
+            }),
+            status: "pending",
+            origin: "ai",
+            is_estimated: false,
+          });
+        }
+
+        fontesUsadas.push("ai");
+        iaInfo = { provider: def.id, model };
+      } catch (err) {
+        // A IA falhou, mas o motor local já produziu resultados.
+        // Não derrubamos a requisição por causa disso.
+        avisoIa = `A IA (${provedor.def.label}) falhou: ${String(
+          (err as any)?.message ?? err
+        ).slice(0, 200)}. As sugestões do motor local foram mantidas.`;
       }
-
-      const dataEvento = new Date(s.year, s.month, s.day);
-      if (isNaN(dataEvento.getTime()) || dataEvento.getTime() < agora.getTime()) {
-        descartadas++; // nunca sugerir evento no passado
-        continue;
-      }
-
-      validas.push({
-        title: String(s.title).slice(0, 200),
-        description: s.description ?? null,
-        location: s.location ?? null,
-        address: s.address ?? null,
-        city: s.city === "Curitiba" ? "Curitiba" : "Araucária",
-        category: s.category ?? null,
-        school_name: s.school_name ?? null,
-        day: s.day,
-        month: s.month,
-        year: s.year,
-        time: s.time ?? "08:00",
-        is_paid: Boolean(s.is_paid),
-        price: s.price ?? null,
-        requirements: s.requirements ?? null,
-        website: s.website || s.source_url || null,
-        source_name: s.source_name ?? null,
-        source_url: s.source_url ?? null,
-        ai_confidence: Number(s.confidence) || 0.5,
-        ai_reasoning: s.reasoning ?? null,
-        fingerprint: fingerprint({
-          title: s.title,
-          day: s.day,
-          month: s.month,
-          year: s.year,
-          city: s.city,
-        }),
-        status: "pending",
-      });
+    } else {
+      avisoIa =
+        "Nenhuma IA configurada — usando apenas o motor local. " +
+        "Para ativar a descoberta de eventos inéditos, adicione GEMINI_API_KEY, " +
+        "ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY ou GROQ_API_KEY " +
+        "em Supabase → Edge Functions → Secrets.";
     }
 
+    // --- 4. Deduplicação entre fontes ---
+    // O motor local tem prioridade quando o mesmo evento aparece nas duas.
     const vistos = new Set<string>();
-    const lote = validas.filter((s) => {
+    const lote = candidatos.filter((s) => {
       if (vistos.has(s.fingerprint)) return false;
       vistos.add(s.fingerprint);
       return true;
     });
+
+    const semDuplicatas = candidatos.length - lote.length;
 
     if (lote.length === 0) {
       return respostaJson({
         success: true,
         inseridas: 0,
         descartadas,
-        provider: def.id,
-        model,
+        fontes: fontesUsadas,
+        provider: iaInfo?.provider ?? null,
+        model: iaInfo?.model ?? null,
+        aviso: avisoIa,
         message: "Nenhuma sugestão válida encontrada nesta rodada.",
       });
     }
 
-    // --- 6. Gravação (ignora duplicatas por fingerprint) ---
+    // --- 5. Gravação (ignora duplicatas por fingerprint) ---
     const { data: inseridas, error: insertError } = await serviceClient
       .from("event_suggestions")
       .upsert(lote, { onConflict: "fingerprint", ignoreDuplicates: true })
@@ -540,13 +561,24 @@ Deno.serve(async (req: Request) => {
       return respostaJson({ error: insertError.message }, 500);
     }
 
+    const totalInseridas = inseridas?.length ?? 0;
+    const origemLocal = lote.filter((s) => s.origin === "local_engine").length;
+    const origemIa = lote.filter((s) => s.origin === "ai").length;
+
     return respostaJson({
       success: true,
-      inseridas: inseridas?.length ?? 0,
+      inseridas: totalInseridas,
       descartadas,
-      provider: def.id,
-      model,
-      message: `${inseridas?.length ?? 0} sugestão(ões) adicionada(s) para revisão.`,
+      duplicadas: semDuplicatas,
+      fontes: fontesUsadas,
+      provider: iaInfo?.provider ?? null,
+      model: iaInfo?.model ?? null,
+      resumo: { local_engine: origemLocal, ai: origemIa },
+      aviso: avisoIa,
+      message:
+        totalInseridas > 0
+          ? `${totalInseridas} sugestão(ões) adicionada(s) para revisão.`
+          : "Nenhuma sugestão nova: os eventos recorrentes já estão na lista.",
     });
   } catch (err) {
     return respostaJson({ error: String((err as any)?.message ?? err) }, 500);

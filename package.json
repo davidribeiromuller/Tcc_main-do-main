@@ -10,7 +10,9 @@
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "sync:local-engine": "node scripts/sync-local-engine.mjs",
+    "sync:local-engine:check": "node scripts/sync-local-engine.mjs --check"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
