@@ -46,6 +46,7 @@ import {
   heartbeatUserDirectInSupabase,
 } from "./lib/usersService.ts";
 import { canAccessAdminPanel } from "./lib/permissions.ts";
+import { isEventRetentionExpired } from "./lib/eventLifecycle.ts";
 
 export default function App() {
   const [resetTokenParam, setResetTokenParam] = useState<string | null>(() => {
@@ -360,8 +361,11 @@ export default function App() {
       if (parsed.ok && parsed.data?.events) {
         const incomingEvents = parsed.data.events;
         if (Array.isArray(incomingEvents) && incomingEvents.length > 0) {
-          setEvents(incomingEvents);
-          localStorage.setItem("local_events", JSON.stringify(incomingEvents));
+          // Retenção de 3 dias: eventos vencidos saem do app mesmo que o
+          // backend ainda os devolva.
+          const validos = incomingEvents.filter((e: Event) => !isEventRetentionExpired(e));
+          setEvents(validos);
+          localStorage.setItem("local_events", JSON.stringify(validos));
           setIsLoadingEvents(false);
           return true;
         }
@@ -389,7 +393,8 @@ export default function App() {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setEvents(parsed);
+          // O cache local pode conter eventos que já foram excluídos.
+          setEvents(parsed.filter((e: Event) => !isEventRetentionExpired(e)));
           setIsLoadingEvents(false);
           return true;
         }
@@ -1908,6 +1913,7 @@ export default function App() {
                       onSelectEvent={setSelectedEvent}
                       currentUser={currentUser}
                       onShowToast={showToast}
+                      onRefreshEvents={() => { void loadEvents(); }}
                     />
                   </motion.div>
                 )}

@@ -1,10 +1,13 @@
 import { Event } from "../types.ts";
 
 /**
- * Global constant for event retention policy:
- * Events are automatically archived 30 days after their scheduled end date.
+ * Retenção de eventos: o evento sai do app 3 dias após o seu término
+ * e vai para a lista de eventos excluídos (recuperável).
+ *
+ * Precisa ficar em sincronia com a função SQL
+ * `archive_expired_events_routine()` (migration 0004), que roda via pg_cron.
  */
-export const EVENT_RETENTION_DAYS = 30;
+export const EVENT_RETENTION_DAYS = 3;
 
 /**
  * Converts event day, month, year, time into a Date object in Brazilian timezone.
@@ -30,7 +33,7 @@ export function isEventEnded(event: Event, referenceDate: Date = new Date()): bo
 }
 
 /**
- * Returns true if the event concluded more than EVENT_RETENTION_DAYS (30 days) ago.
+ * Returns true if the event concluded more than EVENT_RETENTION_DAYS (3 days) ago.
  */
 export function isEventRetentionExpired(event: Event, referenceDate: Date = new Date()): boolean {
   const endDate = getEventEndDateTime(event);
