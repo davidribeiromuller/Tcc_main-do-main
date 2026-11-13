@@ -3,9 +3,12 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 
-export default defineConfig(() => {
+export default defineConfig(({command}) => {
   return {
-    base: '/Tcc_main-do-main/',
+    // Em produção (GitHub Pages) o app é servido em /Tcc_main-do-main/.
+    // Em desenvolvimento servimos na raiz '/', para funcionar em qualquer
+    // host/preview (localhost, túneis, containers, etc.).
+    base: command === 'build' ? '/Tcc_main-do-main/' : '/',
     plugins: [react(), tailwindcss()],
     define: {
       'process.env.GOOGLE_MAPS_PLATFORM_KEY': JSON.stringify(process.env.GOOGLE_MAPS_PLATFORM_KEY || ''),
@@ -22,8 +25,12 @@ export default defineConfig(() => {
       },
     },
     server: {
+      // Aceita o preview host do ambiente de desenvolvimento (E2B/Arena) e
+      // tunneling; em localhost o comportamento padrão continua valendo.
+      host: '0.0.0.0',
+      allowedHosts: true,
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
+      // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
