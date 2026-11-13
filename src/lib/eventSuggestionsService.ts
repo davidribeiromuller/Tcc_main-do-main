@@ -24,6 +24,10 @@ export interface EventSuggestion {
   sourceUrl: string | null;
   aiConfidence: number | null;
   aiReasoning: string | null;
+  /** Fonte: IA externa ou motor local. */
+  origin: "ai" | "local_engine";
+  /** true = data calculada/estimada; exige confirmação antes de publicar. */
+  isEstimated: boolean;
   status: "pending" | "approved" | "rejected";
   createdAt: string;
   reviewedAt: string | null;
@@ -57,6 +61,8 @@ function mapSuggestion(row: any): EventSuggestion {
       ? Number(row.ai_confidence)
       : null,
     aiReasoning: row.ai_reasoning ?? null,
+    origin: row.origin === "local_engine" ? "local_engine" : "ai",
+    isEstimated: Boolean(row.is_estimated),
     status: row.status,
     createdAt: row.created_at,
     reviewedAt: row.reviewed_at ?? null,
@@ -211,8 +217,13 @@ export async function triggerAiEventScout(
   success: boolean;
   inseridas?: number;
   message?: string;
-  needsApiKey?: boolean;
-  availableProviders?: Array<{ label: string; chave: string; ondeObter: string }>;
+  /** Aviso não-fatal (ex.: IA sem chave, caiu para o motor local). */
+  aviso?: string | null;
+  /** Quais fontes rodaram nesta execução. */
+  fontes?: string[];
+  resumo?: { local_engine: number; ai: number };
+  provider?: string | null;
+  model?: string | null;
   error: any;
 }> {
   if (!isSupabaseConfigured()) {
@@ -238,9 +249,7 @@ export async function triggerAiEventScout(
 
       return {
         success: false,
-        needsApiKey: detalhe?.code === "NO_AI_KEY",
-        availableProviders: detalhe?.opcoes,
-        error: new Error(detalhe?.error || error.message || "Falha ao executar a IA"),
+        error: new Error(detalhe?.error || error.message || "Falha ao executar a descoberta"),
       };
     }
 
@@ -248,6 +257,11 @@ export async function triggerAiEventScout(
       success: data?.success === true,
       inseridas: data?.inseridas ?? 0,
       message: data?.message,
+      aviso: data?.aviso ?? null,
+      fontes: data?.fontes ?? [],
+      resumo: data?.resumo,
+      provider: data?.provider ?? null,
+      model: data?.model ?? null,
       error: data?.success === true ? null : new Error(data?.error ?? "Falha ao executar a IA"),
     };
   } catch (err) {
