@@ -78,6 +78,7 @@ import {
 } from "./src/db/fallbackStore.ts";
 import { EVENT_RETENTION_DAYS } from "./src/lib/eventLifecycle.ts";
 import { validateEventDate } from "./src/lib/dateGuards.ts";
+import { detectForbiddenContent } from "./src/lib/eventClassification.ts";
 import {
   createAuthorization,
   getAuthorizationByStudentAndEvent,
@@ -1267,6 +1268,18 @@ async function startServer() {
       const dateError = validateEventDate(Number(day), Number(month), Number(year));
       if (dateError) {
         return res.status(400).json({ error: dateError });
+      }
+
+      // Conteúdo não permitido (balada, rave, festa, show) é barrado na API;
+      // a UI também filtra, mas a checagem no servidor é a que vale.
+      const conteudo = detectForbiddenContent({
+        title,
+        description: req.body.description,
+        category: req.body.category,
+        requirements,
+      });
+      if (conteudo.proibido) {
+        return res.status(400).json({ error: conteudo.motivo });
       }
 
       const creatorId = dbUser ? dbUser.id : null;

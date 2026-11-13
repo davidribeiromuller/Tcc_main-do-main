@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Search, MapPin, Calendar, CircleDollarSign, PlusCircle, X, Map as MapIcon } from "lucide-react";
+import { Search, MapPin, Calendar, CircleDollarSign, PlusCircle, X, Map as MapIcon, GraduationCap, Globe2 } from "lucide-react";
 import { Event } from "../types";
+import { resolveEventCity, classifyEventAsSchool } from "../lib/eventClassification";
 import AIChatAssistant from "./AIChatAssistant";
 import EventLocationModal from "./EventLocationModal";
 
@@ -45,6 +46,11 @@ export default function Feed({
 }: FeedProps) {
   const [localSearchOpen, setLocalSearchOpen] = useState(false);
   const [localSearchTerm, setLocalSearchTerm] = useState("");
+  /** Filtros da aba de eventos: localidade e tipo (escolar / aberto ao público). */
+  type CityFilter = "todas" | "Araucária" | "Curitiba";
+  type TypeFilter = "todos" | "escolar" | "publico";
+  const [cityFilter, setCityFilter] = useState<CityFilter>("todas");
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>("todos");
   const inputRef = useRef<HTMLInputElement>(null);
 
   // State for location permission modal on entering event from feed
@@ -102,12 +108,36 @@ export default function Feed({
     onSelectEvent(event);
   };
 
+  /** Cidade efetiva do evento (campo explícito ou inferida do local). */
+  const getEventCity = (event: Event) => resolveEventCity({
+    city: event.city,
+    location: event.location,
+    title: event.title,
+  });
+
+  /** Escolar vs. aberto ao público, respeitando classificação já gravada. */
+  const getEventIsSchool = (event: Event) => classifyEventAsSchool({
+    isSchool: event.isSchool,
+    category: event.category,
+    title: event.title,
+    description: event.description,
+    schoolName: event.schoolName,
+    location: event.location,
+  });
+
   const filteredEvents = events.filter((event) => {
     const term = normalizeString(currentSearchTerm);
-    return (
+    const matchesSearch =
       normalizeString(event.title).includes(term) ||
-      normalizeString(event.location).includes(term)
-    );
+      normalizeString(event.location).includes(term);
+    if (!matchesSearch) return false;
+
+    if (cityFilter !== "todas" && getEventCity(event) !== cityFilter) return false;
+
+    if (typeFilter === "escolar" && !getEventIsSchool(event)) return false;
+    if (typeFilter === "publico" && getEventIsSchool(event)) return false;
+
+    return true;
   });
 
   return (
@@ -204,6 +234,80 @@ export default function Feed({
         )}
       </AnimatePresence>
 
+      {/* Filtros: localidade e tipo de evento */}
+      <div className="max-w-6xl mx-auto w-full px-6 pt-5">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Filtrar por localidade">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mr-0.5">Cidade</span>
+            {([
+              { id: "todas" as const, label: "Todas" },
+              { id: "Araucária" as const, label: "Araucária" },
+              { id: "Curitiba" as const, label: "Curitiba" },
+            ]).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setCityFilter(opt.id)}
+                aria-pressed={cityFilter === opt.id}
+                className={`px-3 py-1.5 rounded-full text-[11px] font-semibold transition-all cursor-pointer active:scale-95 border ${
+                  cityFilter === opt.id
+                    ? "bg-brand-accent text-white border-brand-accent shadow-sm"
+                    : "bg-white dark:bg-brand-card-dark text-slate-600 dark:text-slate-300 border-brand-primary/20 dark:border-white/10 hover:border-brand-accent/40"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="hidden sm:block h-5 w-px bg-brand-primary/15 dark:bg-white/10" />
+
+          <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Filtrar por tipo de evento">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mr-0.5">Tipo</span>
+            {([
+              { id: "todos" as const, label: "Todos", icon: null },
+              { id: "escolar" as const, label: "Escolar", icon: GraduationCap },
+              { id: "publico" as const, label: "Aberto ao público", icon: Globe2 },
+            ]).map((opt) => {
+              const Icone = opt.icon;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setTypeFilter(opt.id)}
+                  aria-pressed={typeFilter === opt.id}
+                  className={`px-3 py-1.5 rounded-full text-[11px] font-semibold transition-all cursor-pointer active:scale-95 border flex items-center gap-1.5 ${
+                    typeFilter === opt.id
+                      ? "bg-brand-accent text-white border-brand-accent shadow-sm"
+                      : "bg-white dark:bg-brand-card-dark text-slate-600 dark:text-slate-300 border-brand-primary/20 dark:border-white/10 hover:border-brand-accent/40"
+                  }`}
+                >
+                  {Icone && <Icone size={12} />}
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {(cityFilter !== "todas" || typeFilter !== "todos") && (
+          <div className="flex items-center gap-2 mt-2.5 text-[11px] text-slate-500 dark:text-slate-400">
+            <span>
+              {filteredEvents.length} {filteredEvents.length === 1 ? "evento" : "eventos"}
+              {cityFilter !== "todas" ? ` em ${cityFilter}` : ""}
+              {typeFilter === "escolar" ? " • escolares" : typeFilter === "publico" ? " • abertos ao público" : ""}
+            </span>
+            <button
+              type="button"
+              onClick={() => { setCityFilter("todas"); setTypeFilter("todos"); }}
+              className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-white/10 hover:bg-slate-200 dark:hover:bg-white/20 font-semibold transition-colors cursor-pointer"
+            >
+              Limpar filtros
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Events List */}
       <div className="max-w-6xl mx-auto w-full p-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {isLoading && filteredEvents.length === 0 ? (
@@ -261,9 +365,29 @@ export default function Feed({
                   {event.title}
                 </h3>
 
+                {/* Badges: localidade + tipo escolar */}
+                <div className="absolute top-3 left-3 flex items-center gap-1.5 flex-wrap">
+                  {getEventCity(event) && (
+                    <span className="bg-white/95 dark:bg-black/70 backdrop-blur-sm text-slate-800 dark:text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
+                      <MapPin size={10} className="text-red-500" />
+                      {getEventCity(event)}
+                    </span>
+                  )}
+                  <span
+                    className={`backdrop-blur-sm text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm ${
+                      getEventIsSchool(event)
+                        ? "bg-brand-accent/95 text-white"
+                        : "bg-white/95 dark:bg-black/70 text-slate-800 dark:text-white"
+                    }`}
+                  >
+                    {getEventIsSchool(event) ? <GraduationCap size={10} /> : <Globe2 size={10} />}
+                    {getEventIsSchool(event) ? "Escolar" : "Público"}
+                  </span>
+                </div>
+
                 {/* Price indicator badge */}
                 {event.isPaid && (
-                  <span className="absolute top-4 right-4 bg-yellow-400 text-slate-900 text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 shadow">
+                  <span className="absolute top-3 right-3 bg-yellow-400 text-slate-900 text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 shadow">
                     <CircleDollarSign size={12} />
                     {event.price || "Pago"}
                   </span>

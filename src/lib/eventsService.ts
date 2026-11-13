@@ -5,6 +5,8 @@ import { Event } from "../types.ts";
  * Converte um registro da tabela 'eventos' (formato padrão Supabase)
  * para a interface Event utilizada pelo frontend.
  */
+import { resolveEventCity, classifyEventAsSchool, detectForbiddenContent } from "./eventClassification.ts";
+
 export function mapSupabaseEventoToEvent(row: any): Event {
   let startDate: Date | null = null;
   const rawDate = row.dataInicio || row.data_inicio;
@@ -81,6 +83,23 @@ export function mapSupabaseEventoToEvent(row: any): Event {
     website: row.linkInscricao || row.link_inscricao || row.website || null,
     image: row.imagem || row.image || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600",
     createdAt: row.criadoEm || row.criado_em || row.createdAt || row.created_at || new Date().toISOString(),
+    // Classificação preservada na leitura: sem isto os filtros por localidade e
+    // por tipo escolar ficavam vazios, pois os campos eram descartados aqui.
+    city: resolveEventCity({
+      city: row.cidade || row.city,
+      location: locationStr,
+      address: endereco,
+      title: row.titulo || row.title,
+    }),
+    category: row.categoria || row.category || null,
+    schoolName: row.organizador || row.school_name || row.schoolName || null,
+    isSchool: classifyEventAsSchool({
+      category: row.categoria || row.category,
+      title: row.titulo || row.title,
+      description: row.descricao || row.description,
+      schoolName: row.organizador || row.school_name || row.schoolName,
+      location: locationStr,
+    }),
   };
 }
 
@@ -113,6 +132,20 @@ export function mapSupabaseEventsTableToEvent(row: any): Event {
     website: row.website || null,
     image: row.image || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600",
     createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+    city: resolveEventCity({
+      city: row.city || row.cidade,
+      location: row.location,
+      title: row.title,
+    }),
+    category: row.category || row.categoria || null,
+    schoolName: row.school_name || row.schoolName || null,
+    isSchool: classifyEventAsSchool({
+      category: row.category || row.categoria,
+      title: row.title,
+      description: row.description,
+      schoolName: row.school_name || row.schoolName,
+      location: row.location,
+    }),
   };
 }
 
@@ -226,6 +259,36 @@ export async function createEventDirectInSupabase(eventData: {
 
   const supabase = getSupabaseClient();
 
+  // Conteúdo proibido (balada, rave, festa, show) é barrado na origem.
+  const conteudo = detectForbiddenContent({
+    title: eventData.title,
+    description: eventData.description,
+    category: eventData.category,
+    requirements: eventData.requirements,
+  });
+  if (conteudo.proibido) {
+    return {
+      success: false,
+      event: null,
+      error: new Error(conteudo.motivo || "Conteúdo não permitido."),
+    };
+  }
+
+  // Classificação resolvida na escrita: cidade inferida do local/título e tipo
+  // escolar derivado dos marcadores do evento.
+  const cidadeResolvida = resolveEventCity({
+    city: eventData.city,
+    location: eventData.location,
+    title: eventData.title,
+  });
+  const ehEscolar = classifyEventAsSchool({
+    category: eventData.category,
+    title: eventData.title,
+    description: eventData.description,
+    schoolName: eventData.schoolName,
+    location: eventData.location,
+  });
+
   // Calcular timestamp data_inicio
   const day = Number(eventData.day) || 1;
   const month = Number(eventData.month) || 0;
@@ -270,8 +333,10 @@ export async function createEventDirectInSupabase(eventData: {
     const rowEventos: Record<string, any> = {
       titulo: eventData.title,
       descricao: eventData.description || eventData.requirements || "Evento da comunidade escolar",
-      categoria: eventData.category || "Escolar",
-      cidade: eventData.city || "Araucária",
+      // Nunca assumir cidade por padrão: gravar só o que foi informado ou
+      // puder ser inferido do local/título (ver eventClassification.ts).
+      cidade: cidadeResolvida,
+      categoria: eventData.category || (ehEscolar ? "Escolar" : "Aberto ao público"),
       local: eventData.location,
       endereco: eventData.location,
       data_inicio: dataInicioIso,

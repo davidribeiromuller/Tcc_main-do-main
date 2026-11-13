@@ -24,8 +24,11 @@
 //
 // Deno runtime.
 
-import { createClient } from "jsr:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import { runLocalEventEngine } from "./local_engine.ts";
+// Reaproveita a mesma regra do app (src/lib/eventClassification.ts).
+// Duplicar as listas aqui já causou conflito de símbolo no bundle.
+import { detectForbiddenContent } from "./eventClassification.ts";
 
 const DEFAULT_COUNT = 5;
 const MAX_COUNT = 8;
@@ -49,6 +52,7 @@ const ITEM_SCHEMA = {
     city: { type: "string", enum: ["Araucária", "Curitiba"] },
     category: { type: "string" },
     school_name: { type: "string" },
+    is_school: { type: "boolean" },
     day: { type: "integer" },
     month: { type: "integer" },
     year: { type: "integer" },
@@ -117,16 +121,30 @@ das escolas de Araucária e Curitiba, no Paraná, Brasil.
 
 Data de hoje: ${hoje}.
 
-Sua tarefa: propor até ${count} eventos ESCOLARES reais e verificáveis que
-acontecerão nos próximos 12 meses (nunca no passado) e que sejam relevantes
-para estudantes do ensino fundamental II e médio.
+Sua tarefa: propor até ${count} eventos reais e verificáveis que acontecerão
+nos próximos 12 meses (nunca no passado), nas cidades de **Araucária** e
+**Curitiba** (Paraná). A maior parte deve ser ESCOLAR, mas inclua também
+eventos ABERTOS AO PÚBLICO que sejam relevantes para estudantes do ensino
+fundamental II e médio.
 
-Priorize:
+Priorize (escolares):
 - Feiras de profissões, feiras de cursos e mostras vocacionais
 - Olimpíadas do conhecimento (OBMEP, OBI, ONHB, MOBFOG) e competições estudantis
 - Feiras de ciências, tecnologia, robótica e inovação
 - Eventos culturais, artísticos e esportivos escolares
-- Processos seletivos e vestibulares de instituições da região
+- Jogos escolares e competições entre escolas
+
+Priorize (abertos ao público):
+- Processos seletivos e vestibulares de instituições da região (UFPR, UTFPR, PUCPR)
+- Mostras culturais, feiras de livro e exposições com fins educativos
+- Feiras de ciência e tecnologia abertas à comunidade
+- Eventos esportivos e culturais abertos ao público em geral
+
+PROIBIDO — não inclua de forma alguma:
+- Baladas, raves, boates, festas noturnas, micaretas e carnaval fora de época
+- Shows, festivais de música com venda de ingresso e eventos com open bar
+- Qualquer evento cujo público principal seja adulto ou envolva consumo de álcool
+Eventos assim são descartados automaticamente pelo sistema.
 
 ${focus ? `Foco adicional pedido pelo administrador: ${focus}` : ""}
 
@@ -134,6 +152,8 @@ Regras obrigatórias:
 - "month" é 0-indexado (0 = janeiro, 11 = dezembro).
 - Datas devem estar no futuro em relação a hoje.
 - "city" deve ser exatamente "Araucária" ou "Curitiba".
+- "is_school" deve ser true apenas para eventos organizados por escola ou
+  voltados a estudantes; false para eventos abertos ao público em geral.
 - "time" no formato HH:MM (24h). Se não souber, use "08:00".
 - "confidence" entre 0 e 1: use no máximo 0.6 quando a data for aproximada
   ou inferida, e acima de 0.8 apenas quando a data for oficialmente divulgada.
@@ -386,6 +406,143 @@ function fingerprint(s: {
   return `${norm(s.title)}|${s.year}-${s.month}-${s.day}|${norm(s.city || "")}`;
 }
 
+/** Normaliza texto para comparação semântica (sem acento, sem pontuação). */
+function normalizarTexto(v: string): string {
+  return (v || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/** Palavras ignoradas na comparação de títulos. */
+const STOPWORDS = new Set([
+  "de", "da", "do", "das", "dos", "e", "em", "a", "o", "as", "os", "para",
+  "com", "no", "na", "nos", "nas", "por", "ao", "aos", "the", "of",
+  "edicao", "edition", "nacional", "brasileira", "brasileiro", "municipal",
+  "estadual", "2025", "2026", "2027", "2028", "2029", "2030",
+]);
+
+/**
+ * Sinônimos que aparecem nas variações de título geradas pela IA.
+ * "1ª Fase" e "Primeira Fase" descrevem o mesmo evento.
+ */
+const ORDINAIS: Record<string, string> = {
+  "1": "primeira", "1a": "primeira", "1o": "primeira",
+  "2": "segunda", "2a": "segunda", "2o": "segunda",
+  "3": "terceira", "3a": "terceira", "3o": "terceira",
+};
+
+/**
+ * Ano citado explicitamente no título, se houver.
+ * "OBMEP 2027" e "OBMEP 2028" são edições distintas e não podem ser
+ * confundidas pela deduplicação.
+ */
+function anoNoTitulo(titulo: string): number | null {
+  const correspondencia = (titulo || "").match(/(20\d{2})/);
+  return correspondencia ? parseInt(correspondencia[1], 10) : null;
+}
+
+/** Conjunto de palavras significativas do título. */
+function palavrasChave(titulo: string): Set<string> {
+  return new Set(
+    normalizarTexto(titulo)
+      .split(" ")
+      .map((w) => ORDINAIS[w] || w)
+      .filter((w) => w.length > 2 && !STOPWORDS.has(w))
+  );
+}
+
+/** Similaridade de Jaccard entre os títulos (0 a 1). */
+function similaridadeTitulo(a: string, b: string): number {
+  const pa = palavrasChave(a);
+  const pb = palavrasChave(b);
+  if (pa.size === 0 || pb.size === 0) return 0;
+  let intersecao = 0;
+  for (const w of pa) if (pb.has(w)) intersecao++;
+  return intersecao / (pa.size + pb.size - intersecao);
+}
+
+/** Diferença em dias entre duas datas (dia/mês/ano, mês 0-indexado). */
+function diferencaEmDias(
+  a: { day: number; month: number; year: number },
+  b: { day: number; month: number; year: number }
+): number {
+  const ms = new Date(a.year, a.month, a.day).getTime() - new Date(b.year, b.month, b.day).getTime();
+  return Math.abs(Math.round(ms / 86_400_000));
+}
+
+/** Janela (em dias) em que duas ocorrências são consideradas o mesmo evento. */
+const JANELA_MESMO_EVENTO_DIAS = 30;
+/** Similaridade mínima de título para considerar o mesmo evento. */
+const LIMIAR_SIMILARIDADE = 0.6;
+
+/** Cidade normalizada para comparação. */
+function cidadeNormalizada(city: string | null | undefined): string {
+  return normalizarTexto(city || "");
+}
+
+/**
+ * Janela larga para títulos praticamente idênticos.
+ *
+ * Descoberta com dados reais: "Feira de Profissões da PUCPR" foi rejeitada em
+ * 2027-08-15 e voltou como 2027-07-12. A IA inventa a data, então a distância
+ * entre as duas tentativas não pode ser o critério principal — se o título é o
+ * mesmo evento, a rejeição vale independentemente da data que ela chutou.
+ */
+const JANELA_TITULO_IDENTICO_DIAS = 180;
+/** Similaridade a partir da qual o título é considerado o mesmo evento. */
+const LIMIAR_TITULO_IDENTICO = 0.85;
+
+/**
+ * Dois candidatos descrevem o mesmo evento?
+ *
+ * O fingerprint exato falhava porque a IA gera variações do título e da data a
+ * cada execução — por isso sugestões rejeitadas voltavam com fingerprint novo.
+ * Estratégia: título idêntico ignora quase a data; título parecido exige data
+ * próxima.
+ */
+function mesmoEvento(
+  a: { title: string; day: number; month: number; year: number; city?: string | null },
+  b: { title: string; day: number; month: number; year: number; city?: string | null }
+): boolean {
+  const cidadeA = cidadeNormalizada(a.city);
+  const cidadeB = cidadeNormalizada(b.city);
+  if (cidadeA && cidadeB && cidadeA !== cidadeB) return false;
+
+  // Edições distintas (ano explícito diferente) nunca são o mesmo evento,
+  // por mais parecidos que os títulos sejam.
+  const anoA = anoNoTitulo(a.title);
+  const anoB = anoNoTitulo(b.title);
+  if (anoA !== null && anoB !== null && anoA !== anoB) return false;
+
+  let similaridade = similaridadeTitulo(a.title, b.title);
+  const dias = diferencaEmDias(a, b);
+
+  // Contenção: "Vestibular UFPR 2027/2028" e "Vestibular UFPR 2027/2028 - Prova
+  // da 1ª Fase" são o mesmo evento — o segundo só acrescenta qualificador.
+  // Sem isto, a Jaccard sobe apenas para 0,5 e a rejeição se perdia.
+  const menor = palavrasChave(a.title).size <= palavrasChave(b.title).size ? a.title : b.title;
+  const maior = menor === a.title ? b.title : a.title;
+  const chavesMenor = [...palavrasChave(menor)];
+  if (chavesMenor.length > 0 && chavesMenor.every((w) => palavrasChave(maior).has(w))) {
+    similaridade = Math.max(similaridade, 0.9);
+  }
+
+  // Mesmo título, data incerta: é o mesmo evento.
+  if (similaridade >= LIMIAR_TITULO_IDENTICO) {
+    return dias <= JANELA_TITULO_IDENTICO_DIAS;
+  }
+
+  // Título parecido só conta se as datas também estiverem próximas.
+  return similaridade >= LIMIAR_SIMILARIDADE && dias <= JANELA_MESMO_EVENTO_DIAS;
+}
+
+// ============================================================
+// Conteúdo não permitido
+// ============================================================
+
 /**
  * Traduz o erro cru do provedor numa mensagem acionável.
  *
@@ -505,6 +662,7 @@ Deno.serve(async (req: Request) => {
     const candidatos: any[] = [];
     const fontesUsadas: string[] = [];
     let descartadas = 0;
+    let bloqueadosPorConteudo = 0;
     let avisoIa: string | null = null;
 
     // ---------- 3a. Motor local (sem chave) ----------
@@ -546,13 +704,26 @@ Deno.serve(async (req: Request) => {
             continue;
           }
 
+          // Balada, rave, festa e show não entram no app escolar.
+          if (detectForbiddenContent({
+            title: s.title,
+            description: s.description,
+            category: s.category,
+            requirements: s.requirements,
+          }).proibido) {
+            bloqueadosPorConteudo++;
+            continue;
+          }
+
           candidatos.push({
             title: String(s.title).slice(0, 200),
             description: s.description ?? null,
             location: s.location ?? null,
             address: s.address ?? null,
             city: s.city === "Curitiba" ? "Curitiba" : "Araucária",
-            category: s.category ?? null,
+            // Categoria coerente com o tipo: o app usa isto para separar
+            // escolar de "aberto ao público" na aba de eventos.
+            category: s.category ?? (s.is_school === false ? "Aberto ao público" : "Escolar"),
             school_name: s.school_name ?? null,
             day: s.day,
             month: s.month,
@@ -597,28 +768,84 @@ Deno.serve(async (req: Request) => {
         "em Supabase → Edge Functions → Secrets.";
     }
 
-    // --- 4. Deduplicação entre fontes ---
-    // O motor local tem prioridade quando o mesmo evento aparece nas duas.
-    const vistos = new Set<string>();
-    const lote = candidatos.filter((s) => {
-      if (vistos.has(s.fingerprint)) return false;
-      vistos.add(s.fingerprint);
-      return true;
+    // --- 4. Memória de decisões anteriores ---
+    // Sugestões já rejeitadas ou aprovadas NUNCA voltam. Antes, o filtro era só
+    // por fingerprint exato, então qualquer variação de título ou data criava
+    // uma "sugestão nova" e a rejeição se perdia.
+    const { data: historico, error: historicoError } = await serviceClient
+      .from("event_suggestions")
+      .select("title, day, month, year, city, status, reviewed_at")
+      .in("status", ["rejected", "approved"])
+      .order("reviewed_at", { ascending: false })
+      .limit(500);
+
+    if (historicoError) {
+      console.warn("[ai-event-scout] Não foi possível ler o histórico:", historicoError.message);
+    }
+
+    const decididos = (historico ?? []) as Array<{
+      title: string; day: number; month: number; year: number; city: string | null; status: string;
+    }>;
+
+    // Pendentes também servem para não duplicar o que já está na fila de revisão.
+    const { data: pendentes } = await serviceClient
+      .from("event_suggestions")
+      .select("title, day, month, year, city")
+      .eq("status", "pending")
+      .limit(500);
+
+    const jaConhecidos = [
+      ...decididos.map((d) => ({ ...d, origem: "decidido" as const })),
+      ...((pendentes ?? []) as any[]).map((d) => ({ ...d, origem: "pendente" as const })),
+    ];
+
+    let descartadosPorHistorico = 0;
+    const semRepeticao = candidatos.filter((s) => {
+      const repetido = jaConhecidos.some((k) =>
+        mesmoEvento(s, {
+          title: k.title,
+          day: Number(k.day),
+          month: Number(k.month),
+          year: Number(k.year),
+          city: k.city,
+        })
+      );
+      if (repetido) descartadosPorHistorico++;
+      return !repetido;
     });
 
-    const semDuplicatas = candidatos.length - lote.length;
+    // --- 5. Deduplicação entre fontes e entre candidatos desta rodada ---
+    // Comparação semântica, não só fingerprint: o motor local e a IA podem
+    // descrever o mesmo evento com títulos ligeiramente diferentes.
+    const aceitos: typeof semRepeticao = [];
+    let semDuplicatas = 0;
+    for (const s of semRepeticao) {
+      const duplicado = aceitos.some((a) => a.fingerprint === s.fingerprint || mesmoEvento(a, s));
+      if (duplicado) {
+        semDuplicatas++;
+        continue;
+      }
+      aceitos.push(s);
+    }
+    const lote = aceitos;
 
     if (lote.length === 0) {
       return respostaJson({
         success: true,
         inseridas: 0,
         descartadas,
+        duplicatas: semDuplicatas,
+        repetidas: descartadosPorHistorico,
+        bloqueadas_por_conteudo: bloqueadosPorConteudo,
         fontes: fontesUsadas,
         provider: iaInfo?.provider ?? null,
         model: iaInfo?.model ?? null,
         aviso: avisoIa,
         falha_ia: falhaIa,
-        message: "Nenhuma sugestão válida encontrada nesta rodada.",
+        message:
+          descartadosPorHistorico > 0
+            ? `Nenhuma sugestão inédita: ${descartadosPorHistorico} já havia sido avaliada antes e não voltam à fila.`
+            : "Nenhuma sugestão válida encontrada nesta rodada.",
       });
     }
 
@@ -641,6 +868,8 @@ Deno.serve(async (req: Request) => {
       inseridas: totalInseridas,
       descartadas,
       duplicadas: semDuplicatas,
+      repetidas: descartadosPorHistorico,
+      bloqueadas_por_conteudo: bloqueadosPorConteudo,
       fontes: fontesUsadas,
       provider: iaInfo?.provider ?? null,
       model: iaInfo?.model ?? null,

@@ -95,10 +95,12 @@ export interface Event {
   lng?: number | null;
   creatorId?: number | null;
   createdAt?: string;
-  city?: string | null; // 'Araucária' | 'Curitiba'
+  city?: string | null; // 'Araucária' | 'Curitiba' | null (não informada)
   schoolId?: number | null;
   schoolName?: string | null;
   category?: string | null;
+  /** Classificação derivada: evento escolar (true) ou aberto ao público (false). */
+  isSchool?: boolean | null;
   isArchived?: boolean;
   archivedAt?: string;
 }

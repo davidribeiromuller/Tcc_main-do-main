@@ -97,8 +97,10 @@ export default function EventSuggestionsTab({
     setRunning(true);
     setAvisoExecucao(null);
     try {
-      const { success, inseridas, message, error, aviso, fontes, resumo, provider, model, falhaIa: falha } =
-        await triggerAiEventScout({ count: 8 });
+      const {
+        success, inseridas, message, error, aviso, fontes, resumo, provider, model,
+        falhaIa: falha, repetidas, bloqueadasPorConteudo,
+      } = await triggerAiEventScout({ count: 8 });
 
       if (!success) {
         throw new Error(error?.message || "A descoberta de eventos não pôde ser executada.");
@@ -117,7 +119,21 @@ export default function EventSuggestionsTab({
       if (inseridas && inseridas > 0) {
         notify(message || `${inseridas} nova(s) sugestão(ões) recebida(s).`, "success");
       } else {
-        notify(message || "Nenhuma sugestão nova: os eventos já estão na lista.", "info");
+        // Explica o "nada novo": sem isto o admin não sabia se a IA falhou,
+        // se o evento já havia sido rejeitado ou se era conteúdo bloqueado.
+        const motivos: string[] = [];
+        if (repetidas && repetidas > 0) {
+          motivos.push(`${repetidas} já ${repetidas === 1 ? "avaliada" : "avaliadas"} antes`);
+        }
+        if (bloqueadasPorConteudo && bloqueadasPorConteudo > 0) {
+          motivos.push(`${bloqueadasPorConteudo} com conteúdo não permitido`);
+        }
+        notify(
+          motivos.length > 0
+            ? `Nenhuma sugestão inédita: ${motivos.join(" e ")}. Eventos descartados não voltam à fila.`
+            : message || "Nenhuma sugestão nova: os eventos já estão na lista.",
+          "info"
+        );
       }
 
       await load();
