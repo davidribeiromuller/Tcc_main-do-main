@@ -32,6 +32,9 @@ import {
   AlertTriangle,
   Crown,
   Eye,
+  EyeOff,
+  KeyRound,
+  Copy,
   Table as TableIcon,
   LayoutGrid,
   Check,
@@ -117,6 +120,10 @@ export default function AdminPanel({
   });
   const [filterRole, setFilterRole] = useState<"all" | "aluno" | "funcionario" | "chefe" | "ativos" | "bloqueados">("all");
   const [userToViewDetails, setUserToViewDetails] = useState<User | null>(null);
+  /** Senha visível na ficha do usuário (admin decide revelar). */
+  const [showUserPassword, setShowUserPassword] = useState(false);
+  /** Confirmação visual do botão "copiar senha". */
+  const [passwordCopied, setPasswordCopied] = useState(false);
   const [userForMobileActions, setUserForMobileActions] = useState<User | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [eventSearchTerm, setEventSearchTerm] = useState("");
@@ -735,37 +742,37 @@ export default function AdminPanel({
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="flex flex-col flex-1 h-full min-h-0 admin-scrollable overflow-y-auto overflow-x-hidden pb-56 sm:pb-44 text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark transition-colors scroll-smooth overscroll-contain"
+      className="flex flex-col flex-1 h-full min-h-0 admin-scrollable overflow-y-auto overflow-x-hidden pb-24 sm:pb-16 text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark transition-colors scroll-smooth overscroll-contain"
     >
       {/* Top Bar / Header */}
       <div className="border-b border-brand-primary/10 dark:border-white/10 bg-brand-bg-light/90 dark:bg-brand-bg-dark/90 backdrop-blur-md sticky top-0 z-30 transition-colors">
-        <div className="max-w-6xl mx-auto w-full p-4 sm:p-6">
+        <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 py-3.5">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-xl sm:text-2xl font-display font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-                  <ShieldCheck className="text-brand-accent dark:text-brand-primary shrink-0" size={24} />
+                <h1 className="text-lg sm:text-xl font-display font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+                  <ShieldCheck className="text-brand-accent dark:text-brand-primary shrink-0" size={20} />
                   Painel de Controle Escolar
                 </h1>
 
                 {/* Role Badge Indicator */}
                 {isChefe ? (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700/80 shadow-2xs">
-                    <Crown size={13} className="text-amber-600 dark:text-amber-400" />
-                    <span>Chefe Administrador (Controle Total)</span>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700/80">
+                    <Crown size={11} className="text-amber-600 dark:text-amber-400" />
+                    <span>Chefe ADM</span>
                   </span>
                 ) : isFuncionario ? (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-700/80 shadow-2xs">
-                    <ShieldCheck size={13} className="text-blue-600 dark:text-blue-400" />
-                    <span>Funcionário Administrador (Gestão de Eventos)</span>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-700/80">
+                    <ShieldCheck size={11} className="text-blue-600 dark:text-blue-400" />
+                    <span>Funcionário ADM</span>
                   </span>
                 ) : null}
               </div>
 
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug truncate">
                 {isChefe
-                  ? "Acesso irrestrito: você pode gerenciar contas, credenciais das escolas de Araucária, alterar permissões e editar eventos."
-                  : "Acesso administrativo restrito: você pode consultar o diretório escolar e cadastrar novos eventos na agenda."}
+                  ? "Contas, credenciais e eventos da rede de Araucária."
+                  : "Consulta do diretório escolar e cadastro de eventos."}
               </p>
             </div>
 
@@ -841,7 +848,7 @@ export default function AdminPanel({
           </div>
 
           {/* Faixa de KPIs — leitura rápida do estado da rede */}
-          <div className="mt-4 grid grid-cols-2 lg:grid-cols-5 gap-2.5">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             {[
               {
                 label: "Contas totais",
@@ -876,17 +883,16 @@ export default function AdminPanel({
             ].map((card) => (
               <div
                 key={card.label}
-                className={`rounded-2xl border px-3 py-2.5 flex items-center gap-2.5 ${card.tone} transition-colors`}
+                className={`rounded-xl border pl-2.5 pr-3 py-1.5 flex items-center gap-2 ${card.tone} transition-colors`}
+                title={card.label}
               >
-                <div className="shrink-0 opacity-80">{card.icon}</div>
-                <div className="min-w-0">
-                  <div className="text-lg font-display font-bold leading-none tabular-nums">
-                    {card.value}
-                  </div>
-                  <div className="text-[10px] font-semibold uppercase tracking-wider opacity-70 truncate mt-0.5">
-                    {card.label}
-                  </div>
-                </div>
+                <div className="shrink-0 opacity-70">{card.icon}</div>
+                <span className="text-sm font-display font-bold leading-none tabular-nums">
+                  {card.value}
+                </span>
+                <span className="text-[10px] font-semibold uppercase tracking-wide opacity-70 whitespace-nowrap">
+                  {card.label}
+                </span>
               </div>
             ))}
           </div>
@@ -894,7 +900,7 @@ export default function AdminPanel({
           {/* Search & Secondary Action Bar */}
           {activeTab === "users" || activeTab === "blocked" ? (
             <>
-              <div className="flex flex-col sm:flex-row items-center gap-3 mt-4">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mt-3">
                 <div className="relative flex-1 w-full">
                   <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                   <input
@@ -973,10 +979,10 @@ export default function AdminPanel({
                 </div>
               )}
 
-              {/* Mobile & Touch Quick Filter Chips */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-3 scrollbar-none w-full select-none text-xs">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 shrink-0 mr-1 flex items-center gap-1">
-                  <Filter size={11} /> Filtros:
+              {/* Filtros rápidos — faixa alinhada com a barra de busca */}
+              <div className="flex items-center gap-1.5 overflow-x-auto py-1.5 px-2 mt-2 rounded-xl bg-white/60 dark:bg-brand-card-dark/60 border border-slate-200/80 dark:border-white/10 scrollbar-none w-full select-none text-xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 shrink-0 pl-1 pr-1.5 flex items-center gap-1 border-r border-slate-200 dark:border-white/10">
+                  <Filter size={11} /> Filtros
                 </span>
                 {[
                   { id: "all", label: "Todos", count: usersList.length },
@@ -1100,7 +1106,7 @@ export default function AdminPanel({
             ) : viewMode === "table" ? (
               /* ================= TABLE VIEW ================= */
               <div className="bg-white dark:bg-brand-card-dark rounded-2xl border border-brand-primary/20 dark:border-white/10 shadow-sm overflow-hidden transition-colors">
-                <div className="overflow-x-auto max-h-[600px] overflow-y-auto admin-scrollable">
+                <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-900 shadow-2xs">
                       <tr className="border-b border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 font-semibold select-none">
@@ -1289,8 +1295,9 @@ export default function AdminPanel({
               </div>
             ) : (
               /* ================= CARDS VIEW ================= */
-              <div className="max-h-[620px] overflow-y-auto admin-scrollable pr-1 pb-2">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              /* Sem max-h: o único scroll é o do painel (evita scroll duplo). */
+              <div className="pb-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                   {activeUsers.map((u) => {
                   const isMe =
                     currentUser?.id === u.id ||
@@ -1307,16 +1314,28 @@ export default function AdminPanel({
                   return (
                     <div
                       key={u.id}
-                      className="bg-white dark:bg-brand-card-dark rounded-2xl p-4.5 border border-brand-primary/15 dark:border-white/10 shadow-sm hover:shadow-md transition-all flex flex-col justify-between gap-3 relative overflow-hidden"
+                      className={`group bg-white dark:bg-brand-card-dark rounded-2xl border shadow-xs hover:shadow-md transition-all flex flex-col gap-3 relative overflow-hidden ${
+                        u.ativo === false
+                          ? "border-rose-200 dark:border-rose-900/50"
+                          : "border-slate-200 dark:border-white/10 hover:border-emerald-300 dark:hover:border-emerald-800/60"
+                      }`}
                     >
-                      {isMe && (
-                        <div className="absolute top-0 left-0 right-0 h-1 bg-brand-accent dark:bg-brand-primary" />
-                      )}
+                      {/* Cor de destaque: você (verde) ou bloqueado (vermelho) */}
+                      <div
+                        className={`h-1 w-full shrink-0 ${
+                          isMe
+                            ? "bg-brand-accent dark:bg-brand-primary"
+                            : u.ativo === false
+                              ? "bg-rose-400"
+                              : "bg-transparent"
+                        }`}
+                      />
 
+                      <div className="px-4 pb-4 flex flex-col gap-3">
                       {/* Header: 👤 Nome & E-mail */}
                       <div className="flex items-start justify-between gap-2.5">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-11 h-11 rounded-2xl bg-brand-primary/20 text-brand-accent dark:text-brand-primary flex items-center justify-center font-bold text-sm uppercase shrink-0 select-none overflow-hidden border border-brand-primary/30">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-10 h-10 rounded-xl bg-brand-primary/15 text-brand-accent dark:text-brand-primary flex items-center justify-center font-bold text-sm uppercase shrink-0 select-none overflow-hidden border border-brand-primary/25">
                             {u.foto_perfil ? (
                               <img
                                 src={u.foto_perfil}
@@ -1388,7 +1407,7 @@ export default function AdminPanel({
                       </div>
 
                       {/* Stats Badges */}
-                      <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-slate-500 dark:text-slate-400">
+                      <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-slate-500 dark:text-slate-400 pt-0.5">
                         <span className="bg-slate-100 dark:bg-black/30 px-2 py-0.5 rounded-md font-mono flex items-center gap-1">
                           <Ticket size={11} className="text-blue-500" />
                           <span>{uStats.participatedEventsCount} inscr.</span>
@@ -1404,10 +1423,10 @@ export default function AdminPanel({
                       </div>
 
                       {/* Action buttons: [Visualizar] [Ações] */}
-                      <div className="pt-1 flex items-center gap-2">
+                      <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => setUserToViewDetails(u)}
+                          onClick={() => { setUserToViewDetails(u); setShowUserPassword(false); setPasswordCopied(false); }}
                           className={`h-10 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 border border-slate-200 dark:border-white/10 bg-slate-50 hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 ${
                             isChefe ? "flex-1" : "w-full"
                           }`}
@@ -1429,6 +1448,7 @@ export default function AdminPanel({
                             <span>Ações</span>
                           </button>
                         )}
+                      </div>
                       </div>
                     </div>
                   );
@@ -1481,7 +1501,7 @@ export default function AdminPanel({
             ) : viewMode === "table" ? (
               /* Blocked users Table */
               <div className="bg-white dark:bg-brand-card-dark rounded-2xl border border-red-200 dark:border-red-900/40 shadow-sm overflow-hidden transition-colors">
-                <div className="overflow-x-auto max-h-[600px] overflow-y-auto admin-scrollable">
+                <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead className="sticky top-0 z-10 bg-red-100 dark:bg-red-950/90 shadow-2xs">
                       <tr className="border-b border-red-200 dark:border-red-900/40 text-red-900 dark:text-red-200 font-semibold select-none">
@@ -1586,8 +1606,9 @@ export default function AdminPanel({
               </div>
             ) : (
               /* Blocked Users Cards */
-              <div className="max-h-[620px] overflow-y-auto admin-scrollable pr-1 pb-2">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              /* Sem max-h: o único scroll é o do painel (evita scroll duplo). */
+              <div className="pb-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                   {blockedUsers.map((u) => {
                   const activityDate = u.lastActiveAt || u.updatedAt || u.createdAt;
                   const formattedDateStr = formatDateTimeBR(activityDate);
@@ -1595,11 +1616,12 @@ export default function AdminPanel({
                   return (
                     <div
                       key={u.id}
-                      className="bg-white dark:bg-brand-card-dark rounded-2xl p-5 border-2 border-red-200 dark:border-red-900/50 shadow-sm flex flex-col justify-between gap-3.5 relative overflow-hidden"
+                      className="bg-white dark:bg-brand-card-dark rounded-2xl border-2 border-red-200 dark:border-red-900/50 shadow-xs hover:shadow-md transition-all flex flex-col relative overflow-hidden"
                     >
-                      <div className="absolute top-0 left-0 right-0 h-1 bg-red-500" />
+                      <div className="h-1 w-full shrink-0 bg-red-500" />
 
-                      <div className="flex justify-between items-start gap-2 pt-1">
+                      <div className="px-4 pb-4 flex flex-col gap-3">
+                      <div className="flex justify-between items-start gap-2">
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center font-bold text-sm uppercase shrink-0 border border-red-200 dark:border-red-800">
                             <Lock size={16} />
@@ -1677,6 +1699,7 @@ export default function AdminPanel({
                           Apenas o Chefe Administrador pode desbloquear contas.
                         </div>
                       )}
+                      </div>
                     </div>
                   );
                 })}
@@ -3278,7 +3301,7 @@ export default function AdminPanel({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setUserToViewDetails(null)}
+                  onClick={() => { setUserToViewDetails(null); setShowUserPassword(false); setPasswordCopied(false); }}
                   className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-white/10 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
                 >
                   <X size={18} />
@@ -3347,6 +3370,64 @@ export default function AdminPanel({
                       </span>
                     </div>
                   )}
+
+                  {/* Senha da conta — visível apenas para administradores */}
+                  <div className="rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-900/40 p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-600 dark:text-slate-300 flex items-center gap-1.5 shrink-0">
+                        <KeyRound size={13} className="text-amber-600 dark:text-amber-400" />
+                        Senha:
+                      </span>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="font-mono text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
+                          {userToViewDetails.password
+                            ? showUserPassword
+                              ? userToViewDetails.password
+                              : "•".repeat(Math.min(userToViewDetails.password.length, 12))
+                            : "não definida"}
+                        </span>
+
+                        {userToViewDetails.password && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setShowUserPassword((v) => !v)}
+                              className="p-1 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-white/60 dark:hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+                              title={showUserPassword ? "Ocultar senha" : "Mostrar senha"}
+                              aria-label={showUserPassword ? "Ocultar senha" : "Mostrar senha"}
+                            >
+                              {showUserPassword ? <EyeOff size={13} /> : <Eye size={13} />}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(userToViewDetails.password || "");
+                                  setPasswordCopied(true);
+                                  setTimeout(() => setPasswordCopied(false), 2000);
+                                } catch (_) {
+                                  notifyAdmin("Não foi possível copiar a senha.", "warning");
+                                }
+                              }}
+                              className="p-1 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-white/60 dark:hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+                              title="Copiar senha"
+                              aria-label="Copiar senha"
+                            >
+                              {passwordCopied ? (
+                                <Check size={13} className="text-emerald-600 dark:text-emerald-400" />
+                              ) : (
+                                <Copy size={13} />
+                              )}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-amber-700/80 dark:text-amber-400/70 mt-1 leading-snug">
+                      Visível apenas para administradores. Oriente o usuário a trocar no primeiro acesso.
+                    </p>
+                  </div>
 
                   <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-black/20 border border-slate-100 dark:border-white/5">
                     <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
@@ -3425,7 +3506,7 @@ export default function AdminPanel({
 
                 <button
                   type="button"
-                  onClick={() => setUserToViewDetails(null)}
+                  onClick={() => { setUserToViewDetails(null); setShowUserPassword(false); setPasswordCopied(false); }}
                   className={`h-11 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
                     isChefe ? "px-5" : "w-full"
                   }`}

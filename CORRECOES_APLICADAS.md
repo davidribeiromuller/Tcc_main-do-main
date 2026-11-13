@@ -152,3 +152,58 @@ location.reload();
   em produção a aba continua vazia até migrarmos a consulta para o Supabase.
 - 17 senhas em texto claro e 12 policies `USING (true)` seguem como risco aberto.
   Recomendo rotacionar a chave Gemini ao final do TCC (ela apareceu no chat).
+
+---
+
+# Rodada 3 — Senha na ficha e reorganização do painel
+
+## 7. Senha da conta visível para o administrador
+
+Na **Ficha Cadastral** (botão "Visualizar" no painel), o admin agora vê a senha da conta:
+
+- começa **mascarada** (`••••••••`), com botão de olho para revelar/ocultar;
+- botão de **copiar** com confirmação visual (✓ por 2 s);
+- aviso em âmbar: *"Visível apenas para administradores. Oriente o usuário a trocar no primeiro acesso."*;
+- conta sem senha definida mostra "não definida" (6 das 23 contas estão assim — são as criadas
+  via Google OAuth, que não têm senha local).
+
+O campo já vinha do banco (`select("*")` em `users`), então não houve mudança de query —
+confirmei que `password` chega no payload da API (206 com o campo presente).
+
+> **Nota para o TCC:** como as senhas estão em texto claro, qualquer pessoa com a chave anon
+> consegue lê-las direto da API. Exibir na ficha só torna visível um problema que já existia.
+> O correto seria hash (bcrypt/argon2) + função RPC para o admin conferir/definir senha.
+
+## 8. Scroll e organização do painel
+
+### A causa do scroll quebrado
+Havia **scroll duplo**: o `App.tsx` embrulhava o `AdminPanel` em `overflow-y-auto` e o próprio
+painel também rolava — além de um `pb-56` (224 px de padding morto no fim) e containers internos
+com `max-h-[620px]`/`max-h-[600px]` que cortavam a lista no meio.
+
+**Correções**
+- `App.tsx`: wrapper passou a `overflow-hidden` (cada área rola uma vez só).
+- `AdminPanel`: `pb-56` → `pb-24`; removido todo `max-h` dos containers de lista.
+- Cards: `grid-cols-1 sm:2 xl:3` e `gap-3`.
+
+### Cabeçalho compacto
+Título e badge menores (badge virou "Chefe ADM"), descrição em uma linha, e os 5 KPIs viraram
+**pills em linha única** em vez de 5 cards grandes — o cabeçalho caiu de ~240 px para ~110 px.
+
+### Card de usuário reorganizado
+- faixa colorida no topo indicando estado (verde = você, vermelha = bloqueado);
+- avatar 40 px, nome, e-mail e CPF agrupados;
+- Cargo e Status na mesma faixa divisória;
+- badges de estatísticas e os botões [Visualizar] [Ações] sempre alinhados na base;
+- o card de **bloqueados** seguiu o mesmo padrão (antes usava `p-5` e outro espaçamento).
+
+### Filtros
+A barra de filtros virou um bloco com borda, alinhada à barra de busca, em vez de chips soltos.
+
+## Validação
+- `npx tsc --noEmit`: 0 erros · `npm run build`: ok
+- Render do painel em DOM real (jsdom): 16/17 verificações — a única "falha" é esperada
+  (a visão padrão é Tabela, então o teste alterna para Cartões antes de checar os cards).
+- Confirmado no HTML renderizado: **6 cards** com o novo wrapper, KPIs, e o campo de senha
+  mascarado que só revela ao clicar.
+- `password` presente no payload do PostgREST (verificado via chamada real: status 206).
