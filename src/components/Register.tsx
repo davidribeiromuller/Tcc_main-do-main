@@ -502,7 +502,7 @@ export default function Register({
               <span className="text-[11px] text-red-600 dark:text-red-400">{fieldErrors.matricula}</span>
             ) : (
               <span className="text-[11px] text-slate-400">
-                Fornecida pela escola. Use a mesma que aparece no seu comprovante de matrícula.
+                Use a mesma que aparece no seu comprovante de matrícula.
               </span>
             )}
           </div>
@@ -529,7 +529,7 @@ export default function Register({
               <span className="text-[11px] text-red-600 dark:text-red-400">{fieldErrors.personalEmail}</span>
             ) : (
               <span className="text-[11px] text-slate-400">
-                Usado só para recuperar o acesso — nunca aparece para outros alunos.
+                Usado só para recuperar o acesso, caso você esqueça a senha.
               </span>
             )}
           </div>

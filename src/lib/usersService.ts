@@ -399,6 +399,9 @@ export async function registerUserDirectInSupabase(
       uid: userData.uid || `local-uid-${Math.floor(Math.random() * 88888 + 10000)}`,
       nome: userData.nome.trim(),
       email: cleanEmail,
+      // Guarda a senha provisória definida no cadastro. O app autentica na
+      // coluna `password` (não usa Supabase Auth), então sem isso o aluno era
+      // criado com uma senha que ele nunca digitou.
       password: userData.password || "123456",
       foto_perfil: userData.foto_perfil || "",
       provider: userData.provider || "local",

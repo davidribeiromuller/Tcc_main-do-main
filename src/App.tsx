@@ -1120,6 +1120,7 @@ export default function App() {
         setCurrentUser(synchronizedUser);
         localStorage.setItem("local_user", JSON.stringify(synchronizedUser));
         setActiveScreen("feed");
+        setLoginError(null);
         showToast("Conta escolar criada com sucesso!", "success");
         // Load events and user lists in background without stalling the screen transition
         loadAllUsers();
@@ -1148,6 +1149,9 @@ export default function App() {
             "Conta escolar criada! No primeiro acesso, troque sua senha provisória.",
             "success"
           );
+          // O cadastro deu certo: a mensagem de erro anterior precisa sumir,
+          // senão o Register a reintroduz ao remontar (registerError).
+          setLoginError(null);
           loadEvents();
           loadAllUsers();
           return { success: true };
