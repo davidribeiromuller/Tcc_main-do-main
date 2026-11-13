@@ -826,11 +826,11 @@ export default function AdminPanel({
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="flex flex-col flex-1 h-full min-h-0 admin-scrollable overflow-y-auto overflow-x-hidden pb-24 sm:pb-16 text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark transition-colors scroll-smooth overscroll-contain"
+      className="flex flex-col flex-1 h-full min-h-0 admin-scrollable admin-scroll-x overflow-y-auto overflow-x-auto pb-24 sm:pb-16 text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark transition-colors scroll-smooth overscroll-contain"
     >
       {/* Top Bar / Header */}
       <div className="border-b border-brand-primary/10 dark:border-white/10 bg-brand-bg-light/90 dark:bg-brand-bg-dark/90 backdrop-blur-md sticky top-0 z-30 transition-colors">
-        <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 py-3.5">
+        <div className="w-full max-w-[110rem] mx-auto px-4 sm:px-6 py-3.5">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
@@ -1148,8 +1148,11 @@ export default function AdminPanel({
         </div>
       </div>
 
-      {/* Main Content Area */}
-      <div className="max-w-6xl mx-auto w-full p-4 sm:p-6 flex flex-col gap-4">
+      {/* Main Content Area — largura ampla para o painel respirar.
+          Em telas grandes os cards e tabelas ocupam o espaço disponível em vez
+          de ficarem espremidos em 1152px. Em telas pequenas o container raiz
+          permite rolagem horizontal (admin-scroll-x). */}
+      <div className="w-full max-w-[110rem] mx-auto p-4 sm:p-6 flex flex-col gap-4">
         {/* ================= ACTIVE USERS TAB ================= */}
         {activeTab === "users" && (
           <>
@@ -1195,7 +1198,7 @@ export default function AdminPanel({
               /* ================= TABLE VIEW ================= */
               <div className="bg-white dark:bg-brand-card-dark rounded-2xl border border-brand-primary/20 dark:border-white/10 shadow-sm overflow-hidden transition-colors">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
+                  <table className="admin-table text-left text-xs">
                     <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-900 shadow-2xs">
                       <tr className="border-b border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 font-semibold select-none">
                         <th className="py-3.5 px-4 bg-slate-100 dark:bg-slate-900">Nome & Identificação</th>
@@ -1385,7 +1388,7 @@ export default function AdminPanel({
               /* ================= CARDS VIEW ================= */
               /* Sem max-h: o único scroll é o do painel (evita scroll duplo). */
               <div className="pb-2">
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
                   {activeUsers.map((u) => {
                   const isMe =
                     currentUser?.id === u.id ||
@@ -1594,7 +1597,7 @@ export default function AdminPanel({
               /* Blocked users Table */
               <div className="bg-white dark:bg-brand-card-dark rounded-2xl border border-red-200 dark:border-red-900/40 shadow-sm overflow-hidden transition-colors">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
+                  <table className="admin-table text-left text-xs">
                     <thead className="sticky top-0 z-10 bg-red-100 dark:bg-red-950/90 shadow-2xs">
                       <tr className="border-b border-red-200 dark:border-red-900/40 text-red-900 dark:text-red-200 font-semibold select-none">
                         <th className="py-3.5 px-4 bg-red-100 dark:bg-red-950/90">Nome & Identificação</th>
@@ -1700,7 +1703,7 @@ export default function AdminPanel({
               /* Blocked Users Cards */
               /* Sem max-h: o único scroll é o do painel (evita scroll duplo). */
               <div className="pb-2">
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
                   {blockedUsers.map((u) => {
                   const activityDate = u.lastActiveAt || u.updatedAt || u.createdAt;
                   const formattedDateStr = formatDateTimeBR(activityDate);
@@ -1881,7 +1884,7 @@ export default function AdminPanel({
                     </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
                     {deletedEvents.map((dEv) => {
                       const payload: any = dEv.payload ?? {};
                       const dia = payload.day ?? payload.data_inicio?.slice?.(8, 10);
@@ -1957,7 +1960,7 @@ export default function AdminPanel({
                 )}
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
               {filteredEvents.length === 0 ? (
                 <div className="col-span-full flex flex-col items-center justify-center py-16 text-center text-slate-400 bg-white dark:bg-brand-card-dark rounded-3xl border border-dashed border-slate-300 dark:border-white/10 p-8">
                   <Calendar size={48} className="text-slate-300 dark:text-slate-600 mb-3" />

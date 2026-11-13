@@ -445,3 +445,34 @@ Como a function bundlada é válida foi verificada sem deploy: o bundle foi carr
 - `school_accounts` continua inexistente no banco; a solução atual usa `users` com
   `role: "Escola"`, que é o que o login já consulta.
 - Senhas seguem em texto claro em `users.password` (risco herdado da rodada 3).
+
+---
+
+## 7. Painel de administração — largura ampliada e rolagem horizontal
+
+### O que estava errado
+- O conteúdo usava `max-w-6xl` (**1152 px**) enquanto o cabeçalho usava `max-w-7xl`.
+  Em monitores grandes o painel ficava espremido e desalinhado do cabeçalho.
+- O container raiz tinha **`overflow-x-hidden`** (linha 829). As tabelas de usuários
+  e de ex-alunos têm 6 colunas com `min-w-[180px]` em várias células; em telas
+  estreitas o conteúdo passava da largura e era **cortado**, deixando a última
+  coluna ("Ações Administrativas") inacessível no celular.
+
+### O que mudou
+| Arquivo | Mudança |
+|---|---|
+| `src/components/AdminPanel.tsx` | Raiz troca `overflow-x-hidden` por `overflow-x-auto` + classe `admin-scroll-x`. Cabeçalho e conteúdo passam a usar `max-w-[110rem]` (1760 px), alinhados entre si. |
+| `src/index.css` | Nova família `.admin-scroll-x`: barra horizontal visível (9 px, 12 px em toque), tema escuro, `overscroll-behavior-x: contain`. Nova `.admin-table` com `min-width: 46rem` para as colunas não serem esmagadas antes da rolagem entrar. |
+| Tabelas de usuários e ex-alunos | Passam a usar `admin-table` em vez de `w-full ... border-collapse`. |
+| Grids de cards | Usuários/bloqueados ganham `2xl:grid-cols-4`; eventos ganham `2xl:grid-cols-4`. Aproveitam a largura extra sem mudar o visual em telas menores. |
+
+### Validação executada
+- Render do painel em jsdom: **10/10** — raiz com `admin-scroll-x`, sem
+  `overflow-x-hidden`, conteúdo em `max-w-[110rem]`, tabela com `admin-table`
+  dentro de wrapper rolável, coluna "Ações Administrativas" presente, KPIs e abas
+  renderizando.
+- Regras CSS: **7/7** — `.admin-scroll-x` com `overflow-x: auto`, barra de 9 px
+  (12 px em toque), `.admin-table` com `min-width: 46rem`, cobertura do tema escuro.
+- Medição estrutural: 6 colunas na tabela, wrapper com `overflow-x-auto`,
+  último cabeçalho = "Ações Administrativas".
+- `tsc --noEmit`: 0 erros · `npm run build`: ok (5,01 s).
