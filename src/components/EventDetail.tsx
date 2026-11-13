@@ -2,28 +2,29 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import L from "leaflet";
 import {
+  AlertCircle,
   ArrowLeft,
-  MapPin,
   Calendar,
-  Clock,
-  CircleDollarSign,
-  CheckSquare,
-  Globe,
-  Trash2,
-  Navigation,
-  ShieldCheck,
-  Compass,
   Car,
+  CheckCircle,
+  CheckSquare,
+  CircleDollarSign,
+  Clock,
+  Compass,
+  ExternalLink,
+  Globe,
   Layers,
-  Plus,
-  Minus,
+  MapPin,
   Maximize2,
   Minimize2,
-  X,
-  School,
-  ExternalLink,
+  Minus,
+  Navigation,
   Pencil,
-  CheckCircle
+  Plus,
+  School,
+  ShieldCheck,
+  Trash2,
+  X,
 } from "lucide-react";
 import { Event, User, EventAttendanceAuthorization } from "../types";
 import { fetchStreetRoute } from "../lib/routing.ts";
@@ -47,6 +48,10 @@ interface EventDetailProps {
 // Fallback school coordinates (Colégio Estadual Helena Wysocki)
 const DEFAULT_LAT = -25.4385;
 const DEFAULT_LNG = -49.1925;
+
+// Quanto tempo uma posição obtida continua sendo considerada válida.
+// Evita reutilizar coordenadas antigas e traçar rotas de um ponto errado.
+const GEOLOCATION_MAX_AGE_MS = 10 * 60 * 1000; // 10 minutos
 
 // Calculate distance in km
 function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -159,6 +164,7 @@ export default function EventDetail({
   const [showEditModal, setShowEditModal] = useState(false);
   const [showEnrollSuccessModal, setShowEnrollSuccessModal] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [editError, setEditError] = useState("");
 
@@ -193,7 +199,18 @@ export default function EventDetail({
     if (propUserCoords) return propUserCoords;
     try {
       const saved = localStorage.getItem("user_geolocation_coords");
-      return saved ? JSON.parse(saved) : null;
+      if (!saved) return null;
+      const parsed = JSON.parse(saved);
+      if (typeof parsed?.lat !== "number" || typeof parsed?.lng !== "number") return null;
+
+      // A posição salva expira: um ponto de dias atrás não representa onde o
+      // usuário está agora e gerava rotas partindo de um local errado.
+      const ageMs = parsed.ts ? Date.now() - parsed.ts : Infinity;
+      if (!Number.isFinite(ageMs) || ageMs > GEOLOCATION_MAX_AGE_MS) {
+        localStorage.removeItem("user_geolocation_coords");
+        return null;
+      }
+      return { lat: parsed.lat, lng: parsed.lng };
     } catch {
       return null;
     }
@@ -281,24 +298,28 @@ export default function EventDetail({
     }
 
     setIsLocating(true);
+    setLocationError(null);
+
     if (!("geolocation" in navigator)) {
-      const defaultCoords = { lat: -25.5920, lng: -49.4080 };
-      setUserCoords(defaultCoords);
-      if (onUserCoordsChange) onUserCoordsChange(defaultCoords);
       setIsLocating(false);
       setShowLocationPermissionModal(false);
+      setLocationError("Este navegador não oferece suporte a geolocalização.");
       return;
     }
 
     const applyCoords = (coords: { lat: number; lng: number }) => {
       setUserCoords(coords);
       try {
-        localStorage.setItem("user_geolocation_coords", JSON.stringify(coords));
+        localStorage.setItem(
+          "user_geolocation_coords",
+          JSON.stringify({ ...coords, ts: Date.now() })
+        );
       } catch {}
       if (onUserCoordsChange) {
         onUserCoordsChange(coords);
       }
       setIsLocating(false);
+      setLocationError(null);
       setShowLocationPermissionModal(false);
 
       if (mapInstanceRef.current) {
@@ -310,25 +331,43 @@ export default function EventDetail({
       }
     };
 
+    // Falha real: nunca inventar a posição do usuário. Traçar uma rota a partir
+    // de um ponto arbitrário (ex.: centro de Araucária) produzia distâncias e
+    // trajetos errados sem que o usuário soubesse.
+    const handleFailure = (err: GeolocationPositionError) => {
+      console.warn("Geolocalização indisponível:", err.message);
+      setIsLocating(false);
+      setShowLocationPermissionModal(false);
+
+      const messages: Record<number, string> = {
+        1: "Permissão de localização negada. Autorize o acesso nas configurações do navegador para calcular a rota real.",
+        2: "Não foi possível determinar sua localização no momento. Verifique o GPS/sinal e tente novamente.",
+        3: "Tempo esgotado ao obter sua localização. Tente novamente em local aberto.",
+      };
+      setLocationError(messages[err.code] || "Não foi possível obter sua localização.");
+    };
+
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         applyCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
       },
       (err) => {
-        console.warn("High accuracy geolocation failed, trying low accuracy fallback:", err.message);
+        console.warn("Alta precisão falhou, tentando baixa precisão:", err.message);
+        // Segunda tentativa apenas para erro de timeout/sinal (código 2 e 3).
+        // Se a permissão foi negada (código 1), insistir não adianta.
+        if (err.code === 1) {
+          handleFailure(err);
+          return;
+        }
         navigator.geolocation.getCurrentPosition(
           (pos) => {
             applyCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
           },
-          () => {
-            // Default center of Araucária so route trajectory always computes
-            const araucariaCenter = { lat: -25.5925, lng: -49.4085 };
-            applyCoords(araucariaCenter);
-          },
-          { enableHighAccuracy: false, timeout: 4000, maximumAge: 300000 }
+          handleFailure,
+          { enableHighAccuracy: false, timeout: 8000, maximumAge: 30000 }
         );
       },
-      { enableHighAccuracy: true, timeout: 6000, maximumAge: 60000 }
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
     );
   };
 
@@ -893,6 +932,16 @@ export default function EventDetail({
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 mb-4">
                 Permita o acesso à sua localização para traçar a rota até <strong>{event.location}</strong> e calcular a distância em tempo real.
               </p>
+
+              {locationError && (
+                <div
+                  role="alert"
+                  className="mb-3 flex items-start gap-2 text-left text-[11px] font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-xl px-3 py-2"
+                >
+                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                  <span>{locationError}</span>
+                </div>
+              )}
 
               <div className="flex flex-col gap-2">
                 <button

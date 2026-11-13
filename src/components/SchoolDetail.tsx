@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 import { SchoolProfile, SchoolNewsItem, SchoolEventItem } from "../lib/schoolsData";
+import { mergeNews, saveNews } from "../lib/schoolNewsStore.ts";
+import { safeParseJsonResponse } from "../lib/apiResilience.ts";
 import { User } from "../types";
 import {
   ArrowLeft,
@@ -110,15 +112,25 @@ export const SchoolDetail: React.FC<SchoolDetailProps> = ({
         })
       });
 
-      const data = await res.json();
+      const parsed = await safeParseJsonResponse<any>(res, {});
       if (!res.ok) {
-        throw new Error(data.error || "Falha ao publicar comunicado.");
+        throw new Error(parsed.data?.error || parsed.error || "Falha ao publicar comunicado.");
       }
 
-      if (data.school && onSchoolUpdate) {
-        onSchoolUpdate(data.school);
+      if (res.ok && parsed.ok && parsed.data?.school && onSchoolUpdate) {
+        onSchoolUpdate(parsed.data.school);
+      } else if (res.ok && parsed.ok && parsed.data?.news) {
+        school.news.unshift(parsed.data.news);
       } else {
-        school.news.unshift(data.news);
+        // Sem backend (GitHub Pages é estático): persiste localmente para que o
+        // comunicado realmente apareça no mural da escola.
+        const created = saveNews(school.slug, {
+          title: newsTitle.trim(),
+          description: newsDescription.trim(),
+          category: newsCategory,
+          author: isThisSchool ? school.shortName : "Administração eloEscola"
+        });
+        school.news = mergeNews(school.slug, [created, ...(school.news || [])]);
       }
 
       setNewsTitle("");

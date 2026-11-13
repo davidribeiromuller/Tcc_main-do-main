@@ -53,13 +53,26 @@ export interface SchoolProfile {
   verificationSource: string;
 }
 
+/**
+ * Resolve o caminho de um asset da pasta `public/` respeitando o `base` do Vite.
+ *
+ * No GitHub Pages o app é servido em `/Tcc_main-do-main/`, portanto um caminho
+ * absoluto como `/images/escolas/x.png` aponta para a raiz do domínio e resulta
+ * em 404. Em desenvolvimento o base é `/`, então o comportamento não muda.
+ */
+export function publicAsset(path: string): string {
+  const normalized = path.startsWith("/") ? path.slice(1) : path;
+  const base = import.meta.env?.BASE_URL || "/";
+  return `${base.endsWith("/") ? base : `${base}/`}${normalized}`;
+}
+
 export const SCHOOL_IMAGES: Record<string, string> = {
-  "julio-szymanski": "/images/escolas/szymanski.png",
-  "helena-wysocki": "/images/escolas/helena-wysocki.png",
-  "maria-da-graca": "/images/escolas/maria-da-graca.png",
-  "guajuvira": "/images/escolas/guajuvira.png",
-  "marilze-da-luz-brand": "/images/escolas/marilze.png",
-  "cecilia-meireles": "/images/escolas/cecilia.png"
+  "julio-szymanski": publicAsset("/images/escolas/szymanski.png"),
+  "helena-wysocki": publicAsset("/images/escolas/helena-wysocki.png"),
+  "maria-da-graca": publicAsset("/images/escolas/maria-da-graca.png"),
+  "guajuvira": publicAsset("/images/escolas/guajuvira.png"),
+  "marilze-da-luz-brand": publicAsset("/images/escolas/marilze.png"),
+  "cecilia-meireles": publicAsset("/images/escolas/cecilia.png")
 };
 
 export const ARAUCARIA_SCHOOLS: SchoolProfile[] = [
@@ -103,7 +116,7 @@ export const ARAUCARIA_SCHOOLS: SchoolProfile[] = [
       lat: -25.5908,
       lng: -49.4068
     },
-    image: "/images/escolas/szymanski.png",
+    image: publicAsset("/images/escolas/szymanski.png"),
     imagePlaceholderText: "Fotografia Institucional • C.E. Júlio Szymanski",
     lastVerifiedDate: "Novembro de 2026",
     verificationSource: "SEED-PR / NRE Área Metropolitana Sul / Consulta Escolas Paraná",
@@ -196,7 +209,7 @@ export const ARAUCARIA_SCHOOLS: SchoolProfile[] = [
       lat: -25.5785,
       lng: -49.3975
     },
-    image: "/images/escolas/helena-wysocki.png",
+    image: publicAsset("/images/escolas/helena-wysocki.png"),
     imagePlaceholderText: "Fotografia Institucional • C.E. Helena Wysocki",
     lastVerifiedDate: "Novembro de 2026",
     verificationSource: "SEED-PR / Consulta Escolas Paraná",
@@ -289,7 +302,7 @@ export const ARAUCARIA_SCHOOLS: SchoolProfile[] = [
       lat: -25.5842,
       lng: -49.3921
     },
-    image: "/images/escolas/maria-da-graca.png",
+    image: publicAsset("/images/escolas/maria-da-graca.png"),
     imagePlaceholderText: "Fotografia Institucional • C.E. Maria da Graça",
     lastVerifiedDate: "Novembro de 2026",
     verificationSource: "CEE-PR / Consulta Escolas Paraná / NRE Metropolitana Sul",
@@ -370,7 +383,7 @@ export const ARAUCARIA_SCHOOLS: SchoolProfile[] = [
       lat: -25.6835,
       lng: -49.5212
     },
-    image: "/images/escolas/guajuvira.png",
+    image: publicAsset("/images/escolas/guajuvira.png"),
     imagePlaceholderText: "Fotografia Institucional • C.E. do Campo Guajuvira",
     lastVerifiedDate: "Novembro de 2026",
     verificationSource: "SEED-PR / Consulta Escolas Paraná (Educação do Campo)",
@@ -451,7 +464,7 @@ export const ARAUCARIA_SCHOOLS: SchoolProfile[] = [
       lat: -25.5971,
       lng: -49.3874
     },
-    image: "/images/escolas/marilze.png",
+    image: publicAsset("/images/escolas/marilze.png"),
     imagePlaceholderText: "Fotografia Institucional • C.E. Marilze da Luz Brand",
     lastVerifiedDate: "Novembro de 2026",
     verificationSource: "SEED-PR / NRE Metropolitana Sul / Consulta Escolas",
@@ -532,7 +545,7 @@ export const ARAUCARIA_SCHOOLS: SchoolProfile[] = [
       lat: -25.5714,
       lng: -49.4215
     },
-    image: "/images/escolas/cecilia.png",
+    image: publicAsset("/images/escolas/cecilia.png"),
     imagePlaceholderText: "Fotografia Institucional • C.E. Cecília Meireles",
     lastVerifiedDate: "Novembro de 2026",
     verificationSource: "SEED-PR / Câmara Municipal de Araucária (Registro APMF) / NRE Sul",

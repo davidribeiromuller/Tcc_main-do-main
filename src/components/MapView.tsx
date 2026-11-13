@@ -2,28 +2,29 @@ import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import L from "leaflet";
 import {
-  Search,
-  MapPin,
+  AlertCircle,
   Calendar,
-  Clock,
-  Navigation,
-  Layers,
-  Crosshair,
-  Maximize2,
-  ChevronRight,
-  Sparkles,
-  Info,
-  X,
-  List,
-  Filter,
-  School,
-  Route as RouteIcon,
   Car,
-  Footprints,
-  ShieldCheck,
+  ChevronRight,
+  Clock,
   Compass,
+  Crosshair,
+  Filter,
+  Footprints,
+  Info,
+  Layers,
+  List,
+  MapPin,
+  Maximize2,
+  Minus,
+  Navigation,
   Plus,
-  Minus
+  Route as RouteIcon,
+  School,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  X,
 } from "lucide-react";
 import { Event, User } from "../types";
 import { fetchStreetRoute } from "../lib/routing.ts";
@@ -178,6 +179,7 @@ export default function MapView({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
   const [locationStatusMessage, setLocationStatusMessage] = useState<string | null>(null);
   const [localUserLocation, setLocalUserLocation] = useState<{ lat: number; lng: number } | null>(() => {
     if (userCoords) return userCoords;
@@ -541,12 +543,16 @@ export default function MapView({
       const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       setLocalUserLocation(coords);
       try {
-        localStorage.setItem("user_geolocation_coords", JSON.stringify(coords));
+        localStorage.setItem(
+          "user_geolocation_coords",
+          JSON.stringify({ ...coords, ts: Date.now() })
+        );
       } catch {}
       if (onUserCoordsChange) {
         onUserCoordsChange(coords);
       }
       setIsLocating(false);
+      setLocationError(null);
       setShowLocationModal(false);
 
       if (mapInstanceRef.current) {
@@ -554,35 +560,37 @@ export default function MapView({
       }
     };
 
+    // Nunca substituir a posição real por um ponto fixo: isso colocava o
+    // usuário no centro de Araucária e gerava rotas/distâncias incorretas.
+    const onFailure = (err: GeolocationPositionError) => {
+      console.warn("Geolocalização indisponível:", err.message);
+      setIsLocating(false);
+      setShowLocationModal(false);
+      const messages: Record<number, string> = {
+        1: "Permissão de localização negada. Autorize o acesso no navegador para ver sua posição real.",
+        2: "Não foi possível determinar sua localização agora. Verifique o sinal de GPS e tente novamente.",
+        3: "Tempo esgotado ao obter sua localização. Tente novamente.",
+      };
+      setLocationError(messages[err.code] || "Não foi possível obter sua localização.");
+    };
+
     const onError = (err: GeolocationPositionError) => {
-      console.warn("High accuracy geolocation failed, trying standard accuracy:", err.message);
-      // Try with low accuracy
+      console.warn("Alta precisão falhou, tentando precisão padrão:", err.message);
+      if (err.code === 1) {
+        onFailure(err);
+        return;
+      }
       navigator.geolocation.getCurrentPosition(
         onSuccess,
-        () => {
-          // If browser or iframe permissions block GPS, use Araucária default location for immediate route calculation
-          const araucariaCenter = { lat: -25.5925, lng: -49.4085 };
-          setLocalUserLocation(araucariaCenter);
-          try {
-            localStorage.setItem("user_geolocation_coords", JSON.stringify(araucariaCenter));
-          } catch {}
-          if (onUserCoordsChange) {
-            onUserCoordsChange(araucariaCenter);
-          }
-          setIsLocating(false);
-          setShowLocationModal(false);
-          if (mapInstanceRef.current) {
-            mapInstanceRef.current.flyTo([araucariaCenter.lat, araucariaCenter.lng], 16, { duration: 1 });
-          }
-        },
-        { enableHighAccuracy: false, timeout: 4000, maximumAge: 300000 }
+        onFailure,
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 30000 }
       );
     };
 
     navigator.geolocation.getCurrentPosition(
       onSuccess,
       onError,
-      { enableHighAccuracy: true, timeout: 6000, maximumAge: 60000 }
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
     );
   };
 
@@ -1088,6 +1096,16 @@ export default function MapView({
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mt-2">
                 O aplicativo gostaria de acessar sua posição geográfica para exibir sua localização em tempo real no mapa e calcular o trajeto e a distância até os eventos da escola.
               </p>
+
+              {locationError && (
+                <div
+                  role="alert"
+                  className="mt-3 flex items-start gap-2 text-left text-[11px] font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-xl px-3 py-2"
+                >
+                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                  <span>{locationError}</span>
+                </div>
+              )}
 
               <div className="mt-5 flex flex-col gap-2">
                 <button
