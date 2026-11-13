@@ -27,6 +27,8 @@ import { motion, AnimatePresence } from "motion/react";
 import { CheckCircle, AlertCircle, CheckCircle2, Info, X } from "lucide-react";
 import logoImg from "./assets/images/logo.jpg";
 import { resilientFetch, setupNetworkAutoRecovery, safeAppReload, safeParseJsonResponse } from "./lib/apiResilience.ts";
+import { fetchJsonApi } from "./lib/staticHosting.ts";
+import { registerSchoolAccount } from "./lib/schoolAccountService.ts";
 import { getSupabaseClient, isSupabaseConfigured, getEffectiveSupabaseUrl } from "./lib/supabase.ts";
 import {
   fetchEventsDirectFromSupabase,
@@ -256,17 +258,42 @@ export default function App() {
   const handleGuestLogin = async (destination: string = "feed") => {
     setIsLoadingAuth(true);
     try {
-      const res = await fetch("/api/auth/guest-login", { method: "POST" });
-      const data = await res.json();
-      if (data.user && data.token) {
-        setCurrentUser(data.user);
-        localStorage.setItem("local_user", JSON.stringify(data.user));
-        localStorage.setItem("token", data.token);
-        navigateTo(destination);
-        showToast("Modo visitante iniciado com sucesso!", "success");
-      } else {
-        navigateTo(destination);
+      const res = await fetchJsonApi("/api/auth/guest-login", { method: "POST" });
+
+      if (res && res.ok) {
+        const data = await res.json();
+        if (data.user && data.token) {
+          setCurrentUser(data.user);
+          localStorage.setItem("local_user", JSON.stringify(data.user));
+          localStorage.setItem("token", data.token);
+          navigateTo(destination);
+          showToast("Modo visitante iniciado com sucesso!", "success");
+          return;
+        }
       }
+
+      // Hospedagem estática (GitHub Pages): não existe backend, então a sessão
+      // de convidado é montada no próprio cliente. O nome é sempre "Convidado",
+      // nunca um identificador aleatório.
+      const guestId = Math.floor(Math.random() * 80000) + 20000;
+      const guestUser: User = {
+        id: guestId,
+        uid: `guest-${guestId}`,
+        nome: "Convidado",
+        email: `visitante_${guestId}@eloescola.local`,
+        foto_perfil: "",
+        provider: "local",
+        role: "Convidado",
+        ativo: true,
+        isAdmin: false,
+        isGuest: true,
+        institution: "eloEscola",
+        createdAt: new Date().toISOString(),
+      };
+      setCurrentUser(guestUser);
+      localStorage.setItem("local_user", JSON.stringify(guestUser));
+      navigateTo(destination);
+      showToast("Modo visitante iniciado com sucesso!", "success");
     } catch (err) {
       navigateTo(destination);
     } finally {
@@ -278,20 +305,42 @@ export default function App() {
   const handleInstitutionalLogin = async (identificador: string, password: string) => {
     setIsLoadingAuth(true);
     try {
-      const res = await fetch("/api/auth/institutional-login", {
+      const res = await fetchJsonApi("/api/auth/institutional-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ identificador, password })
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Identificador ou senha institucional incorretos.");
+
+      if (res) {
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || "Identificador ou senha institucional incorretos.");
+        }
+        setCurrentUser(data.user);
+        localStorage.setItem("local_user", JSON.stringify(data.user));
+        localStorage.setItem("token", data.token);
+        navigateTo("feed");
+        showToast(`Bem-vindo(a), gestão do ${data.user.nome}!`, "success");
+        return;
       }
-      setCurrentUser(data.user);
-      localStorage.setItem("local_user", JSON.stringify(data.user));
-      localStorage.setItem("token", data.token);
-      navigateTo("feed");
-      showToast(`Bem-vindo(a), gestão do ${data.user.nome}!`, "success");
+
+      // Hospedagem estática: valida diretamente no Supabase pelo identificador
+      // institucional (e-mail ou CGM), sem depender do Express.
+      if (!isSupabaseConfigured()) {
+        throw new Error("Acesso institucional indisponível: Supabase não configurado.");
+      }
+      const { user: instUser, error: instErr } = await authenticateUserDirectInSupabase(
+        identificador,
+        password
+      );
+      if (instUser) {
+        setCurrentUser(instUser);
+        localStorage.setItem("local_user", JSON.stringify(instUser));
+        navigateTo("feed");
+        showToast(`Bem-vindo(a), gestão do ${instUser.nome}!`, "success");
+        return;
+      }
+      throw new Error(instErr || "Identificador ou senha institucional incorretos.");
     } catch (err: any) {
       setLoginError(err.message || "Erro no acesso institucional.");
       throw err;
@@ -358,26 +407,28 @@ export default function App() {
     try {
       const res = await resilientFetch("/api/events", { retries: 2, retryDelay: 500 });
       const parsed = await safeParseJsonResponse<{ events?: Event[] }>(res);
-      if (parsed.ok && parsed.data?.events) {
+      if (parsed.ok && parsed.data && Array.isArray(parsed.data.events)) {
         const incomingEvents = parsed.data.events;
-        if (Array.isArray(incomingEvents) && incomingEvents.length > 0) {
-          // Retenção de 3 dias: eventos vencidos saem do app mesmo que o
-          // backend ainda os devolva.
-          const validos = incomingEvents.filter((e: Event) => !isEventRetentionExpired(e));
-          setEvents(validos);
-          localStorage.setItem("local_events", JSON.stringify(validos));
-          setIsLoadingEvents(false);
-          return true;
-        }
+        // Lista vazia também é resultado válido: reflete o banco real.
+        // Retenção de 3 dias: eventos vencidos saem do app mesmo que o
+        // backend ainda os devolva.
+        const validos = incomingEvents.filter((e: Event) => !isEventRetentionExpired(e));
+        setEvents(validos);
+        localStorage.setItem("local_events", JSON.stringify(validos));
+        setIsLoadingEvents(false);
+        return true;
       }
     } catch (error) {
       console.warn("[loadEvents] Backend /api/events falhou ou demorou:", error);
     }
 
     // 2. Consulta direta via cliente Supabase (REST/PostgREST)
+    // IMPORTANTE: uma resposta válida com 0 linhas é um resultado legítimo
+    // (por exemplo, o último evento acabou de ser excluído). Tratá-la como
+    // falha mantinha o evento já apagado visível na tela para sempre.
     try {
       const { events: directEvents, error: directErr } = await fetchEventsDirectFromSupabase();
-      if (!directErr && Array.isArray(directEvents) && directEvents.length > 0) {
+      if (!directErr && Array.isArray(directEvents)) {
         setEvents(directEvents);
         localStorage.setItem("local_events", JSON.stringify(directEvents));
         setIsLoadingEvents(false);
@@ -392,7 +443,7 @@ export default function App() {
       const stored = localStorage.getItem("local_events");
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           // O cache local pode conter eventos que já foram excluídos.
           setEvents(parsed.filter((e: Event) => !isEventRetentionExpired(e)));
           setIsLoadingEvents(false);
@@ -916,7 +967,7 @@ export default function App() {
       
       let res: Response | null = null;
       try {
-        res = await fetch("/api/auth/local-login-password", {
+        res = await fetchJsonApi("/api/auth/local-login-password", {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -992,27 +1043,22 @@ export default function App() {
         }
       } catch {}
 
-      let found = localUsersList.find(u => u.email.toLowerCase() === cleanEmail);
+      // Nunca inventar conta a partir do e-mail digitado: isso criava um
+      // usuário fantasma com senha padrão sempre que o e-mail não existia.
+      const found = localUsersList.find((u) => u.email.toLowerCase() === cleanEmail);
       if (!found) {
-        const isDirector = cleanEmail === "diretoria@helenawysocki.com";
-        const isStaff = cleanEmail === "funcionario@helenawysocki.com";
-        found = {
-          id: Date.now(),
-          uid: `local-${Date.now()}`,
-          email: cleanEmail,
-          password: password || "senha123",
-          nome: cleanEmail.split("@")[0].replace(".", " "),
-          foto_perfil: "",
-          provider: "local",
-          role: isDirector ? "Diretor" : (isStaff ? "Funcionário" : "Aluno"),
-          ativo: true,
-          isAdmin: isDirector,
-          institution: "Escola estadual Helena Wysocki",
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        localUsersList.push(found);
-        localStorage.setItem("local_users_db", JSON.stringify(localUsersList));
+        const notFoundMsg =
+          "Usuário não encontrado. Verifique o e-mail digitado ou crie uma nova conta.";
+        setLoginError(notFoundMsg);
+        showToast(notFoundMsg, "error");
+        return;
+      }
+
+      if (found.ativo === false) {
+        const blockedMsg = "Sua conta escolar está desativada. Procure a direção da escola.";
+        setLoginError(blockedMsg);
+        showToast(blockedMsg, "error");
+        return;
       }
 
       setCurrentUser(found);
@@ -1040,14 +1086,18 @@ export default function App() {
     gender?: string;
     role?: string;
     institution?: string;
-  }): Promise<{ success: boolean; error?: string }> => {
+    matricula?: string;
+    personalEmail?: string;
+  }): Promise<{ success: boolean; error?: string; fieldErrors?: Record<string, string> }> => {
     try {
       setIsLoadingAuth(true);
       setLoginError(null);
 
+      // `fetchJsonApi` evita o falso-positivo do GitHub Pages, que devolve
+      // index.html com status 200 para rotas /api inexistentes.
       let res: Response | null = null;
       try {
-        res = await fetch("/api/auth/register", {
+        res = await fetchJsonApi("/api/auth/register", {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -1078,20 +1128,27 @@ export default function App() {
       }
 
       // 2. Gravação direta no Supabase (GitHub Pages)
+      //      Cadastro escolar completo: valida CPF/matrícula/e-mail institucional
+      //      e confere o vínculo prévio carregado pela escola.
       if (isSupabaseConfigured()) {
-        const { user: newUser, error: regError } = await registerUserDirectInSupabase(data as any);
+        const { user: newUser, error: regError, fieldErrors } = await registerSchoolAccount(
+          data as any
+        );
         if (newUser) {
           setCurrentUser(newUser);
           localStorage.setItem("local_user", JSON.stringify(newUser));
           setActiveScreen("feed");
-          showToast("Conta escolar criada com sucesso no banco de dados!", "success");
+          showToast(
+            "Conta escolar criada! No primeiro acesso, troque sua senha provisória.",
+            "success"
+          );
           loadEvents();
           loadAllUsers();
           return { success: true };
         } else if (regError) {
           setLoginError(regError);
           showToast(regError, "error");
-          return { success: false, error: regError };
+          return { success: false, error: regError, fieldErrors };
         }
       }
 

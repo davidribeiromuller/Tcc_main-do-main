@@ -38,7 +38,10 @@ import {
   RefreshCw,
   MoreVertical,
   Filter,
-  CalendarDays
+  CalendarDays,
+  TrendingUp,
+  UserCheck,
+  GraduationCap
 } from "lucide-react";
 import { User, Event } from "../types";
 import {
@@ -58,6 +61,8 @@ import {
   getRoleBadgeLabel,
   getAdminRoleType
 } from "../lib/permissions";
+import { getEventYearOptions, validateEventDate } from "../lib/dateGuards.ts";
+import { fetchJsonApi } from "../lib/staticHosting.ts";
 
 interface AdminPanelProps {
   usersList: User[];
@@ -304,6 +309,18 @@ export default function AdminPanel({
   const activeUsers = filteredUsers.filter((u) => u.ativo !== false);
   const blockedUsers = filteredUsers.filter((u) => u.ativo === false);
 
+  // KPIs do topo — calculados sobre a lista COMPLETA, não sobre o filtro de busca.
+  const kpi = React.useMemo(() => {
+    const total = usersList.length;
+    const ativos = usersList.filter((u) => u.ativo !== false).length;
+    const bloqueados = total - ativos;
+    const alunos = usersList.filter((u) => (u.role || "") === "Aluno").length;
+    const equipe = usersList.filter((u) =>
+      ["Diretor", "Funcionário", "Professor", "Pedagogo(a)"].includes(u.role || "")
+    ).length;
+    return { total, ativos, bloqueados, alunos, equipe, eventos: events.length };
+  }, [usersList, events.length]);
+
   const filteredEvents = events.filter((ev) => {
     const term = eventSearchTerm.toLowerCase();
     const matchesTerm =
@@ -528,6 +545,18 @@ export default function AdminPanel({
   const handleSaveNewEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!onAddEvent) return;
+
+    // O app só trabalha com datas de hoje em diante.
+    const dateError = validateEventDate(
+      Number(eventFormData.day),
+      Number(eventFormData.month),
+      Number(eventFormData.year)
+    );
+    if (dateError) {
+      notifyAdmin(`Não foi possível salvar: ${dateError}`, "warning");
+      return;
+    }
+
     try {
       setIsSavingEvent(true);
       await onAddEvent({
@@ -554,6 +583,17 @@ export default function AdminPanel({
   const handleSaveEditEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingEvent || !onUpdateEvent) return;
+
+    const dateError = validateEventDate(
+      Number(eventFormData.day),
+      Number(eventFormData.month),
+      Number(eventFormData.year)
+    );
+    if (dateError) {
+      notifyAdmin(`Não foi possível salvar: ${dateError}`, "warning");
+      return;
+    }
+
     try {
       setIsSavingEvent(true);
       await onUpdateEvent(editingEvent.id, {
@@ -601,15 +641,20 @@ export default function AdminPanel({
     setLoadingAccounts(true);
     try {
       const token = localStorage.getItem("token") || "";
-      const res = await fetch("/api/admin/institutional-accounts", {
+      // Em hospedagem estática a rota não existe: `fetchJsonApi` devolve null
+      // em vez do HTML-200 do fallback de SPA.
+      const res = await fetchJsonApi("/api/admin/institutional-accounts", {
         headers: { Authorization: `Bearer ${token}` }
       });
-      const data = await res.json();
-      if (data.accounts) {
-        setInstitutionalAccounts(data.accounts);
+
+      if (res && res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (Array.isArray(data?.accounts)) {
+          setInstitutionalAccounts(data.accounts);
+        }
       }
     } catch (err) {
-      console.error("Erro ao carregar contas institucionais:", err);
+      console.warn("[AdminPanel] Contas institucionais indisponíveis:", err);
     } finally {
       setLoadingAccounts(false);
     }
@@ -793,6 +838,57 @@ export default function AdminPanel({
                 </button>
               )}
             </div>
+          </div>
+
+          {/* Faixa de KPIs — leitura rápida do estado da rede */}
+          <div className="mt-4 grid grid-cols-2 lg:grid-cols-5 gap-2.5">
+            {[
+              {
+                label: "Contas totais",
+                value: kpi.total,
+                icon: <Users size={15} />,
+                tone: "text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-white/5 border-slate-200 dark:border-white/10",
+              },
+              {
+                label: "Ativas",
+                value: kpi.ativos,
+                icon: <UserCheck size={15} />,
+                tone: "text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900/50",
+              },
+              {
+                label: "Bloqueadas",
+                value: kpi.bloqueados,
+                icon: <Lock size={15} />,
+                tone: "text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900/50",
+              },
+              {
+                label: "Alunos",
+                value: kpi.alunos,
+                icon: <GraduationCap size={15} />,
+                tone: "text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-900/50",
+              },
+              {
+                label: "Eventos na agenda",
+                value: kpi.eventos,
+                icon: <CalendarDays size={15} />,
+                tone: "text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/50",
+              },
+            ].map((card) => (
+              <div
+                key={card.label}
+                className={`rounded-2xl border px-3 py-2.5 flex items-center gap-2.5 ${card.tone} transition-colors`}
+              >
+                <div className="shrink-0 opacity-80">{card.icon}</div>
+                <div className="min-w-0">
+                  <div className="text-lg font-display font-bold leading-none tabular-nums">
+                    {card.value}
+                  </div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider opacity-70 truncate mt-0.5">
+                    {card.label}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
 
           {/* Search & Secondary Action Bar */}
@@ -1942,8 +2038,23 @@ export default function AdminPanel({
                 <p className="text-xs text-slate-500">Carregando contas institucionais das escolas...</p>
               </div>
             ) : institutionalAccounts.length === 0 ? (
-              <div className="text-center py-12 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
-                <p className="text-xs text-slate-500">Nenhuma conta institucional configurada no momento.</p>
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-8 sm:p-10 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 flex items-center justify-center mx-auto mb-3">
+                  <Building2 size={22} />
+                </div>
+                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                  Nenhuma conta institucional ativa
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 max-w-md mx-auto leading-relaxed">
+                  As contas de gestão das escolas de Araucária aparecem aqui depois que a
+                  instituição é verificada pela direção. O cadastro de alunos e professores é
+                  feito em paralelo, na lista de vínculos (CPF + matrícula).
+                </p>
+                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-3 max-w-md mx-auto leading-relaxed">
+                  Esta lista é carregada do servidor. Em hospedagem estática (GitHub Pages) o
+                  endpoint <code className="font-mono">/api/admin/institutional-accounts</code> não
+                  existe — por isso ela pode aparecer vazia mesmo havendo escolas cadastradas.
+                </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
@@ -2853,6 +2964,23 @@ export default function AdminPanel({
 
                   <div className="flex flex-col gap-1">
                     <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      Ano
+                    </label>
+                    <select
+                      value={eventFormData.year}
+                      onChange={(e) => setEventFormData({ ...eventFormData, year: Number(e.target.value) })}
+                      className="w-full h-10 px-2 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
+                    >
+                      {getEventYearOptions().map((y) => (
+                        <option key={y} value={y}>
+                          {y}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
                       Horário
                     </label>
                     <input
@@ -3023,6 +3151,23 @@ export default function AdminPanel({
                       {monthNames.map((m, idx) => (
                         <option key={idx} value={idx}>
                           {m}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      Ano
+                    </label>
+                    <select
+                      value={eventFormData.year}
+                      onChange={(e) => setEventFormData({ ...eventFormData, year: Number(e.target.value) })}
+                      className="w-full h-10 px-2 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
+                    >
+                      {getEventYearOptions().map((y) => (
+                        <option key={y} value={y}>
+                          {y}
                         </option>
                       ))}
                     </select>

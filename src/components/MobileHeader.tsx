@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Sun, Moon, LogOut, Settings as SettingsIcon, ShieldCheck, Crown, User as UserIcon, Calendar, Home } from "lucide-react";
+import { getUserDisplayName } from "../lib/userDisplay.ts";
 
 interface MobileHeaderProps {
   activeScreen: string;
@@ -22,7 +23,7 @@ export default function MobileHeader({
 }: MobileHeaderProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-  const userName = currentUser?.nome || currentUser?.email?.split("@")[0] || "Usuário";
+  const userName = getUserDisplayName(currentUser);
   const userRole = currentUser?.role || "Aluno";
   const isChefe = currentUser?.role === "Diretor" || (currentUser?.isAdmin && !currentUser?.role?.includes("Funcionário"));
   const isFuncionario = !isChefe && (currentUser?.role === "Funcionário" || currentUser?.role === "Professor" || currentUser?.isAdmin);

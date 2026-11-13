@@ -1,7 +1,9 @@
 import React, { useState } from "react";
 import { motion } from "motion/react";
-import { User2, Mail, Lock, CreditCard, Calendar, Users, Building, ArrowLeft, Phone } from "lucide-react";
+import { User2, Mail, Lock, CreditCard, Calendar, Users, Building, ArrowLeft, Phone, Hash, AtSign } from "lucide-react";
 import { SCHOOLS_LIST } from "../lib/schools.ts";
+import { fetchJsonApi } from "../lib/staticHosting.ts";
+import { formatCPF, validateSchoolRegistration } from "../lib/schoolAccountValidation.ts";
 
 interface RegisterProps {
   onRegister: (data: {
@@ -14,7 +16,9 @@ interface RegisterProps {
     gender: string;
     role: string;
     institution: string;
-  }) => Promise<{ success: boolean; error?: string } | void> | void;
+    matricula?: string;
+    personalEmail?: string;
+  }) => Promise<{ success: boolean; error?: string; fieldErrors?: Record<string, string> } | void> | void;
   onNavigate: (screen: string) => void;
   isLoading?: boolean;
   registerError?: string | null;
@@ -35,6 +39,9 @@ export default function Register({
   const [gender, setGender] = useState("");
   const [institution, setInstitution] = useState(SCHOOLS_LIST[0]);
   const [role, setRole] = useState("Aluno");
+  const [matricula, setMatricula] = useState("");
+  const [personalEmail, setPersonalEmail] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const [currentStep, setCurrentStep] = useState<1 | 2>(1);
   const [isCheckingEmail, setIsCheckingEmail] = useState(false);
@@ -165,8 +172,8 @@ export default function Register({
       // 1. Check email uniqueness
       let existsEmailOnServer = false;
       try {
-        const checkRes = await fetch(`/api/auth/check-email?email=${encodeURIComponent(cleanEmail)}`);
-        if (checkRes.ok) {
+        const checkRes = await fetchJsonApi(`/api/auth/check-email?email=${encodeURIComponent(cleanEmail)}`);
+        if (checkRes && checkRes.ok) {
           const checkData = await checkRes.json();
           if (checkData && checkData.exists === true) {
             existsEmailOnServer = true;
@@ -186,8 +193,8 @@ export default function Register({
       if (cleanPhoneDigits.length >= 8) {
         let existsPhoneOnServer = false;
         try {
-          const phoneCheckRes = await fetch(`/api/auth/check-phone?phone=${encodeURIComponent(cleanPhoneDigits)}`);
-          if (phoneCheckRes.ok) {
+          const phoneCheckRes = await fetchJsonApi(`/api/auth/check-phone?phone=${encodeURIComponent(cleanPhoneDigits)}`);
+          if (phoneCheckRes && phoneCheckRes.ok) {
             const phoneData = await phoneCheckRes.json();
             if (phoneData && phoneData.exists === true) {
               existsPhoneOnServer = true;
@@ -214,9 +221,30 @@ export default function Register({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setFieldErrors({});
 
     if (!birthdate) {
       setError("Por favor, insira sua data de nascimento!");
+      return;
+    }
+
+    // Validação do vínculo escolar antes de enviar: CPF com dígito verificador,
+    // matrícula, e-mail institucional, e-mail pessoal e senha provisória.
+    const erros = validateSchoolRegistration({
+      nome,
+      email,
+      matricula,
+      cpf,
+      birthdate,
+      personalEmail,
+      password,
+      institution: institution || SCHOOLS_LIST[0] || "",
+      role: "Aluno",
+    });
+
+    if (Object.keys(erros).length > 0) {
+      setFieldErrors(erros);
+      setError("Confira os campos destacados para concluir o cadastro.");
       return;
     }
 
@@ -232,10 +260,13 @@ export default function Register({
         gender: gender || "Não informado",
         role: "Aluno",
         institution: institution || SCHOOLS_LIST[0] || "Escola estadual Helena Wysocki",
-      });
+        matricula: matricula.trim(),
+        personalEmail: personalEmail.trim().toLowerCase(),
+      } as any);
 
       if (res && res.success === false && res.error) {
         setError(res.error);
+        if ((res as any).fieldErrors) setFieldErrors((res as any).fieldErrors);
       }
     } catch (submitErr: any) {
       setError(submitErr?.message || "Erro ao realizar o cadastro. Tente novamente.");
@@ -340,20 +371,35 @@ export default function Register({
                 } rounded-xl focus:ring-2 focus:outline-none text-sm`}
               />
             </div>
+            {fieldErrors.email ? (
+              <span className="text-[11px] text-red-600 dark:text-red-400">{fieldErrors.email}</span>
+            ) : (
+              <span className="text-[11px] text-slate-400">
+                Use o e-mail institucional fornecido pela escola. E-mails pessoais (Gmail, Hotmail)
+                não são aceitos aqui.
+              </span>
+            )}
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Definir Senha de Acesso</label>
+            <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Senha provisória</label>
             <div className="relative">
               <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Mínimo 4 caracteres"
-                className="w-full h-12 pl-11 pr-4 bg-white dark:bg-brand-card-dark border border-brand-primary rounded-xl focus:ring-2 focus:ring-brand-accent/50 focus:outline-none focus:border-brand-accent text-sm"
+                placeholder="Mínimo 8 caracteres, com letras e números"
+                className={`w-full h-12 pl-11 pr-4 bg-white dark:bg-brand-card-dark border rounded-xl focus:ring-2 focus:ring-brand-accent/50 focus:outline-none text-sm ${
+                  fieldErrors.password
+                    ? "border-red-400 focus:border-red-400"
+                    : "border-brand-primary focus:border-brand-accent"
+                }`}
               />
             </div>
+            {fieldErrors.password && (
+              <span className="text-[11px] text-red-600 dark:text-red-400">{fieldErrors.password}</span>
+            )}
           </div>
 
           <div className="flex flex-col gap-1">
@@ -364,10 +410,17 @@ export default function Register({
                 type="text"
                 value={cpf}
                 onChange={handleCpfChange}
-                placeholder="111.111.111-11"
-                className="w-full h-12 pl-11 pr-4 bg-white dark:bg-brand-card-dark border border-brand-primary rounded-xl focus:ring-2 focus:ring-brand-accent/50 focus:outline-none focus:border-brand-accent text-sm"
+                placeholder="000.000.000-00"
+                className={`w-full h-12 pl-11 pr-4 bg-white dark:bg-brand-card-dark border rounded-xl focus:ring-2 focus:ring-brand-accent/50 focus:outline-none text-sm ${
+                  fieldErrors.cpf
+                    ? "border-red-400 focus:border-red-400"
+                    : "border-brand-primary focus:border-brand-accent"
+                }`}
               />
             </div>
+            {fieldErrors.cpf && (
+              <span className="text-[11px] text-red-600 dark:text-red-400">{fieldErrors.cpf}</span>
+            )}
           </div>
 
           <div className="flex flex-col gap-1">
@@ -425,6 +478,60 @@ export default function Register({
                 </select>
               </div>
             </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+              Matrícula / RA *
+            </label>
+            <div className="relative">
+              <Hash className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <input
+                type="text"
+                value={matricula}
+                onChange={(e) => setMatricula(e.target.value)}
+                placeholder="Ex: 2026-001234"
+                className={`w-full h-12 pl-9 pr-2 bg-white dark:bg-brand-card-dark border rounded-xl focus:ring-2 focus:ring-brand-accent/50 focus:outline-none text-sm ${
+                  fieldErrors.matricula
+                    ? "border-red-400 focus:border-red-400"
+                    : "border-brand-primary focus:border-brand-accent"
+                }`}
+              />
+            </div>
+            {fieldErrors.matricula ? (
+              <span className="text-[11px] text-red-600 dark:text-red-400">{fieldErrors.matricula}</span>
+            ) : (
+              <span className="text-[11px] text-slate-400">
+                Fornecida pela escola. Use a mesma que aparece no seu comprovante de matrícula.
+              </span>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+              E-mail pessoal (recuperação) *
+            </label>
+            <div className="relative">
+              <AtSign className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <input
+                type="email"
+                value={personalEmail}
+                onChange={(e) => setPersonalEmail(e.target.value)}
+                placeholder="seunome@gmail.com"
+                className={`w-full h-12 pl-9 pr-2 bg-white dark:bg-brand-card-dark border rounded-xl focus:ring-2 focus:ring-brand-accent/50 focus:outline-none text-sm ${
+                  fieldErrors.personalEmail
+                    ? "border-red-400 focus:border-red-400"
+                    : "border-brand-primary focus:border-brand-accent"
+                }`}
+              />
+            </div>
+            {fieldErrors.personalEmail ? (
+              <span className="text-[11px] text-red-600 dark:text-red-400">{fieldErrors.personalEmail}</span>
+            ) : (
+              <span className="text-[11px] text-slate-400">
+                Usado só para recuperar o acesso — nunca aparece para outros alunos.
+              </span>
+            )}
           </div>
 
           <div className="flex flex-col gap-1">

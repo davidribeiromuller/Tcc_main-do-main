@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Search, ChevronDown, LogOut, User as UserIcon, Settings as SettingsIcon, Sun, Moon } from "lucide-react";
+import { getUserDisplayName } from "../lib/userDisplay.ts";
 
 interface DesktopNavbarProps {
   activeScreen: string;
@@ -23,7 +24,7 @@ export default function DesktopNavbar({
   onToggleTheme
 }: DesktopNavbarProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const userName = currentUser?.nome || currentUser?.email?.split("@")[0] || "Usuário";
+  const userName = getUserDisplayName(currentUser);
   const hasAdminAccess = Boolean(canAccessAdmin || currentUser?.isAdmin);
 
   return (

@@ -1,4 +1,5 @@
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase.ts";
+import { isPastDate } from "./dateGuards.ts";
 import { createEventDirectInSupabase } from "./eventsService.ts";
 
 /** Candidato a evento gerado pela IA, aguardando aprovação do admin. */
@@ -73,7 +74,24 @@ function mapSuggestion(row: any): EventSuggestion {
 }
 
 /**
+ * Sugestões com data anterior à atual não fazem sentido para o app:
+ * ninguém vai participar de um evento que já passou. O motor local e a Edge
+ * Function já descartam essas datas na origem, mas bancos antigos podem ter
+ * resíduos — por isso filtramos também na leitura.
+ */
+export function isSuggestionInThePast(
+  suggestion: Pick<EventSuggestion, "day" | "month" | "year">
+): boolean {
+  const { day, month, year } = suggestion;
+  if (!Number.isFinite(day) || !Number.isFinite(month) || !Number.isFinite(year)) {
+    return false; // data incompleta: manter, o admin decide
+  }
+  return isPastDate(Number(day), Number(month), Number(year));
+}
+
+/**
  * Lista as sugestões da IA. Visível para todos os níveis hierárquicos.
+ * Sugestões com data passada são omitidas.
  */
 export async function fetchEventSuggestions(
   status: "pending" | "approved" | "rejected" | "all" = "pending"
@@ -96,7 +114,11 @@ export async function fetchEventSuggestions(
 
     if (error) return { suggestions: [], error };
 
-    return { suggestions: (data ?? []).map(mapSuggestion), error: null };
+    const suggestions = (data ?? [])
+      .map(mapSuggestion)
+      .filter((s) => !isSuggestionInThePast(s));
+
+    return { suggestions, error: null };
   } catch (err) {
     return { suggestions: [], error: err };
   }
