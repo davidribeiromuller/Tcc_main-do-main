@@ -30,6 +30,12 @@ import { Event, User } from "../types";
 import { fetchStreetRoute } from "../lib/routing.ts";
 import { recordRouteCalculation } from "../lib/userStats.ts";
 import { ARAUCARIA_SCHOOLS, SchoolProfile } from "../lib/schoolsData.ts";
+import {
+  requestCurrentCoords,
+  saveCoords,
+  clearSavedCoords,
+  geolocationFalhou,
+} from "../lib/geolocation.ts";
 
 // Default coordinates for Araucária Center
 const ARAUCARIA_COORDINATES: [number, number] = [-25.5936, -49.4103];
@@ -509,89 +515,37 @@ export default function MapView({
   }, [initialSelectedEventId, events]);
 
   // Handle Geolocation Authorization Request with multi-tier fallback
-  const handleRequestLocationAuthorization = (fallbackPreset?: { lat: number; lng: number }) => {
-    if (fallbackPreset) {
-      setLocalUserLocation(fallbackPreset);
-      try {
-        localStorage.setItem("user_geolocation_coords", JSON.stringify(fallbackPreset));
-      } catch {}
-      if (onUserCoordsChange) {
-        onUserCoordsChange(fallbackPreset);
-      }
-      setShowLocationModal(false);
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.flyTo([fallbackPreset.lat, fallbackPreset.lng], 16, { duration: 1 });
-      }
-      return;
-    }
-
+  const handleRequestLocationAuthorization = async () => {
     setIsLocating(true);
     setLocationStatusMessage("Solicitando permissão de GPS...");
+    setLocationError(null);
 
-    if (!("geolocation" in navigator)) {
-      // Fallback for unsupported browsers
-      const defaultCoords = { lat: -25.5920, lng: -49.4080 }; // Centro de Araucária
-      setLocalUserLocation(defaultCoords);
-      if (onUserCoordsChange) onUserCoordsChange(defaultCoords);
+    // Sempre do GPS: um ponto fixo (centro de Araucária) fazia o mapa e as
+    // distâncias partirem de um lugar onde o usuário não estava.
+    const resultado = await requestCurrentCoords();
+
+    if (geolocationFalhou(resultado)) {
+      clearSavedCoords();
       setIsLocating(false);
       setShowLocationModal(false);
+      setLocationError(resultado.message);
+      setLocationStatusMessage("");
       return;
     }
 
-    // Try High Accuracy first, if timeout/error fallback gracefully
-    const onSuccess = (pos: GeolocationPosition) => {
-      const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      setLocalUserLocation(coords);
-      try {
-        localStorage.setItem(
-          "user_geolocation_coords",
-          JSON.stringify({ ...coords, ts: Date.now() })
-        );
-      } catch {}
-      if (onUserCoordsChange) {
-        onUserCoordsChange(coords);
-      }
-      setIsLocating(false);
-      setLocationError(null);
-      setShowLocationModal(false);
+    const coords = resultado.coords;
+    setLocalUserLocation(coords);
+    saveCoords(coords);
+    if (onUserCoordsChange) onUserCoordsChange(coords);
 
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.flyTo([coords.lat, coords.lng], 16, { duration: 1 });
-      }
-    };
+    setIsLocating(false);
+    setLocationError(null);
+    setLocationStatusMessage("");
+    setShowLocationModal(false);
 
-    // Nunca substituir a posição real por um ponto fixo: isso colocava o
-    // usuário no centro de Araucária e gerava rotas/distâncias incorretas.
-    const onFailure = (err: GeolocationPositionError) => {
-      console.warn("Geolocalização indisponível:", err.message);
-      setIsLocating(false);
-      setShowLocationModal(false);
-      const messages: Record<number, string> = {
-        1: "Permissão de localização negada. Autorize o acesso no navegador para ver sua posição real.",
-        2: "Não foi possível determinar sua localização agora. Verifique o sinal de GPS e tente novamente.",
-        3: "Tempo esgotado ao obter sua localização. Tente novamente.",
-      };
-      setLocationError(messages[err.code] || "Não foi possível obter sua localização.");
-    };
-
-    const onError = (err: GeolocationPositionError) => {
-      console.warn("Alta precisão falhou, tentando precisão padrão:", err.message);
-      if (err.code === 1) {
-        onFailure(err);
-        return;
-      }
-      navigator.geolocation.getCurrentPosition(
-        onSuccess,
-        onFailure,
-        { enableHighAccuracy: false, timeout: 8000, maximumAge: 30000 }
-      );
-    };
-
-    navigator.geolocation.getCurrentPosition(
-      onSuccess,
-      onError,
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
-    );
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.flyTo([coords.lat, coords.lng], 16, { duration: 1 });
+    }
   };
 
   // Center on school
@@ -1115,15 +1069,6 @@ export default function MapView({
                 >
                   <ShieldCheck size={16} />
                   {isLocating ? (locationStatusMessage || "Obtendo localização...") : "Permitir e Ver Minha Posição"}
-                </button>
-
-                <button
-                  onClick={() => handleRequestLocationAuthorization({ lat: -25.5925, lng: -49.4085 })}
-                  disabled={isLocating}
-                  className="w-full h-10 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-xs font-semibold rounded-2xl hover:bg-blue-100 active:scale-98 transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                >
-                  <MapPin size={14} />
-                  <span>Usar Centro de Araucária (Padrão)</span>
                 </button>
 
                 <button

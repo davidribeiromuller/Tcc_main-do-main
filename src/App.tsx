@@ -28,6 +28,7 @@ import { CheckCircle, AlertCircle, CheckCircle2, Info, X } from "lucide-react";
 import logoImg from "./assets/images/logo.jpg";
 import { resilientFetch, setupNetworkAutoRecovery, safeAppReload, safeParseJsonResponse } from "./lib/apiResilience.ts";
 import { fetchJsonApi } from "./lib/staticHosting.ts";
+import { readSavedCoords } from "./lib/geolocation.ts";
 import { registerSchoolAccount } from "./lib/schoolAccountService.ts";
 import { getSupabaseClient, isSupabaseConfigured, getEffectiveSupabaseUrl } from "./lib/supabase.ts";
 import {
@@ -139,14 +140,13 @@ export default function App() {
   const [isLoadingEvents, setIsLoadingEvents] = useState<boolean>(true);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [focusedMapEventId, setFocusedMapEventId] = useState<number | null>(null);
-  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(() => {
-    try {
-      const saved = localStorage.getItem("user_geolocation_coords");
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(
+    // `readSavedCoords` descarta posição vencida/sem carimbo de tempo.
+    // Antes o App aceitava qualquer JSON com lat/lng, então a coordenada de
+    // dias atrás (de outro lugar) continuava valendo como se fosse a atual —
+    // era isso que fazia a localização parecer aleatória.
+    () => readSavedCoords()
+  );
   const [usersList, setUsersList] = useState<User[]>(() => {
     try {
       const parsed = readUsersCache();

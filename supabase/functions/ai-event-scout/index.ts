@@ -849,13 +849,55 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // --- 5. Gravação (ignora duplicatas por fingerprint) ---
+    // --- 5. Gravação ---
+    //
+    // NÃO usar `upsert({ onConflict: "fingerprint" })`.
+    // O índice `idx_event_suggestions_fingerprint` é PARCIAL
+    // (`WHERE fingerprint IS NOT NULL`), e o Postgres só aceita
+    // `ON CONFLICT (coluna)` quando existe constraint completa na coluna:
+    //
+    //   ERROR: 42P10: there is no unique or exclusion constraint
+    //   matching the ON CONFLICT specification
+    //
+    // A deduplicação já foi feita acima, em memória, comparando fingerprint
+    // E similaridade semântica (`mesmoEvento`) — é mais rigorosa que o índice.
+    // O insert simples é suficiente; se o índice parcial ainda barrar alguma
+    // corrida, tratamos 23505 como duplicata em vez de derrubar a requisição.
     const { data: inseridas, error: insertError } = await serviceClient
       .from("event_suggestions")
-      .upsert(lote, { onConflict: "fingerprint", ignoreDuplicates: true })
+      .insert(lote)
       .select("id");
 
     if (insertError) {
+      const codigo = (insertError as any)?.code;
+      const mensagem = String(insertError.message || "");
+
+      // Corrida com outra execução: o índice parcial barrou um fingerprint
+      // repetido. Não é falha para o usuário — só não entrou de novo.
+      const ehDuplicata =
+        codigo === "23505" ||
+        codigo === "42P10" ||
+        mensagem.includes("duplicate key") ||
+        mensagem.includes("ON CONFLICT");
+
+      if (ehDuplicata) {
+        return respostaJson({
+          success: true,
+          inseridas: 0,
+          descartadas,
+          duplicadas: semDuplicatas + lote.length,
+          repetidas: descartadosPorHistorico,
+          bloqueadas_por_conteudo: bloqueadosPorConteudo,
+          fontes: fontesUsadas,
+          provider: iaInfo?.provider ?? null,
+          model: iaInfo?.model ?? null,
+          aviso: avisoIa,
+          falha_ia: falhaIa,
+          message:
+            "Estas sugestões já estavam na fila ou já foram avaliadas antes e não voltam a aparecer.",
+        });
+      }
+
       return respostaJson({ error: insertError.message }, 500);
     }
 
