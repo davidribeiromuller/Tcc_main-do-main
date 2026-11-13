@@ -173,6 +173,74 @@ html.dark .admin-scrollable::-webkit-scrollbar-thumb {
   background: rgba(163, 198, 157, 0.4) !important;
 }
 
+/* ------------------------------------------------------------------
+   Rolagem horizontal do painel de administração
+   ------------------------------------------------------------------
+   As tabelas do painel (usuários, ex-alunos) têm muitas colunas e
+   `min-w-*` em várias células. Em telas estreitas o conteúdo passa da
+   largura disponível. Antes o container raiz usava `overflow-x-hidden`,
+   o que CORTAVA essas colunas em vez de permitir rolagem — a última
+   coluna ("Ações Administrativas") ficava inacessível no celular.
+   Aqui a rolagem horizontal fica explícita e visível.
+   ------------------------------------------------------------------ */
+.admin-scroll-x {
+  overflow-x: auto !important;
+  overflow-y: auto !important;
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(76, 107, 76, 0.45) transparent !important;
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior-x: contain;
+}
+
+.admin-scroll-x::-webkit-scrollbar {
+  display: block !important;
+  width: 9px !important;
+  height: 9px !important;
+}
+
+.admin-scroll-x::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.03) !important;
+  border-radius: 9999px !important;
+}
+
+.admin-scroll-x::-webkit-scrollbar-thumb {
+  background: rgba(76, 107, 76, 0.45) !important;
+  border-radius: 9999px !important;
+  border: 1px solid transparent !important;
+}
+
+.admin-scroll-x::-webkit-scrollbar-thumb:hover {
+  background: rgba(76, 107, 76, 0.75) !important;
+}
+
+html.dark .admin-scroll-x {
+  scrollbar-color: rgba(163, 198, 157, 0.45) transparent !important;
+}
+
+html.dark .admin-scroll-x::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03) !important;
+}
+
+html.dark .admin-scroll-x::-webkit-scrollbar-thumb {
+  background: rgba(163, 198, 157, 0.4) !important;
+}
+
+/* Em dispositivos de toque a barra fina é difícil de acertar; deixa mais
+   generosa para dar o "pega" da rolagem horizontal. */
+@media (pointer: coarse) {
+  .admin-scroll-x::-webkit-scrollbar {
+    height: 12px !important;
+  }
+}
+
+/* Tabelas do painel: garante largura mínima confortável, para as colunas
+   não serem esmagadas antes da rolagem horizontal entrar em ação. */
+.admin-table {
+  min-width: 46rem;
+  width: 100%;
+  border-collapse: collapse;
+}
+
 html.dark .admin-scrollable::-webkit-scrollbar-thumb:hover {
   background: rgba(163, 198, 157, 0.65) !important;
 }
