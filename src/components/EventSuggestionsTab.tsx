@@ -62,6 +62,12 @@ export default function EventSuggestionsTab({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   /** Aviso não-fatal da última execução (ex.: IA sem chave). */
   const [avisoExecucao, setAvisoExecucao] = useState<string | null>(null);
+  /** Diagnóstico da falha da IA, quando houver. */
+  const [falhaIa, setFalhaIa] = useState<{
+    tipo: string;
+    mensagem: string;
+    sugestao: string | null;
+  } | null>(null);
   /** Resumo de fontes da última execução. */
   const [ultimaExecucao, setUltimaExecucao] = useState<{
     fontes: string[];
@@ -91,7 +97,7 @@ export default function EventSuggestionsTab({
     setRunning(true);
     setAvisoExecucao(null);
     try {
-      const { success, inseridas, message, error, aviso, fontes, resumo, provider, model } =
+      const { success, inseridas, message, error, aviso, fontes, resumo, provider, model, falhaIa: falha } =
         await triggerAiEventScout({ count: 8 });
 
       if (!success) {
@@ -100,6 +106,7 @@ export default function EventSuggestionsTab({
 
       // Aviso não-fatal: a execução funcionou, mas a IA não participou.
       setAvisoExecucao(aviso ?? null);
+      setFalhaIa(falha ?? null);
       setUltimaExecucao({
         fontes: fontes ?? [],
         provider: provider ?? null,
@@ -252,6 +259,11 @@ export default function EventSuggestionsTab({
             <Info size={14} className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
             <div className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300 flex-1">
               <p>{avisoExecucao}</p>
+              {falhaIa?.sugestao && (
+                <p className="mt-1 font-semibold text-amber-800 dark:text-amber-300">
+                  {falhaIa.sugestao}
+                </p>
+              )}
               <button
                 type="button"
                 onClick={() => setMostrarConfigIA((v) => !v)}
