@@ -24,6 +24,8 @@ import {
 } from "lucide-react";
 import { User, Event } from "../types.ts";
 import { SchoolProfile, ARAUCARIA_SCHOOLS, SCHOOL_IMAGES } from "../lib/schoolsData.ts";
+import { mergeNews, saveNews } from "../lib/schoolNewsStore.ts";
+import { safeParseJsonResponse } from "../lib/apiResilience.ts";
 
 interface SchoolPortalProps {
   currentUser: User | null;
@@ -66,6 +68,7 @@ export default function SchoolPortal({
   const [newsTitle, setNewsTitle] = useState("");
   const [newsSummary, setNewsSummary] = useState("");
   const [newsCategory, setNewsCategory] = useState("Comunicado");
+  const [isPublishingNews, setIsPublishingNews] = useState(false);
 
   // New Event Modal state
   const [showEventModal, setShowEventModal] = useState(false);
@@ -82,7 +85,7 @@ export default function SchoolPortal({
   const schoolCrest =
     SCHOOL_IMAGES[initialSchool.slug] ||
     initialSchool.image ||
-    "/images/escolas/szymanski.png";
+    SCHOOL_IMAGES["julio-szymanski"];
 
   const fetchPortalData = async () => {
     setIsLoading(true);
@@ -178,37 +181,77 @@ export default function SchoolPortal({
 
   const handlePublishNews = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newsTitle.trim()) return;
+    if (!newsTitle.trim() || isPublishingNews) return;
 
+    setIsPublishingNews(true);
     try {
       const token = localStorage.getItem("token") || "";
-      const res = await fetch(`/api/school-portal/${schoolId}/news`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          title: newsTitle.trim(),
-          summary: newsSummary.trim(),
-          category: newsCategory,
-          date: new Date().toLocaleDateString("pt-BR"),
-          author: currentUser?.nome || schoolData.name
-        })
-      });
+      const payload = {
+        title: newsTitle.trim(),
+        summary: newsSummary.trim(),
+        description: newsSummary.trim(),
+        category: newsCategory,
+        date: new Date().toLocaleDateString("pt-BR"),
+        author: currentUser?.nome || schoolData.name
+      };
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Erro ao publicar notícia.");
+      // Nem todo ambiente possui backend (GitHub Pages é estático). A resposta
+      // pode ser um `index.html` com status 200, por isso nunca chamamos
+      // `res.json()` sem antes validar o Content-Type.
+      let publishedRemotely = false;
+      try {
+        const res = await fetch(`/api/school-portal/${schoolId}/news`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const parsed = await safeParseJsonResponse<{ error?: string }>(res, {});
+        if (res.ok && parsed.ok) {
+          publishedRemotely = true;
+        } else if (res.ok && !parsed.ok) {
+          // 200 com HTML: significa "sem backend disponível", não erro do usuário.
+          console.info("[SchoolPortal] Backend indisponível; publicando localmente.");
+        } else {
+          throw new Error(parsed.data?.error || parsed.error || "Erro ao publicar comunicado.");
+        }
+      } catch (networkErr: any) {
+        // Erro de rede também não deve impedir o registro local do comunicado.
+        if (networkErr?.message && !/fetch|network|Failed/i.test(networkErr.message)) {
+          throw networkErr;
+        }
+        console.info("[SchoolPortal] Rede indisponível; publicando localmente.", networkErr?.message);
       }
+
+      // Publica no armazenamento local para que o comunicado apareça de fato
+      // no mural, mesmo sem servidor (produção no GitHub Pages).
+      const created = saveNews(schoolData.slug || initialSchool.slug, {
+        title: payload.title,
+        description: payload.description,
+        category: payload.category as any,
+        author: payload.author
+      });
+      setNewsList((prev) => mergeNews(initialSchool.slug, [...(prev as any), created]));
 
       setShowNewsModal(false);
       setNewsTitle("");
       setNewsSummary("");
-      if (onShowToast) onShowToast("Comunicado escolar publicado com sucesso!", "success");
-      fetchPortalData();
+      if (onShowToast) {
+        onShowToast(
+          publishedRemotely
+            ? "Comunicado escolar publicado com sucesso!"
+            : "Comunicado publicado e salvo neste dispositivo!",
+          "success"
+        );
+      }
+      if (publishedRemotely) fetchPortalData();
     } catch (error: any) {
-      if (onShowToast) onShowToast(error.message, "error");
+      if (onShowToast) onShowToast(error.message || "Erro ao publicar comunicado.", "error");
+    } finally {
+      setIsPublishingNews(false);
     }
   };
 
@@ -278,7 +321,7 @@ export default function SchoolPortal({
                 alt={schoolData.name}
                 className="w-full h-full object-contain"
                 onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).src = "/images/escolas/szymanski.png";
+                  (e.currentTarget as HTMLImageElement).src = SCHOOL_IMAGES["julio-szymanski"];
                 }}
               />
             </div>

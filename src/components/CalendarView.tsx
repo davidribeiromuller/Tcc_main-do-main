@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   ChevronLeft,
@@ -51,8 +51,32 @@ export default function CalendarView({
   const todayMonth = today.getMonth(); // 0-11
   const todayYear = today.getFullYear();
 
-  const [currentMonth, setCurrentMonth] = useState<number>(todayMonth);
-  const [currentYear, setCurrentYear] = useState<number>(todayYear);
+  // Mês exibido ao abrir: o atual, ou o mais próximo que tenha eventos.
+  // Sem isso o calendário abria em um mês vazio (ex.: novembro) enquanto todos
+  // os eventos cadastrados estavam em julho/agosto, dando a impressão de que
+  // os eventos não haviam sido salvos.
+  const initialView = useMemo(() => {
+    const nowKey = todayYear * 12 + todayMonth;
+    const hasInCurrent = events.some(
+      (e) => e.month === todayMonth && e.year === todayYear
+    );
+    if (hasInCurrent || events.length === 0) {
+      return { month: todayMonth, year: todayYear };
+    }
+    const closest = events.reduce<{ month: number; year: number }>(
+      (best, e) => {
+        const key = e.year * 12 + e.month;
+        return Math.abs(key - nowKey) < Math.abs(best.year * 12 + best.month - nowKey)
+          ? { month: e.month, year: e.year }
+          : best;
+      },
+      { month: events[0].month, year: events[0].year }
+    );
+    return { month: closest.month, year: closest.year };
+  }, []);
+
+  const [currentMonth, setCurrentMonth] = useState<number>(initialView.month);
+  const [currentYear, setCurrentYear] = useState<number>(initialView.year);
   const [selectedDay, setSelectedDay] = useState<number | null>(todayDay);
   const [filterType, setFilterType] = useState<"all" | "free" | "paid">("all");
 
@@ -163,6 +187,19 @@ export default function CalendarView({
         (e) => e.day === selectedDay && e.month === currentMonth && e.year === currentYear
       )
     : [];
+
+  // Eventos que existem, mas em outro mês — evita a impressão de "nada salvo".
+  const otherMonthEvents = filteredEvents
+    .filter((e) => !(e.month === currentMonth && e.year === currentYear))
+    .sort((a, b) =>
+      a.year !== b.year ? a.year - b.year : a.month !== b.month ? a.month - b.month : a.day - b.day
+    );
+
+  const goToMonth = (month: number, year: number) => {
+    setCurrentMonth(month);
+    setCurrentYear(year);
+    setSelectedDay(null);
+  };
 
   const selectedDateObject = selectedDay !== null ? new Date(currentYear, currentMonth, selectedDay) : null;
   const selectedWeekdayName = selectedDateObject ? WEEKDAYS_NAMES[selectedDateObject.getDay()] : "";
@@ -330,6 +367,37 @@ export default function CalendarView({
       <div className="max-w-6xl mx-auto w-full p-4 sm:p-6 flex flex-col gap-6">
         
         {/* HIGHLIGHTED MONTH EVENTS STRIP */}
+        {otherMonthEvents.length > 0 && (
+          <div className="rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/80 dark:bg-amber-950/30 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <p className="text-[11px] sm:text-xs text-amber-900 dark:text-amber-200 font-medium">
+              Há <strong>{otherMonthEvents.length}</strong> evento(s) cadastrado(s) em outros meses.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {Array.from(
+                new Set(otherMonthEvents.map((e) => `${e.year}-${e.month}`))
+              )
+                .slice(0, 4)
+                .map((key) => {
+                  const [yearStr, monthStr] = key.split("-");
+                  const year = Number(yearStr);
+                  const month = Number(monthStr);
+                  const count = otherMonthEvents.filter(
+                    (e) => e.year === year && e.month === month
+                  ).length;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => goToMonth(month, year)}
+                      className="px-2.5 py-1 rounded-lg bg-white dark:bg-amber-900/40 border border-amber-300 dark:border-amber-800 text-[11px] font-semibold text-amber-900 dark:text-amber-100 hover:bg-amber-100 dark:hover:bg-amber-900/60 transition-colors cursor-pointer"
+                    >
+                      {MONTHS_NAMES[month]}/{year} ({count})
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+        )}
+
         {monthEvents.length > 0 && (
           <div className="bg-gradient-to-r from-emerald-500/10 via-brand-primary/10 to-teal-500/10 dark:from-emerald-950/30 dark:via-brand-card-dark dark:to-teal-950/30 rounded-3xl p-4 border border-emerald-500/20 shadow-xs">
             <div className="flex items-center justify-between mb-3 px-1">
