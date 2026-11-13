@@ -77,6 +77,7 @@ import {
   listAllEventsFallback
 } from "./src/db/fallbackStore.ts";
 import { EVENT_RETENTION_DAYS } from "./src/lib/eventLifecycle.ts";
+import { validateEventDate } from "./src/lib/dateGuards.ts";
 import {
   createAuthorization,
   getAuthorizationByStudentAndEvent,
@@ -1261,6 +1262,13 @@ async function startServer() {
         });
       }
 
+      // Validação de data também no backend: o formulário já bloqueia datas
+      // passadas, mas a API é a fonte de verdade e não pode aceitá-las.
+      const dateError = validateEventDate(Number(day), Number(month), Number(year));
+      if (dateError) {
+        return res.status(400).json({ error: dateError });
+      }
+
       const creatorId = dbUser ? dbUser.id : null;
 
       const newEvent = await createNewEvent({
@@ -1329,6 +1337,19 @@ async function startServer() {
       }
 
       const { title, location, day, month, year, time, isPaid, price, requirements, website, image } = req.body;
+
+      // Ao mexer na data, valida a data resultante (campos omitidos herdam do evento atual).
+      if (day !== undefined || month !== undefined || year !== undefined) {
+        const dateError = validateEventDate(
+          Number(day !== undefined ? day : targetEvent.day),
+          Number(month !== undefined ? month : targetEvent.month),
+          Number(year !== undefined ? year : targetEvent.year)
+        );
+        if (dateError) {
+          return res.status(400).json({ error: dateError });
+        }
+      }
+
       const updatePayload: any = {};
       if (title !== undefined) updatePayload.title = String(title).trim();
       if (location !== undefined) updatePayload.location = String(location).trim();

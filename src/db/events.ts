@@ -453,12 +453,18 @@ export async function updateEventById(id: number, data: Partial<{
 }
 
 export async function deleteEventById(id: number) {
-  try {
-    deleteEventByIdFallback(id);
-  } catch (e) {}
-
+  // Em modo offline/JSON a fonte de verdade é o store em memória: uma única
+  // exclusão. Antes, o fallback era chamado duas vezes — a segunda estourava
+  // "Evento não encontrado para excluir na memória" e a rota devolvia 500.
   if (isDbCachedOffline()) {
     return deleteEventByIdFallback(id);
+  }
+
+  // Com banco online, removemos do espelho em memória para manter a UI coerente.
+  try {
+    deleteEventByIdFallback(id);
+  } catch (e) {
+    // Evento pode existir apenas no banco remoto; seguir para a exclusão real.
   }
 
   try {

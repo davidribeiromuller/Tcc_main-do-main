@@ -47,7 +47,8 @@ import {
   syncOAuthUserDirectInSupabase,
   heartbeatUserDirectInSupabase,
 } from "./lib/usersService.ts";
-import { canAccessAdminPanel } from "./lib/permissions.ts";
+import { canAccessAdminPanel, isChefeAdmin } from "./lib/permissions.ts";
+import { saveUsersCache, readUsersCache } from "./lib/userCache.ts";
 import { isEventRetentionExpired } from "./lib/eventLifecycle.ts";
 
 export default function App() {
@@ -148,11 +149,8 @@ export default function App() {
   });
   const [usersList, setUsersList] = useState<User[]>(() => {
     try {
-      const stored = localStorage.getItem("local_users_db");
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
+      const parsed = readUsersCache();
+      if (parsed && parsed.length > 0) return parsed as User[];
       return defaultUsers;
     } catch {
       return defaultUsers;
@@ -466,7 +464,7 @@ export default function App() {
         const { users: dbUsers, error: dbError } = await fetchUsersDirectFromSupabase();
         if (!dbError && Array.isArray(dbUsers) && dbUsers.length > 0) {
           setUsersList(dbUsers);
-          localStorage.setItem("local_users_db", JSON.stringify(dbUsers));
+          saveUsersCache(dbUsers);
           return;
         }
       }
@@ -485,7 +483,7 @@ export default function App() {
       const parsed = await safeParseJsonResponse<{ users?: User[] }>(res);
       if (parsed.ok && parsed.data?.users && Array.isArray(parsed.data.users) && parsed.data.users.length > 0) {
         setUsersList(parsed.data.users);
-        localStorage.setItem("local_users_db", JSON.stringify(parsed.data.users));
+        saveUsersCache(parsed.data.users);
         return;
       }
     } catch (error) {
@@ -494,16 +492,13 @@ export default function App() {
 
     // 3. Safe fallback from local storage
     try {
-      const stored = localStorage.getItem("local_users_db");
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setUsersList(parsed);
-          return;
-        }
+      const parsed = readUsersCache();
+      if (parsed && parsed.length > 0) {
+        setUsersList(parsed as User[]);
+        return;
       }
       setUsersList(defaultUsers);
-      localStorage.setItem("local_users_db", JSON.stringify(defaultUsers));
+      saveUsersCache(defaultUsers);
     } catch {
       setUsersList(defaultUsers);
     }
@@ -1035,11 +1030,11 @@ export default function App() {
       const cleanEmail = email.trim().toLowerCase();
       let localUsersList: User[] = defaultUsers;
       try {
-        const stored = localStorage.getItem("local_users_db");
-        if (stored) {
-          localUsersList = JSON.parse(stored);
+        const cached = readUsersCache();
+        if (cached && cached.length > 0) {
+          localUsersList = cached as User[];
         } else {
-          localStorage.setItem("local_users_db", JSON.stringify(defaultUsers));
+          saveUsersCache(defaultUsers);
         }
       } catch {}
 
@@ -1058,6 +1053,17 @@ export default function App() {
         const blockedMsg = "Sua conta escolar está desativada. Procure a direção da escola.";
         setLoginError(blockedMsg);
         showToast(blockedMsg, "error");
+        return;
+      }
+
+      // O cache local não guarda mais senhas (ver src/lib/userCache.ts). Se
+      // recebemos uma senha digitada e o backend/Supabase não validou, não há
+      // como autenticar offline: exigimos login online em vez de liberar acesso.
+      if (password) {
+        const offlineAuthMsg =
+          "Não foi possível validar sua senha sem conexão. Conecte-se à internet e tente novamente.";
+        setLoginError(offlineAuthMsg);
+        showToast(offlineAuthMsg, "error");
         return;
       }
 
@@ -1156,8 +1162,8 @@ export default function App() {
       const cleanEmail = data.email.trim().toLowerCase();
       let localUsersList: User[] = defaultUsers;
       try {
-        const stored = localStorage.getItem("local_users_db");
-        if (stored) localUsersList = JSON.parse(stored);
+        const cached = readUsersCache();
+        if (cached && cached.length > 0) localUsersList = cached as User[];
       } catch {}
 
       const existing = localUsersList.find(u => u.email.toLowerCase() === cleanEmail);
@@ -1189,7 +1195,7 @@ export default function App() {
       };
 
       localUsersList.push(newUser);
-      localStorage.setItem("local_users_db", JSON.stringify(localUsersList));
+      saveUsersCache(localUsersList);
       setCurrentUser(newUser);
       localStorage.setItem("local_user", JSON.stringify(newUser));
       setActiveScreen("feed");
@@ -1415,8 +1421,24 @@ export default function App() {
     }
   };
 
+  /**
+   * Trava defensiva: gestão de perfis/dados de usuário é EXCLUSIVA do Chefe
+   * Administrador. Funcionários só cadastram eventos e sugestões de eventos.
+   * A UI já esconde as ações; esta guarda protege contra chamadas indevidas.
+   */
+  const ensureChefeAdmin = (acao: string): boolean => {
+    if (isChefeAdmin(currentUser)) return true;
+    console.warn(`[Permissão] Ação bloqueada (${acao}): requer Chefe Administrador.`);
+    showToast(
+      "Ação restrita ao Chefe Administrador. Funcionários podem cadastrar eventos e sugestões.",
+      "error"
+    );
+    return false;
+  };
+
   // Admin: Update another user role/privileges
   const handleAdminUpdateUser = async (userId: number, updateData: any) => {
+    if (!ensureChefeAdmin("editar usuário")) return;
     const previousUsers = [...usersList];
     const targetUser = usersList.find(u => u.id === userId);
     const enrichedData = {
@@ -1443,7 +1465,7 @@ export default function App() {
         if (!sbError && updatedUser) {
           setUsersList(prev => {
             const updated = prev.map(u => (u.id === userId || u.id === updatedUser.id ? { ...u, ...updatedUser } : u));
-            try { localStorage.setItem("local_users_db", JSON.stringify(updated)); } catch {}
+            try { saveUsersCache(updated); } catch {}
             return updated;
           });
           await loadAllUsers();
@@ -1485,7 +1507,7 @@ export default function App() {
               return u;
             });
             try {
-              localStorage.setItem("local_users_db", JSON.stringify(updated));
+              saveUsersCache(updated);
             } catch {}
             return updated;
           });
@@ -1513,6 +1535,7 @@ export default function App() {
 
   // Admin: Delete user from database (Soft delete / Block)
   const handleAdminDeleteUser = async (userId: number) => {
+    if (!ensureChefeAdmin("bloquear usuário")) return;
     const previousUsers = [...usersList];
     const targetUser = usersList.find(u => u.id === userId);
     const targetEmail = targetUser?.email || "";
@@ -1566,6 +1589,7 @@ export default function App() {
 
   // Admin: Unblock user
   const handleAdminUnblockUser = async (userId: number) => {
+    if (!ensureChefeAdmin("desbloquear usuário")) return;
     const previousUsers = [...usersList];
     const targetUser = usersList.find(u => u.id === userId);
     const targetEmail = targetUser?.email || "";
@@ -1619,6 +1643,7 @@ export default function App() {
 
   // Admin: Permanent Delete user
   const handleAdminPermanentDeleteUser = async (userId: number) => {
+    if (!ensureChefeAdmin("excluir usuário")) return;
     const previousUsers = [...usersList];
     const targetUser = usersList.find(u => u.id === userId);
     const targetEmail = targetUser?.email || "";

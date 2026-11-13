@@ -276,9 +276,11 @@ export default function AdminPanel({
     const matchesName = u.nome ? u.nome.toLowerCase().includes(term) : false;
     const matchesEmail = u.email ? u.email.toLowerCase().includes(term) : false;
 
-    // Search by CPF (formatted with punctation or unformatted numbers)
+    // Search by CPF (formatted with punctation or unformatted numbers).
+    // Exclusivo do Chefe: caso contrário a busca funcionaria como oráculo para
+    // descobrir o CPF de um aluno digitando números.
     let matchesCpf = false;
-    if (u.cpf) {
+    if (isChefe && u.cpf) {
       const uCpfClean = u.cpf.toLowerCase();
       const uCpfDigits = u.cpf.replace(/\D/g, "");
       matchesCpf =
@@ -908,9 +910,11 @@ export default function AdminPanel({
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder={
-                      activeTab === "blocked"
-                        ? "Buscar contas bloqueadas por nome, e-mail ou CPF..."
-                        : "Buscar usuários em tempo real por nome, e-mail ou CPF..."
+                      isChefe
+                        ? activeTab === "blocked"
+                          ? "Buscar contas bloqueadas por nome, e-mail ou CPF..."
+                          : "Buscar usuários em tempo real por nome, e-mail ou CPF..."
+                        : "Buscar usuários por nome, e-mail funcional, função ou instituição..."
                     }
                     className="w-full h-10 pl-10 pr-10 text-xs bg-white dark:bg-brand-card-dark border border-brand-primary/20 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-accent text-brand-text-light dark:text-brand-text-dark placeholder-slate-400 shadow-2xs transition-all"
                   />
@@ -1074,8 +1078,8 @@ export default function AdminPanel({
                 <p className="font-semibold">Diretório Geral de Usuários do eloEscola:</p>
                 <p className="text-[11px] opacity-90 mt-0.5">
                   {isChefe
-                    ? "Como Chefe Administrador, você possui permissão total para alterar permissões, editar dados cadastrais, suspender ou excluir contas."
-                    : "Como Funcionário Administrador, você tem acesso de consulta ao diretório completo para suporte escolar aos estudantes e responsáveis."}
+                    ? "Como Chefe Administrador, você possui permissão total para alterar permissões, editar dados cadastrais, consultar dados pessoais, suspender ou excluir contas."
+                    : "Como Funcionário Administrador, você tem acesso apenas aos dados institucionais (nome, e-mail funcional, função e status). Dados pessoais e a gestão de contas são exclusivos do Chefe Administrador. Você pode cadastrar eventos e sugestões de eventos."}
                 </p>
               </div>
             </div>
@@ -1090,7 +1094,9 @@ export default function AdminPanel({
                 </p>
                 <p className="text-xs text-slate-400 mt-1 max-w-sm">
                   {searchTerm.trim()
-                    ? "Verifique se o nome, e-mail ou CPF digitado está correto."
+                    ? isChefe
+                      ? "Verifique se o nome, e-mail ou CPF digitado está correto."
+                      : "Verifique se o nome, e-mail ou instituição digitado está correto."
                     : "Verifique o termo digitado na barra de pesquisa ou os filtros acima."}
                 </p>
                 {searchTerm.trim() && (
@@ -1170,7 +1176,7 @@ export default function AdminPanel({
                                     <span className="truncate">
                                       {u.institution || "C.E. Helena Wysocki"}
                                     </span>
-                                    {u.cpf && (
+                                    {isChefe && u.cpf && (
                                       <span className="text-[10px] font-mono text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-white/10 px-1.5 py-0.2 rounded border border-slate-200/80 dark:border-white/10">
                                         CPF: {u.cpf}
                                       </span>
@@ -1361,7 +1367,7 @@ export default function AdminPanel({
                             <span className="text-xs text-slate-500 dark:text-slate-400 font-mono block truncate mt-0.5">
                               {u.email}
                             </span>
-                            {u.cpf && (
+                            {isChefe && u.cpf && (
                               <span className="inline-block text-[10px] font-mono text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-white/10 px-1.5 py-0.5 rounded border border-slate-200/80 dark:border-white/10 mt-1">
                                 CPF: {u.cpf}
                               </span>
@@ -1422,22 +1428,20 @@ export default function AdminPanel({
                         </span>
                       </div>
 
-                      {/* Action buttons: [Visualizar] [Ações] */}
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => { setUserToViewDetails(u); setShowUserPassword(false); setPasswordCopied(false); }}
-                          className={`h-10 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 border border-slate-200 dark:border-white/10 bg-slate-50 hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 ${
-                            isChefe ? "flex-1" : "w-full"
-                          }`}
-                          title="Visualizar ficha completa"
-                        >
-                          <Eye size={14} />
-                          <span>Visualizar</span>
-                        </button>
+                      {/* Action buttons: [Visualizar] [Ações] — exclusivos do Chefe Admin */}
+                      {isChefe ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => { setUserToViewDetails(u); setShowUserPassword(false); setPasswordCopied(false); }}
+                            className="flex-1 h-10 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 border border-slate-200 dark:border-white/10 bg-slate-50 hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200"
+                            title="Visualizar ficha completa (dados pessoais)"
+                          >
+                            <Eye size={14} />
+                            <span>Visualizar</span>
+                          </button>
 
-                        {/* [Ações] Only for Chefe Admin */}
-                        {isChefe && (
+                          {/* [Ações] Only for Chefe Admin */}
                           <button
                             type="button"
                             onClick={() => setUserForMobileActions(u)}
@@ -1447,8 +1451,12 @@ export default function AdminPanel({
                             <MoreVertical size={14} />
                             <span>Ações</span>
                           </button>
-                        )}
-                      </div>
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-slate-400 dark:text-slate-500 italic text-center py-2">
+                          Dados pessoais restritos ao Chefe Administrador
+                        </div>
+                      )}
                       </div>
                     </div>
                   );
@@ -1485,7 +1493,9 @@ export default function AdminPanel({
                 </p>
                 <p className="text-xs text-slate-400 mt-1 max-w-sm">
                   {searchTerm.trim()
-                    ? "Tente pesquisar por outro nome, e-mail ou CPF."
+                    ? isChefe
+                      ? "Tente pesquisar por outro nome, e-mail ou CPF."
+                      : "Tente pesquisar por outro nome, e-mail ou instituição."
                     : "Todos os usuários cadastrados estão com acesso regular às funcionalidades do portal escolar."}
                 </p>
                 {searchTerm.trim() && (
@@ -1538,7 +1548,7 @@ export default function AdminPanel({
                                     <span className="truncate">
                                       {u.institution || "C.E. Helena Wysocki"}
                                     </span>
-                                    {u.cpf && (
+                                    {isChefe && u.cpf && (
                                       <span className="text-[10px] font-mono text-slate-600 dark:text-slate-300 bg-red-100/60 dark:bg-white/10 px-1.5 py-0.2 rounded border border-red-200/60 dark:border-white/10">
                                         CPF: {u.cpf}
                                       </span>
@@ -1638,7 +1648,7 @@ export default function AdminPanel({
                             <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono block truncate mt-0.5">
                               {u.email}
                             </span>
-                            {u.cpf && (
+                            {isChefe && u.cpf && (
                               <span className="inline-block text-[10px] font-mono text-red-700 dark:text-red-300 bg-red-100/60 dark:bg-white/10 px-1.5 py-0.5 rounded border border-red-200/60 dark:border-white/10 mt-1">
                                 CPF: {u.cpf}
                               </span>
@@ -3276,8 +3286,8 @@ export default function AdminPanel({
             </motion.div>
           </div>
         )}
-        {/* MODAL: Visualizar Detalhes do Usuário (Consulta Read-Only para Chefe e Funcionário) */}
-        {userToViewDetails && (
+        {/* MODAL: Visualizar Detalhes do Usuário (dados pessoais — EXCLUSIVO do Chefe Admin) */}
+        {userToViewDetails && isChefe && (
           <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 15 }}
@@ -3371,7 +3381,8 @@ export default function AdminPanel({
                     </div>
                   )}
 
-                  {/* Senha da conta — visível apenas para administradores */}
+                  {/* Senha da conta — EXCLUSIVO do Chefe Administrador */}
+                  {isChefe && (
                   <div className="rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-900/40 p-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-slate-600 dark:text-slate-300 flex items-center gap-1.5 shrink-0">
@@ -3425,9 +3436,10 @@ export default function AdminPanel({
                       </div>
                     </div>
                     <p className="text-[10px] text-amber-700/80 dark:text-amber-400/70 mt-1 leading-snug">
-                      Visível apenas para administradores. Oriente o usuário a trocar no primeiro acesso.
+                      Visível apenas para o Chefe Administrador. Oriente o usuário a trocar no primeiro acesso.
                     </p>
                   </div>
+                  )}
 
                   <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-black/20 border border-slate-100 dark:border-white/5">
                     <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
