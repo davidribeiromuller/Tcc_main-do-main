@@ -409,6 +409,50 @@ async function chamarModelo(
 // ============================================================
 // Deduplicação
 // ============================================================
+/**
+ * Colunas que realmente existem em `event_suggestions`.
+ *
+ * ## O bug que isto corrige (500 persistente)
+ *
+ * O motor local monta o candidato com `is_school` (`localEventEngine.ts`),
+ * porque a informação é útil em memória para classificar o evento. Mas
+ * `is_school` **não é coluna da tabela** — o PostgREST responde:
+ *
+ *   PGRST204: Could not find the 'is_school' column of 'event_suggestions'
+ *             in the schema cache
+ *
+ * O candidato da IA era montado campo por campo (limpo); o do motor local ia
+ * cru para o lote, e o `.insert()` é único para todos. Um campo sobrando
+ * invalidava a gravação inteira — daí a fila vazia e o 500 sempre que o motor
+ * local gerava algo.
+ *
+ * A correção não é "tirar is_school do engine" (alguém reintroduziria amanhã):
+ * é filtrar o lote contra a lista explícita de colunas, na fronteira com o
+ * banco. Campo desconhecido é descartado, não vira erro de runtime.
+ */
+const COLUNAS_EVENT_SUGGESTIONS = [
+  "title", "location", "address", "city", "category", "description",
+  "requirements", "website", "image", "day", "month", "year", "time",
+  "is_paid", "price", "school_name", "source_name", "source_url",
+  "ai_confidence", "ai_reasoning", "fingerprint", "status", "origin",
+  "is_estimated",
+] as const;
+
+/**
+ * Reduz um candidato às colunas existentes.
+ *
+ * Mantém `null`/`false`/`0` (valores válidos) e remove `undefined`, para não
+ * sobrescrever defaults do banco.
+ */
+function sanearParaInsercao(candidato: Record<string, any>): Record<string, any> {
+  const limpo: Record<string, any> = {};
+  for (const coluna of COLUNAS_EVENT_SUGGESTIONS) {
+    const valor = candidato[coluna];
+    if (valor !== undefined) limpo[coluna] = valor;
+  }
+  return limpo;
+}
+
 function fingerprint(s: {
   title: string;
   day: number;
@@ -888,7 +932,15 @@ Deno.serve(async (req: Request) => {
       }
       aceitos.push(s);
     }
-    const lote = aceitos;
+    /**
+     * Saneamento final, na fronteira com o banco.
+     *
+     * Aplicado ao lote inteiro (motor local + IA) para que nenhuma fonte
+     * derrube a inserção com uma coluna inventada.
+     */
+    const lote = aceitos
+      .map((c) => sanearParaInsercao(c as Record<string, any>))
+      .filter((c) => Object.keys(c).length > 0);
 
     if (lote.length === 0) {
       return respostaJson({
@@ -940,6 +992,37 @@ Deno.serve(async (req: Request) => {
         codigo === "42P10" ||
         mensagem.includes("duplicate key") ||
         mensagem.includes("ON CONFLICT");
+
+      /**
+       * Coluna inexistente (PGRST204).
+       *
+       * Não deve acontecer depois do saneamento, mas se alguém adicionar um
+       * campo novo ao motor local sem migração, a função precisa dizer o que
+       * houve — em vez de devolver "500 Internal Server Error" e deixar o
+       * admin sem pista (foi exatamente o que aconteceu com `is_school`).
+       */
+      const ehColunaInvalida =
+        codigo === "PGRST204" || mensagem.includes("schema cache");
+
+      if (ehColunaInvalida) {
+        console.error(
+          "[ai-event-scout] Insert rejeitado por coluna inexistente:",
+          mensagem,
+          "| colunas enviadas:",
+          Object.keys(lote[0] ?? {}).join(", ")
+        );
+        return respostaJson(
+          {
+            success: false,
+            inseridas: 0,
+            error:
+              "O banco recusou a gravação por uma coluna inexistente. " +
+              "Isso é um problema de configuração do app, não seu. " +
+              `Detalhe técnico: ${mensagem}`,
+          },
+          500
+        );
+      }
 
       if (ehDuplicata) {
         return respostaJson({

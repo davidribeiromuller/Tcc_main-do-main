@@ -666,3 +666,112 @@ cabeçalho (props `theme`/`onToggleTheme`), com `aria-label` que reflete o estad
   parser: lat/lng, cidade e nome curto corretos.
 - `tsc --noEmit`: 0 erros · `npm run build`: ok.
 - Bundle da Edge Function: 71843 bytes, 5 módulos resolvidos, sem import órfão.
+
+---
+
+## 15. Rodada 11 — correção do 500, tema na introdução e acessibilidade por voz
+
+### 15.1 O erro 500 persistente do `ai-event-scout`
+
+Screenshot enviado pelo usuário:
+
+```
+ai-event-scout  400  (POST /functions/v1/ai-event-scout)
+Could not find the 'is_school' column of 'event_suggestions' in the schema cache
+```
+
+**Causa raiz**: o motor local (`localEventEngine.ts`) marca cada candidato com
+`is_school` — e isso está **certo**, é um conceito do domínio (evento escolar ×
+aberto ao público), usado no filtro de localidade/escolaridade. O problema é que
+`event_suggestions` **não tem essa coluna** (31 colunas, verificadas no banco).
+O lote era enviado cru, o PostgREST respondia `PGRST204`, e o tratamento de erro
+só conhecia `23505` (duplicata) e `42P10` — então a exceção virava **500**, a
+fila de sugestões ficava vazia e todo mundo que abria a aba via o erro.
+
+**Correção em três camadas** (sem remover nenhuma condicionalidade existente):
+
+1. **Na fronteira de gravação** — `COLUNAS_EVENT_SUGGESTIONS` (as 23 colunas
+   reais) + `sanearParaInsercao()`, que monta cada linha só com o que existe no
+   banco. `is_school` continua no schema interno; é descartado apenas no
+   `INSERT`.
+2. **No tratamento de erro** — bloco para `PGRST204`/`schema cache` que devolve
+   500 **legível** ("O banco recusou a gravação por uma coluna inexistente…") e
+   registra em `console.error` a lista exata de colunas enviadas. Se o schema
+   mudar de novo, o diagnóstico aparece na hora em vez de virar erro opaco.
+3. **Nada do resto mudou**: aprovação humana, datas futuras, bloqueio de
+   balada/rave, memória de rejeição e independência de `AI_MODEL` intactos.
+
+**Verificação**: função v15 `ACTIVE`; reprodução local com `runLocalEventEngine`
+encontrou `is_school` como campo inválido e confirmou **13/13 candidatos
+preservados, 0 inválidos após sanitização**; `INSERT` real com as 23 colunas
+executado dentro de transação e revertido (`ROLLBACK`) — aceito pelo banco.
+
+### 15.2 Modo escuro na tela de introdução
+
+A tela já tinha ~40 classes `dark:` prontas, mas o tema só chegava ao
+`MobileHeader` e ao `AdminPanel`: para trocar antes do login era preciso entrar e
+ir em Configurações. Adicionadas as props `theme`/`onToggleTheme` ao
+`WelcomeScreen` e um botão Lua/Sol no cabeçalho, ao lado de "Entrar" — com
+`aria-label` que reflete o estado e `title` em português.
+
+### 15.3 Login Google
+
+Já era enviado `prompt: "select_account"` desde a rodada anterior. O Google
+decide o que listar conforme o navegador: o seletor mostra as contas **já
+logadas naquele navegador**. Não é limitação do app, e não há como forçar a
+listagem de contas fora da sessão do navegador — só entrando com "Usar outra
+conta".
+
+### 15.4 Acessibilidade por voz (escopo completo)
+
+Antes: o assistente só funcionava por texto. Para quem tem dificuldade de
+leitura, visão ou digitação, o app inteiro ficava inacessível.
+
+**Arquivos novos**
+
+- `src/lib/voiceAccessibility.ts` — falar (`speechSynthesis`), ouvir
+  (`SpeechRecognition`) e `limparParaFala()`, que remove Markdown/emoji antes da
+  leitura (senão o sintetizador fala "asterisco asterisco").
+- `src/lib/voiceActions.ts` — interpreta a instrução (falada ou escrita) e a
+  converte em ação: tema, navegação, leitura de tela, preenchimento de evento.
+  Inclui `extrairCamposEvento` (título, data, hora, local, gratuito/pago) e
+  `ehConfirmacao`.
+
+**`AIChatAssistant.tsx`** ganhou: botão de microfone (só aparece se o navegador
+suportar), leitura em voz alta por mensagem e automática (desligada por padrão),
+texto parcial enquanto ouve, e botões Sim/Não para ações pendentes.
+
+**`App.tsx`** monta o `ContextoAcoes` (`descreverTelaAtual`, navegação, tema,
+pré-rascunho de evento). `descreverTelaAtual` monta o resumo falado a partir do
+**estado** — não raspa o DOM, porque o leitor de tela do navegador já faz isso;
+o que faltava era um resumo curto, com a informação que importa em cada tela.
+
+**Decisões de segurança e privacidade**
+
+- O microfone **só liga por toque** — exigência dos navegadores e garantia de
+  que o usuário saiba que está sendo ouvido.
+- A leitura automática começa **desligada**: falar sem pedir é invasivo em
+  ambiente escolar.
+- Ao abrir o microfone, qualquer leitura em andamento é interrompida; senão o
+  assistente reconheceria a própria voz como comando.
+- **Ações que gravam dados nunca executam direto.** "Crie um evento…" abre o
+  formulário preenchido, pergunta antes e, mesmo confirmado, apenas prepara o
+  cadastro — **publicar continua sendo um clique humano**. A regra de aprovação
+  humana do projeto permanece inviolável.
+- Confirmação ambígua conta como **não** ("não, pode deixar" não publica nada).
+
+**Validação** — `test-round11.mjs`: **64/64**
+
+| Grupo | Casos |
+|---|---|
+| Limpeza de Markdown para fala | 7 |
+| Tema (claro/escuro/alternar) | 7 |
+| Leitura de tela e parar leitura | 6 |
+| Navegação | 7 |
+| Criar evento exige confirmação | 9 |
+| Extração de campos (variações de data/hora/local) | 10 |
+| Confirmação (inclui negação com prioridade) | 9 |
+| Execução respeita o estado do tema | 5 |
+| Pergunta comum não vira ação | 4 |
+
+`tsc --noEmit`: 0 erros · `npm run build`: ok.

@@ -22,6 +22,7 @@ import { SchoolDetail } from "./components/SchoolDetail.tsx";
 import { SchoolsCatalog } from "./components/SchoolsCatalog.tsx";
 import SchoolPortal from "./components/SchoolPortal.tsx";
 import AIChatAssistant from "./components/AIChatAssistant.tsx";
+import type { ContextoAcoes, CamposEvento } from "./lib/voiceActions.ts";
 import { getSchoolBySlug, ARAUCARIA_SCHOOLS, SchoolProfile } from "./lib/schoolsData.ts";
 import { motion, AnimatePresence } from "motion/react";
 import { CheckCircle, AlertCircle, CheckCircle2, Info, X } from "lucide-react";
@@ -435,6 +436,125 @@ export default function App() {
 
   const toggleTheme = () => {
     setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+  };
+
+  /**
+   * Dados de evento pedidos por voz/chat, aguardando revisão no painel.
+   *
+   * O assistente NUNCA publica: ele só prepara o formulário. Guardamos aqui
+   * porque a ação nasce no chat (que pode estar aberto em qualquer tela) e o
+   * formulário vive dentro do AdminPanel.
+   */
+  const [eventoPreRascunho, setEventoPreRascunho] = useState<CamposEvento | null>(null);
+
+  /**
+   * Descreve a tela atual em texto — é o que o assistente lê em voz alta
+   * quando o usuário pede "leia a tela".
+   *
+   * Feito a partir do estado (e não raspando o DOM) porque o leitor de tela
+   * do navegador já faz o DOM: o que faltava era um resumo curto e falado,
+   * com a informação que importa em cada tela.
+   */
+  const descreverTelaAtual = (): string => {
+    const nomeTela: Record<string, string> = {
+      welcome: "Tela de introdução do eloEscola",
+      feed: "Mural de Eventos",
+      schools: "Catálogo de Escolas",
+      schoolDetail: "Detalhes da escola",
+      eventDetail: "Detalhes do evento",
+      calendar: "Calendário",
+      map: "Mapa",
+      settings: "Configurações",
+      admin: "Painel de Controle",
+      contact: "Contato",
+      login: "Tela de Entrar",
+      register: "Tela de Cadastro",
+      schoolPortal: "Portal da Escola",
+    };
+
+    const partes: string[] = [];
+    partes.push(nomeTela[activeScreen] ?? `Tela ${activeScreen}`);
+    partes.push(`Tema ${theme === "dark" ? "escuro" : "claro"}.`);
+
+    if (currentUser) {
+      partes.push(`Você está conectado como ${currentUser.nome}.`);
+    } else {
+      partes.push("Você não está conectado.");
+    }
+
+    if (activeScreen === "feed" || activeScreen === "welcome") {
+      const agora = new Date();
+      const proximos = events
+        .filter((e) => {
+          const data = new Date(e.year, e.month, e.day);
+          return data >= new Date(agora.getFullYear(), agora.getMonth(), agora.getDate());
+        })
+        .sort(
+          (a, b) =>
+            new Date(a.year, a.month, a.day).getTime() - new Date(b.year, b.month, b.day).getTime()
+        )
+        .slice(0, 3);
+
+      if (proximos.length > 0) {
+        partes.push(
+          `Próximos eventos: ${proximos
+            .map((e) => `${e.title}, em ${e.day} de ${new Date(e.year, e.month, 1).toLocaleDateString("pt-BR", { month: "long" })}`)
+            .join("; ")}.`
+        );
+      } else {
+        partes.push("Não há eventos futuros cadastrados no momento.");
+      }
+    }
+
+    if (activeScreen === "schools") {
+      partes.push(`São ${ARAUCARIA_SCHOOLS.length} escolas de Araucária disponíveis para consulta.`);
+    }
+
+    if (activeScreen === "map") {
+      partes.push(
+        "O mapa mostra os eventos e escolas próximos. Use o botão de localização para centralizar em você."
+      );
+    }
+
+    if (activeScreen === "admin") {
+      partes.push(
+        canAccessAdminPanel(currentUser)
+          ? "No painel você pode gerenciar usuários, eventos e sugestões."
+          : "Esta tela é restrita ao Chefe Administrador."
+      );
+    }
+
+    partes.push(
+      "Você pode dizer: leia a tela, ativar modo escuro, abrir o mapa, ou criar um evento."
+    );
+
+    return partes.join(" ");
+  };
+
+  /** Contexto entregue ao Assistente Elo para ele poder agir. */
+  const contextoAcoes: ContextoAcoes = {
+    temaAtual: theme,
+    alternarTema: () => {
+      const novo = theme === "dark" ? "light" : "dark";
+      setTheme(novo);
+      return novo;
+    },
+    navegar: (tela) => navigateTo(tela),
+    descreverTela: descreverTelaAtual,
+    pararLeitura: () => {
+      try {
+        window.speechSynthesis?.cancel();
+      } catch {
+        /* navegador sem suporte */
+      }
+    },
+    preencherEvento: (campos) => {
+      // Não grava nada: só leva o usuário ao painel com o formulário pronto
+      // para revisão. Publicar continua sendo decisão humana.
+      setEventoPreRascunho(campos);
+      navigateTo("admin");
+    },
+    usuario: currentUser,
   };
 
   // Toast notification system
@@ -1805,6 +1925,8 @@ export default function App() {
               onGuestLogin={handleGuestLogin}
               onSelectSchool={(slug) => navigateTo("schoolDetail", slug)}
               events={events}
+              theme={theme}
+              onToggleTheme={toggleTheme}
             />
           </motion.div>
         )}
@@ -2054,6 +2176,8 @@ export default function App() {
                       onRefreshEvents={() => { void loadEvents(); }}
                       theme={theme}
                       onToggleTheme={toggleTheme}
+                      preRascunho={eventoPreRascunho}
+                      onConsumirPreRascunho={() => setEventoPreRascunho(null)}
                     />
                   </motion.div>
                 )}
@@ -2193,7 +2317,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* Assistente Elo Virtual Floating Assistant */}
-      <AIChatAssistant />
+      <AIChatAssistant contextoAcoes={contextoAcoes} />
 
     </div>
   );
