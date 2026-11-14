@@ -12,6 +12,7 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "sync:local-engine": "node scripts/sync-local-engine.mjs",
+    "sync:rejection-memory": "node scripts/sync-rejection-memory.mjs",
     "sync:local-engine:check": "node scripts/sync-local-engine.mjs --check",
     "bundle:edge": "node scripts/bundle-edge-function.mjs",
     "bundle:edge:check": "node scripts/bundle-edge-function.mjs --check"

@@ -213,12 +213,52 @@ export default function MapView({
     }
   };
 
+  /**
+   * Normaliza para comparar busca com endereço.
+   *
+   * O filtro antigo fazia `includes` direto na string: procurar "rua das
+   * flores" não achava "Rua das Flores, 123" (caixa) e "araucaria" não achava
+   * "Araucária" (acento). Além disso, o endereço do evento nem era consultado.
+   */
+  const normalizarBusca = (valor: string | null | undefined) =>
+    (valor || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+
+  const termoBusca = normalizarBusca(searchQuery);
+
+  /**
+   * Todos os campos de texto do evento que podem conter um endereço.
+   *
+   * `location` guarda o endereço curto escolhido na busca ("Rua X, 123 -
+   * Centro"), e o serviço também preenche `endereco` em `eventos`. O bairro e a
+   * cidade entram para permitir busca por região.
+   */
+  const camposDeEndereco = (ev: Event): string[] =>
+    [
+      ev.title,
+      ev.location,
+      ev.city,
+      (ev as any).address,
+      (ev as any).neighborhood,
+      (ev as any).schoolName,
+      (ev as any).category,
+    ].map(normalizarBusca);
+
   // Filter events
   const filteredEvents = events.filter((ev) => {
+    // Vazio = sem filtro (antes, `includes("")` já devolvia tudo, mas a lógica
+    // ficava implícita e quebrava ao normalizar).
     const matchesSearch =
-      ev.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      ev.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (ev.city && ev.city.toLowerCase().includes(searchQuery.toLowerCase()));
+      termoBusca === "" ||
+      camposDeEndereco(ev).some((campo) => campo.includes(termoBusca)) ||
+      // Busca multi-palavra em qualquer ordem: "flores rua" acha
+      // "Rua das Flores, 123".
+      termoBusca.split(/\s+/).filter(Boolean).every((parte) =>
+        camposDeEndereco(ev).some((campo) => campo.includes(parte))
+      );
 
     if (!matchesSearch) return false;
 
@@ -232,11 +272,25 @@ export default function MapView({
   // Filter schools
   const filteredSchools = ARAUCARIA_SCHOOLS.filter((school) => {
     if (selectedCategory === "curitiba") return false;
-    const matchesSearch =
-      school.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      school.shortName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      school.neighborhood.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesSearch;
+    if (termoBusca === "") return true;
+
+    // Agora inclui o endereço completo e o CEP: o usuário pode pesquisar
+    // "Rua das Flores" ou "83700" e encontrar a escola, não só pelo nome.
+    const campos = [
+      school.name,
+      school.shortName,
+      school.neighborhood,
+      school.address,
+      school.cep,
+      school.city,
+    ].map(normalizarBusca);
+
+    return (
+      campos.some((campo) => campo.includes(termoBusca)) ||
+      termoBusca.split(/\s+/).filter(Boolean).every((parte) =>
+        campos.some((campo) => campo.includes(parte))
+      )
+    );
   });
 
   const [mapLayerType, setMapLayerType] = useState<"m" | "s" | "y" | "p">("m");

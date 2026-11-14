@@ -95,6 +95,50 @@ export default function App() {
         if (path === "/login") return "login";
         if (path === "/settings" || path === "/configuracoes") return "settings";
         if (path === "/admin") return "admin";
+
+        /**
+         * Compatibilidade com o GitHub Pages.
+         *
+         * O `deploy.yml` publica em `/Tcc_main-do-main/`, então a URL real é
+         * `.../Tcc_main-do-main/admin`. O caminho comparado acima é o que vem
+         * depois do base? Não — `location.pathname` traz o base junto, então
+         * nenhuma dessas comparações casa em produção e a tela inicial de
+         * qualquer recarregamento caía em "splash" → "welcome". Por isso o app
+         * parecia "voltar para o início" sozinho depois de um tempo ou de uma
+         * ação.
+         *
+         * Aqui desfazemos o base e, se ainda assim não houver rota conhecida,
+         * restauramos a última tela válida da sessão.
+         */
+        const base = (import.meta.env?.BASE_URL || "/").toLowerCase();
+        const semBase =
+          base.length > 1 && path.startsWith(base)
+            ? path.slice(base.length - 1)
+            : path;
+
+        if (semBase !== "/") {
+          const porRota: Record<string, string> = {
+            "/escolas": "schools",
+            "/map": "map",
+            "/mapa": "map",
+            "/calendar": "calendar",
+            "/calendario": "calendar",
+            "/feed": "feed",
+            "/eventos": "feed",
+            "/login": "login",
+            "/settings": "settings",
+            "/configuracoes": "settings",
+            "/admin": "admin",
+          };
+          if (porRota[semBase]) return porRota[semBase];
+          if (semBase.startsWith("/escolas/") && semBase.length > 9) return "schoolDetail";
+        }
+
+        // Última tela conhecida nesta sessão de navegação.
+        const ultima = sessionStorage.getItem("ultima_tela");
+        if (ultima && !["splash", "welcome", "login", "register", "recovery"].includes(ultima)) {
+          return ultima;
+        }
       }
     } catch {}
     return "splash";
@@ -192,6 +236,12 @@ export default function App() {
   // Universal Navigation & Browser History Sync (Etapa 7)
   const navigateTo = (screen: string, param?: string | number) => {
     setActiveScreen(screen);
+    try {
+      // Lembra a tela para sobreviver a um recarregamento (Splash/refresh).
+      // Sem isso o app reabria em "splash" → "welcome" e dava a impressão de
+      // voltar sozinho ao início.
+      sessionStorage.setItem("ultima_tela", screen);
+    } catch {}
     try {
       let path = `/${screen}`;
       if (screen === "welcome") path = "/";
@@ -1321,7 +1371,9 @@ export default function App() {
         if (success) {
           await loadEvents();
           showToast("Evento removido com sucesso.", "info");
-          setActiveScreen("feed");
+          // NÃO trocar de tela: excluir um evento é uma ação do painel, e mandar
+          // o admin para o feed fazia parecer que o app "voltava ao início"
+          // depois de cada exclusão.
           return;
         }
       }
@@ -1343,7 +1395,7 @@ export default function App() {
       if (res && res.ok) {
         await loadEvents();
         showToast("Evento removido com sucesso.", "info");
-        setActiveScreen("feed");
+        // Permanecer na tela atual (painel/feed), sem redirecionar.
         return;
       }
 
@@ -2000,6 +2052,8 @@ export default function App() {
                       currentUser={currentUser}
                       onShowToast={showToast}
                       onRefreshEvents={() => { void loadEvents(); }}
+                      theme={theme}
+                      onToggleTheme={toggleTheme}
                     />
                   </motion.div>
                 )}
