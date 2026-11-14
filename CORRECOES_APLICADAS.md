@@ -554,3 +554,115 @@ fora dele.
   `user_geolocation_coords` ou de coordenada fixa como posição do usuário.
 - Edge Function v13: os três cenários de gravação conferidos; bundle sincronizado.
 - `tsc --noEmit`: 0 erros · `npm run build`: ok (5,43 s).
+
+---
+
+## 14. Rodada 10 — memória de rejeição, busca de endereço, exclusão e navegação
+
+Cinco problemas relatados em uso real. Todos reproduzidos antes de corrigir.
+
+### 14.1 Memória de rejeição: a IA repetia o que já tinha sido recusado
+
+**Diagnóstico (com dados do banco, não suposição).** A Edge Function já lia o
+histórico de `event_suggestions` e descartava repetições — mas o filtro comparava
+**título + data** por similaridade de palavras (Jaccard ≥ 0,6). A IA reescreve o
+título a cada chamada, então o mesmo evento voltava com outra roupa:
+
+| Já decidido | Sugestão "nova" | Jaccard |
+|---|---|---|
+| Feira de Profissões da PUCPR | Feira de Cursos e Profissões da UFPR | 0,25 |
+| Mostra de Inovação e Tecnologia de Araucária | Mostra de Ciência e Tecnologia da UTFPR | 0,33 |
+| JEPS — Jogos Escolares do Paraná | Jogos Escolares do Paraná (Fase Municipal) | 0,50 |
+| Feira de Ciências e Tecnologia da UTFPR | Mostra de Ciência e Tecnologia da UTFPR | 0,33 |
+
+Todos abaixo do limiar. Baixar o limiar faria eventos diferentes colidirem.
+
+Além disso o histórico era consultado **depois** de o motor local já ter gerado
+os candidatos, então o catálogo fixo voltava inteiro em toda rodada.
+
+**Correção** — `src/lib/rejectionMemory.ts` **(novo)**:
+
+- extrai o **tópico** do evento (o assunto), ignorando ruído de vocabulário:
+  conectivos, tipo de evento (`feira`/`mostra`/`olimpíada`) e qualificadores
+  trocáveis (`nacional`, `municipal`, `1ª fase`, anos);
+- dicionário de **sinônimos**: `ciências`/`inovação` → `ciencia`,
+  `profissões`/`carreiras` → `profissao`, `informática`/`programação` → `computacao`;
+- siglas (`OBMEP`, `JEPS`, `MOBFOG`) são preservadas como tópico;
+- nomes de instituição (`UFPR`, `UTFPR`, `PUCPR`) **não** identificam evento —
+  sem isso, rejeitar um vestibular esconderia a feira de cursos da mesma
+  universidade;
+- genéricos de app escolar (`escola`, `estudantil`, `alunos`) e cidades não
+  entram como tópico.
+
+Ligado em três pontos:
+1. `runLocalEventEngine({ excludeTitles })` — a memória alimenta a geração na
+   origem, então o catálogo fixo não devolve o que já foi decidido;
+2. a Edge Function lê os títulos decididos **antes** de gerar e passa para o motor;
+3. candidatos da IA passam pela mesma memória, sem exigir data próxima;
+4. o prompt recebe a lista do que não repetir (reduz desperdício de vagas).
+
+`npm run sync:rejection-memory` gera a cópia para o Deno
+(`supabase/functions/ai-event-scout/rejectionMemory.ts`).
+
+### 14.2 Exclusão de eventos: dizia "removido" sem remover
+
+`deleteEventDirectInSupabase` marcava `anySuccess = true` sempre que o PostgREST
+**não devolvia erro** — mas `DELETE` que não casa nenhuma linha também devolve
+`error: null`. Resultado: apagar um id que existia só em `eventos` marcava
+sucesso em `events` sem apagar nada, e a UI anunciava "Evento removido" com o
+evento ainda na tela.
+
+**Correção**: `.select("id")` e o sucesso passa a depender de **linhas realmente
+removidas**. O mesmo defeito existia no `update` e foi corrigido do mesmo jeito.
+
+### 14.3 O app voltava sozinho para a tela inicial
+
+Duas causas independentes:
+
+- **Excluir evento** chamava `setActiveScreen("feed")` nos dois caminhos de
+  sucesso — o admin era expulso do painel a cada exclusão. Removido.
+- **Recarregamento** caía em `splash` → `welcome`. O `deploy.yml` publica em
+  `/Tcc_main-do-main/`, então `location.pathname` é `.../Tcc_main-do-main/admin`
+  e nenhuma comparação com `/admin` casava. Corrigido desfazendo o `BASE_URL` e,
+  quando a rota não é conhecida, restaurando a última tela da sessão
+  (`sessionStorage.ultima_tela`).
+
+### 14.4 Busca por endereço de rua
+
+Não existia geocoding no projeto: "Localização / Endereço" era texto livre e o
+evento era salvo **sem coordenadas** (o mapa estimava a posição por índice).
+
+**Correção**:
+- `src/lib/addressSearch.ts` **(novo)** — Nominatim/OpenStreetMap (gratuito, sem
+  chave), restrito ao Brasil e enviesado para Araucária/Curitiba; cache em
+  memória e fila de 1 req/s conforme a política de uso; geocoding reverso;
+  **fallback** para o catálogo local de escolas se o serviço cair.
+- `src/components/AddressSearchInput.tsx` **(novo)** — autocomplete com
+  `debounce` de 600 ms, navegação por teclado (↑ ↓ Enter Esc), `aria-*` e
+  rótulo associado. Substitui os dois campos de texto livre do `AdminPanel`.
+- Colunas `lat`/`lng` criadas em `events` e `eventos` (mais `bairro` em
+  `eventos`); gravação, atualização e leitura passaram a carregá-las.
+- `MapView` passou a filtrar por endereço, bairro, CEP e cidade, com
+  normalização (acento/caixa) e busca multi-palavra em qualquer ordem.
+
+### 14.5 Modo escuro no painel
+
+O painel já tinha todas as classes `dark:`, mas não havia como acionar o tema
+estando nele — era preciso ir em Configurações. Adicionado alternador no
+cabeçalho (props `theme`/`onToggleTheme`), com `aria-label` que reflete o estado.
+
+### Validação executada
+
+| Suíte | Resultado |
+|---|---|
+| Memória de rejeição (dados reais do banco + motor local) | 28/28 |
+| Busca de endereço (geocoding, cache, erros, fallback) | 22/22 |
+| Exclusão de eventos (inclui o bug original documentado) | 13/13 |
+| Campo de endereço (jsdom: debounce, seleção, teclado, a11y) | 22/22 |
+| Restauração de tela / GitHub Pages | 22/22 |
+| Modo escuro no painel (jsdom + cobertura `dark:`) | 12/12 |
+
+- Resposta **real** do Nominatim (`Rua das Flores, Araucária`) validada contra o
+  parser: lat/lng, cidade e nome curto corretos.
+- `tsc --noEmit`: 0 erros · `npm run build`: ok.
+- Bundle da Edge Function: 71843 bytes, 5 módulos resolvidos, sem import órfão.

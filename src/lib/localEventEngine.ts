@@ -20,6 +20,7 @@ import {
   type LocalEventTemplate,
 } from "./localEventCatalog.ts";
 import { detectForbiddenContent, classifyEventAsSchool } from "./eventClassification.ts";
+import { buildRejectionMemory, colideComMemoria } from "./rejectionMemory.ts";
 
 /** Candidato gerado pelo motor, no mesmo formato aceito por `event_suggestions`. */
 export interface LocalCandidate {
@@ -158,15 +159,30 @@ export function runLocalEventEngine(options?: {
   referenceDate?: Date;
   cities?: Array<"Araucária" | "Curitiba">;
   limit?: number;
+  /**
+   * Títulos já rejeitados/aprovados (ou já na fila de revisão).
+   *
+   * Sem isto o motor local devolvia sempre o mesmo catálogo: o admin rejeitava
+   * a OBMEP, clicava em "buscar eventos" e a OBMEP voltava — porque o
+   * descarte por histórico só existia no lado da Edge Function e a função era
+   * chamada direto pelo app. A memória agora é aplicada aqui, na origem.
+   */
+  excludeTitles?: string[];
 }): LocalCandidate[] {
   const referenceDate = options?.referenceDate ?? new Date();
   const cities = options?.cities ?? [];
   const limit = options?.limit ?? 10;
+  const memoria = buildRejectionMemory(options?.excludeTitles ?? []);
 
   const candidatos: LocalCandidate[] = [];
 
   for (const template of LOCAL_EVENT_TEMPLATES) {
     if (cities.length > 0 && !cities.includes(template.city)) continue;
+
+    // Já decidido (rejeitado/aprovado) ou já na fila: não volta.
+    // Comparamos pelo tópico do título, e não pelo `topic` do template, para
+    // pegar também as variações de nome que a IA inventa.
+    if (colideComMemoria(template.title, memoria)) continue;
 
     // Balada, rave, festa e show não entram no catálogo do app escolar.
     if (

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import AddressSearchInput from "./AddressSearchInput";
 import { motion, AnimatePresence } from "motion/react";
 import {
   ShieldCheck,
@@ -44,7 +45,9 @@ import {
   CalendarDays,
   TrendingUp,
   UserCheck,
-  GraduationCap
+  GraduationCap,
+  Moon,
+  Sun
 } from "lucide-react";
 import { User, Event } from "../types";
 import {
@@ -85,6 +88,10 @@ interface AdminPanelProps {
   onShowToast?: (message: string, type?: "error" | "warning" | "success" | "info") => void;
   /** Recarrega a agenda após restauração/expurgo de eventos. */
   onRefreshEvents?: () => void | Promise<void>;
+  /** Tema atual, para o alternador dentro do painel. */
+  theme?: "light" | "dark";
+  /** Alterna claro/escuro. */
+  onToggleTheme?: () => void;
 }
 
 export default function AdminPanel({
@@ -101,7 +108,9 @@ export default function AdminPanel({
   onSelectEvent,
   currentUser,
   onShowToast,
-  onRefreshEvents
+  onRefreshEvents,
+  theme = "light",
+  onToggleTheme
 }: AdminPanelProps) {
   const isChefe = isChefeAdmin(currentUser);
   const isFuncionario = isFuncionarioAdmin(currentUser);
@@ -257,6 +266,17 @@ export default function AdminPanel({
   const [isSavingEvent, setIsSavingEvent] = useState(false);
   const [isDeletingEvent, setIsDeletingEvent] = useState(false);
   const [eventFilter, setEventFilter] = useState<"all" | "free" | "paid">("all");
+
+  /**
+   * Coordenadas resolvidas pela busca de endereço.
+   *
+   * Ficam fora de `eventFormData` porque não são digitadas pelo usuário: são o
+   * resultado do geocoding. Sem elas, o evento entrava na base sem posição e o
+   * mapa precisava chutar um ponto — daí os eventos aparecerem espalhados.
+   */
+  const [eventCoords, setEventCoords] = useState<{ lat: number; lng: number; city: string | null } | null>(null);
+  /** Cidade detectada pela busca de endereço (para o filtro de localidade). */
+  const [eventCity, setEventCity] = useState<string | null>(null);
 
   const [eventFormData, setEventFormData] = useState({
     title: "",
@@ -522,6 +542,8 @@ export default function AdminPanel({
   // Event Handlers
   const handleOpenAddEventModal = () => {
     const today = new Date();
+    setEventCoords(null);
+    setEventCity(null);
     setEventFormData({
       title: "",
       location: "Escola Estadual Helena Wysocki - Pátio Principal",
@@ -583,7 +605,12 @@ export default function AdminPanel({
         price: eventFormData.isPaid ? eventFormData.price : null,
         requirements: eventFormData.requirements.trim(),
         website: eventFormData.website.trim() || null,
-        image: eventFormData.image.trim()
+        image: eventFormData.image.trim(),
+        // Coordenadas resolvidas pela busca de endereço: é o que faz o evento
+        // aparecer no ponto certo do mapa em vez de num local aproximado.
+        lat: eventCoords?.lat ?? null,
+        lng: eventCoords?.lng ?? null,
+        city: eventCity ?? eventCoords?.city ?? null,
       });
       setIsAddingEvent(false);
     } catch (err) {
@@ -620,7 +647,10 @@ export default function AdminPanel({
         price: eventFormData.isPaid ? eventFormData.price : null,
         requirements: eventFormData.requirements.trim(),
         website: eventFormData.website.trim() || null,
-        image: eventFormData.image.trim()
+        image: eventFormData.image.trim(),
+        lat: eventCoords?.lat ?? editingEvent.lat ?? null,
+        lng: eventCoords?.lng ?? editingEvent.lng ?? null,
+        city: eventCity ?? editingEvent.city ?? null,
       });
       setEditingEvent(null);
     } catch (err) {
@@ -859,6 +889,22 @@ export default function AdminPanel({
                   : "Consulta do diretório escolar e cadastro de eventos."}
               </p>
             </div>
+
+            {/* Alternador de tema — o painel já tinha todas as classes `dark:`,
+                mas não havia como acionar o modo escuro estando aqui dentro:
+                era preciso sair para Configurações. */}
+            {onToggleTheme && (
+              <button
+                type="button"
+                onClick={onToggleTheme}
+                aria-label={theme === "dark" ? "Ativar modo claro" : "Ativar modo escuro"}
+                title={theme === "dark" ? "Modo claro" : "Modo escuro"}
+                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors cursor-pointer self-start md:self-auto"
+              >
+                {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+                <span className="hidden sm:inline">{theme === "dark" ? "Claro" : "Escuro"}</span>
+              </button>
+            )}
 
             {/* Main Tabs (Ativos, Bloqueados, Eventos, Escolas) */}
             <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-black/30 p-1 rounded-2xl border border-slate-200 dark:border-white/10 shrink-0 overflow-x-auto">
@@ -3425,18 +3471,19 @@ export default function AdminPanel({
                   />
                 </div>
 
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    Localização *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={eventFormData.location}
-                    onChange={(e) => setEventFormData({ ...eventFormData, location: e.target.value })}
-                    className="w-full h-10 px-3 text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:ring-2 focus:ring-brand-accent focus:outline-none"
-                  />
-                </div>
+                <AddressSearchInput
+                  label="Localização *"
+                  required
+                  value={eventFormData.location}
+                  onChange={(valor) =>
+                    setEventFormData((atual) => ({ ...atual, location: valor }))
+                  }
+                  onSelect={(sugestao) => {
+                    setEventCoords({ lat: sugestao.lat, lng: sugestao.lng, city: sugestao.city });
+                    setEventCity(sugestao.city);
+                  }}
+                  hint="Digite a rua, o número ou o nome do local. Selecione um resultado para marcar o ponto no mapa."
+                />
 
                 <div className="grid grid-cols-3 gap-2">
                   <div className="flex flex-col gap-1">

@@ -100,6 +100,10 @@ export function mapSupabaseEventoToEvent(row: any): Event {
       schoolName: row.organizador || row.school_name || row.schoolName,
       location: locationStr,
     }),
+    // Coordenadas gravadas pela busca de endereço: o mapa usa direto, em vez
+    // de estimar por índice.
+    lat: typeof row.lat === "number" ? row.lat : null,
+    lng: typeof row.lng === "number" ? row.lng : null,
   };
 }
 
@@ -146,6 +150,8 @@ export function mapSupabaseEventsTableToEvent(row: any): Event {
       schoolName: row.school_name || row.schoolName,
       location: row.location,
     }),
+    lat: typeof row.lat === "number" ? row.lat : null,
+    lng: typeof row.lng === "number" ? row.lng : null,
   };
 }
 
@@ -252,6 +258,9 @@ export async function createEventDirectInSupabase(eventData: {
   category?: string | null;
   city?: string | null;
   schoolName?: string | null;
+  /** Coordenadas resolvidas pela busca de endereço (geocoding). */
+  lat?: number | null;
+  lng?: number | null;
 }): Promise<{ success: boolean; event: Event | null; error: any }> {
   if (!isSupabaseConfigured()) {
     return { success: false, event: null, error: new Error("Supabase não configurado") };
@@ -316,6 +325,10 @@ export async function createEventDirectInSupabase(eventData: {
       image: eventData.image || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600",
       creator_id: eventData.creatorId || 2,
       created_at: new Date().toISOString(),
+      // Coordenadas resolvidas pela busca de endereço. Antes não existiam na
+      // tabela e o mapa precisava estimar a posição de cada evento.
+      lat: typeof eventData.lat === "number" ? eventData.lat : null,
+      lng: typeof eventData.lng === "number" ? eventData.lng : null,
     };
 
     const { data, error } = await supabase.from("events").insert([rowEvents]).select();
@@ -349,6 +362,8 @@ export async function createEventDirectInSupabase(eventData: {
       link_inscricao: eventData.website || null,
       imagem: eventData.image || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600",
       criado_em: new Date().toISOString(),
+      lat: typeof eventData.lat === "number" ? eventData.lat : null,
+      lng: typeof eventData.lng === "number" ? eventData.lng : null,
     };
 
     const { data: evData, error: evError } = await supabase.from("eventos").insert([rowEventos]).select();
@@ -395,10 +410,23 @@ export async function updateEventDirectInSupabase(
     if (eventData.requirements !== undefined) payloadEvents.requirements = eventData.requirements;
     if (eventData.website !== undefined) payloadEvents.website = eventData.website;
     if (eventData.image !== undefined) payloadEvents.image = eventData.image;
+    if (eventData.lat !== undefined && eventData.lat !== null) payloadEvents.lat = eventData.lat;
+    if (eventData.lng !== undefined && eventData.lng !== null) payloadEvents.lng = eventData.lng;
 
-    const { error } = await supabase.from("events").update(payloadEvents).eq("id", eventId);
-    if (!error) anySuccess = true;
-    else lastError = error;
+    /**
+     * `.select("id")` confirma que a linha foi de fato alterada.
+     *
+     * Mesmo problema do delete: `UPDATE` que não casa nenhuma linha devolve
+     * `error: null`. Sem contar as linhas, a UI dizia "salvo" quando o evento
+     * estava na outra tabela e nada havia mudado.
+     */
+    const { data, error } = await supabase
+      .from("events")
+      .update(payloadEvents)
+      .eq("id", eventId)
+      .select("id");
+    if (!error && (data?.length ?? 0) > 0) anySuccess = true;
+    else if (error) lastError = error;
   } catch (err) {
     lastError = err;
   }
@@ -423,9 +451,16 @@ export async function updateEventDirectInSupabase(
     }
     if (eventData.website !== undefined) payloadEventos.link_inscricao = eventData.website;
     if (eventData.image !== undefined) payloadEventos.imagem = eventData.image;
+    if (eventData.lat !== undefined && eventData.lat !== null) payloadEventos.lat = eventData.lat;
+    if (eventData.lng !== undefined && eventData.lng !== null) payloadEventos.lng = eventData.lng;
 
-    const { error } = await supabase.from("eventos").update(payloadEventos).eq("id", eventId);
-    if (!error) anySuccess = true;
+    const { data, error } = await supabase
+      .from("eventos")
+      .update(payloadEventos)
+      .eq("id", eventId)
+      .select("id");
+    if (!error && (data?.length ?? 0) > 0) anySuccess = true;
+    else if (error && !lastError) lastError = error;
   } catch (_) {}
 
   return { success: anySuccess, error: anySuccess ? null : lastError };
@@ -440,21 +475,49 @@ export async function deleteEventDirectInSupabase(eventId: number): Promise<{ su
   }
 
   const supabase = getSupabaseClient();
-  let anySuccess = false;
-  let lastError: any = null;
 
-  try {
-    const { error } = await supabase.from("events").delete().eq("id", eventId);
-    if (!error) anySuccess = true;
-    else lastError = error;
-  } catch (err) {
-    lastError = err;
+  /**
+   * Exclui de uma tabela e informa quantas linhas saíram.
+   *
+   * O bug antigo: a função considerava sucesso quando o PostgREST não devolvia
+   * erro. Mas `DELETE` que não casa nenhuma linha **também** não devolve erro —
+   * então apagar um id que só existia em `eventos` marcava sucesso em `events`
+   * sem ter apagado nada, e a UI anunciava "Evento removido" enquanto o evento
+   * continuava na tela. Agora `.select("id")` faz o PostgREST devolver as linhas
+   * removidas, e o sucesso depende de ter apagado de fato.
+   *
+   * As duas tabelas existem em paralelo no banco (`events` e `eventos`), com
+   * convenções de coluna diferentes; limpamos as duas e reportamos o total.
+   */
+  const apagarDe = async (tabela: "events" | "eventos") => {
+    try {
+      const { data, error } = await supabase
+        .from(tabela)
+        .delete()
+        .eq("id", eventId)
+        .select("id");
+
+      if (error) {
+        // Tabela ausente/indisponível não deve derrubar a outra tentativa.
+        return { removidas: 0, error };
+      }
+      return { removidas: data?.length ?? 0, error: null };
+    } catch (err) {
+      return { removidas: 0, error: err };
+    }
+  };
+
+  const [r1, r2] = await Promise.all([apagarDe("events"), apagarDe("eventos")]);
+  const totalRemovidas = r1.removidas + r2.removidas;
+
+  if (totalRemovidas > 0) {
+    return { success: true, error: null };
   }
 
-  try {
-    const { error } = await supabase.from("eventos").delete().eq("id", eventId);
-    if (!error) anySuccess = true;
-  } catch (_) {}
-
-  return { success: anySuccess, error: anySuccess ? null : lastError };
+  // Nada foi apagado: devolver o erro real (ou um explícito "não encontrado"),
+  // para a UI não anunciar uma exclusão que não aconteceu.
+  return {
+    success: false,
+    error: r1.error || r2.error || new Error(`Nenhum evento com id ${eventId} foi encontrado para excluir.`),
+  };
 }

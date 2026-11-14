@@ -26,6 +26,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { runLocalEventEngine } from "./local_engine.ts";
+import { buildRejectionMemory, colideComMemoria } from "./rejectionMemory.ts";
 // Reaproveita a mesma regra do app (src/lib/eventClassification.ts).
 // Duplicar as listas aqui já causou conflito de símbolo no bundle.
 import { detectForbiddenContent } from "./eventClassification.ts";
@@ -114,8 +115,26 @@ function toGeminiSchema(node: any): any {
 // ============================================================
 // Prompt
 // ============================================================
-function buildPrompt(count: number, focus?: string): string {
+function buildPrompt(count: number, focus?: string, jaDecididos: string[] = []): string {
   const hoje = new Date().toISOString().slice(0, 10);
+
+  /**
+   * Lista explícita do que já foi avaliado, dentro do prompt.
+   *
+   * O filtro em código (memória de rejeição) é a garantia final, mas avisar o
+   * modelo reduz o desperdício: sem isto ele gastava as `count` vagas repetindo
+   * eventos que seriam descartados na saída, e o admin via "nenhuma sugestão
+   * nova" mesmo havendo assuntos inéditos a descobrir.
+   */
+  const listaBloqueados =
+    jaDecididos.length > 0
+      ? `\nNÃO SUGIRA NEM REPITA (já avaliados pelo administrador, com qualquer
+variação de nome — "feira"/"mostra"/"mostra de ciência"/"feira de ciências"
+contam como o mesmo evento):\n${jaDecididos
+          .slice(0, 60)
+          .map((t) => `- ${t}`)
+          .join("\n")}\n`
+      : "";
   return `Você é o agente de descoberta de eventos do Elo Escola, um app escolar
 das escolas de Araucária e Curitiba, no Paraná, Brasil.
 
@@ -147,7 +166,7 @@ PROIBIDO — não inclua de forma alguma:
 Eventos assim são descartados automaticamente pelo sistema.
 
 ${focus ? `Foco adicional pedido pelo administrador: ${focus}` : ""}
-
+${listaBloqueados}
 Regras obrigatórias:
 - "month" é 0-indexado (0 = janeiro, 11 = dezembro).
 - Datas devem estar no futuro em relação a hoje.
@@ -665,8 +684,27 @@ Deno.serve(async (req: Request) => {
     let bloqueadosPorConteudo = 0;
     let avisoIa: string | null = null;
 
+    /**
+     * Memória de rejeição, lida ANTES de gerar candidatos.
+     *
+     * Antes, o histórico era consultado só no passo 4 (depois de o motor local
+     * já ter produzido tudo), e o filtro por título só existia aqui dentro. Com
+     * isso o motor local devolvia sempre o mesmo catálogo — o admin rejeitava a
+     * OBMEP e ela reaparecia na rodada seguinte. Agora a memória alimenta a
+     * geração na origem.
+     */
+    const { data: titulosDecididos } = await serviceClient
+      .from("event_suggestions")
+      .select("title")
+      .in("status", ["rejected", "approved", "pending"])
+      .limit(1000);
+
+    const excludeTitles = ((titulosDecididos ?? []) as Array<{ title: string }>)
+      .map((t) => t.title)
+      .filter(Boolean);
+
     // ---------- 3a. Motor local (sem chave) ----------
-    const locais = runLocalEventEngine({ referenceDate: agora, limit: count });
+    const locais = runLocalEventEngine({ referenceDate: agora, limit: count, excludeTitles });
     for (const candidato of locais) {
       candidatos.push(candidato);
     }
@@ -684,7 +722,12 @@ Deno.serve(async (req: Request) => {
         const model = (Deno.env.get("AI_MODEL") || "").trim() || def.defaultModel;
         modelUsado = model;
 
-        const resultado = await chamarModelo(def, apiKey, model, buildPrompt(count, focus));
+        const resultado = await chamarModelo(
+          def,
+          apiKey,
+          model,
+          buildPrompt(count, focus, excludeTitles)
+        );
         const sugestoesIa = Array.isArray(resultado?.suggestions) ? resultado.suggestions : [];
 
         for (const s of sugestoesIa) {
@@ -799,8 +842,26 @@ Deno.serve(async (req: Request) => {
       ...((pendentes ?? []) as any[]).map((d) => ({ ...d, origem: "pendente" as const })),
     ];
 
+    /**
+     * Memória por assunto, além da comparação por data/similaridade.
+     *
+     * `mesmoEvento` compara título E data (com janelas de 30/180 dias), o que é
+     * correto para detectar duplicata. Mas o pedido do admin é outro: "não quero
+     * ver isso de novo". A IA reescreve o título a cada rodada (medido: "Mostra
+     * de Ciência e Tecnologia da UTFPR" → "Feira de Ciências e Tecnologia da
+     * UTFPR", Jaccard 0,33) e às vezes muda também a data estimada — então o
+     * evento escapava. Aqui o assunto é comparado sem data.
+     */
+    const memoriaAssunto = buildRejectionMemory(jaConhecidos.map((k) => k.title));
+
     let descartadosPorHistorico = 0;
     const semRepeticao = candidatos.filter((s) => {
+      // Mesmo assunto (sem considerar data) de algo já decidido: fora.
+      if (colideComMemoria(s.title, memoriaAssunto)) {
+        descartadosPorHistorico++;
+        return false;
+      }
+
       const repetido = jaConhecidos.some((k) =>
         mesmoEvento(s, {
           title: k.title,
