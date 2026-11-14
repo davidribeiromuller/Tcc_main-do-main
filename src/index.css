@@ -327,3 +327,36 @@ body {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
+
+/* ============================================================
+   Rolagem por toque na tela de introdução e no dashboard (rodada 13)
+   ============================================================
+   O conteúdo da introdução é mais alto que a tela do celular. Sem estas
+   regras o gesto de arrastar era engolido por `body { height: 100% }` +
+   wrapper `absolute inset-0`, e a parte de baixo (rodapé, SOS, parceiros)
+   ficava inacessível no mobile.
+*/
+.welcome-scroll {
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  overscroll-behavior-y: contain;
+  /* Importante no iOS: acelera o "momentum" do arrasto com o dedo. */
+  will-change: scroll-position;
+}
+
+/* Barra visível na introdução só onde há mouse — no celular a rolagem é
+   por gesto e a barra some, como no resto do app. */
+.welcome-scroll::-webkit-scrollbar {
+  display: block;
+  width: 8px;
+}
+.welcome-scroll::-webkit-scrollbar-thumb {
+  background: rgba(76, 107, 76, 0.35);
+  border-radius: 9999px;
+}
+
+@media (pointer: coarse) {
+  .welcome-scroll::-webkit-scrollbar {
+    display: none;
+  }
+}

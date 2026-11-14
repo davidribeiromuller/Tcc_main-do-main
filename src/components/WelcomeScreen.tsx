@@ -155,8 +155,13 @@ export default function WelcomeScreen({
     }
   };
 
+  /*
+    `min-h-full` (e não `min-h-screen`): o wrapper no App.tsx já é o contêiner
+    de rolagem com a altura da viewport. Usar 100vh aqui dentro somaria a
+    altura da tela ao conteúdo e criaria um trecho em branco após o rodapé.
+  */
   return (
-    <div className="relative min-h-screen w-full bg-[#f2f8f3] dark:bg-[#121c14] text-[#1b3d24] dark:text-[#e4f2e6] flex flex-col justify-between overflow-x-hidden selection:bg-[#9cc4a3] selection:text-[#14361e] transition-colors">
+    <div className="relative min-h-full w-full bg-[#f2f8f3] dark:bg-[#121c14] text-[#1b3d24] dark:text-[#e4f2e6] flex flex-col justify-between overflow-x-hidden selection:bg-[#9cc4a3] selection:text-[#14361e] transition-colors">
       {/* Background Soft Organic Green Atmosphere Glows */}
       <div
         aria-hidden="true"
