@@ -22,6 +22,8 @@ import { SchoolDetail } from "./components/SchoolDetail.tsx";
 import { SchoolsCatalog } from "./components/SchoolsCatalog.tsx";
 import SchoolPortal from "./components/SchoolPortal.tsx";
 import AIChatAssistant from "./components/AIChatAssistant.tsx";
+import BackToDashboardButton from "./components/BackToDashboardButton.tsx";
+import { resolverTelaInicial, resolverTelaDoPopState, destinoDoBotaoVoltar } from "./lib/navigation.ts";
 import type { ContextoAcoes, CamposEvento } from "./lib/voiceActions.ts";
 import { getSchoolBySlug, ARAUCARIA_SCHOOLS, SchoolProfile } from "./lib/schoolsData.ts";
 import { motion, AnimatePresence } from "motion/react";
@@ -87,61 +89,28 @@ export default function App() {
   const [activeScreen, setActiveScreen] = useState<string>(() => {
     if (resetTokenParam) return "recovery";
     try {
-      if (typeof window !== "undefined") {
-        const path = window.location.pathname.toLowerCase();
-        if (path.startsWith("/escolas/") && path.length > 9) return "schoolDetail";
-        if (path === "/escolas") return "schools";
-        if (path === "/map" || path === "/mapa") return "map";
-        if (path === "/calendar" || path === "/calendario") return "calendar";
-        if (path === "/feed" || path === "/eventos") return "feed";
-        if (path === "/login") return "login";
-        if (path === "/settings" || path === "/configuracoes") return "settings";
-        if (path === "/admin") return "admin";
-
-        /**
-         * Compatibilidade com o GitHub Pages.
-         *
-         * O `deploy.yml` publica em `/Tcc_main-do-main/`, então a URL real é
-         * `.../Tcc_main-do-main/admin`. O caminho comparado acima é o que vem
-         * depois do base? Não — `location.pathname` traz o base junto, então
-         * nenhuma dessas comparações casa em produção e a tela inicial de
-         * qualquer recarregamento caía em "splash" → "welcome". Por isso o app
-         * parecia "voltar para o início" sozinho depois de um tempo ou de uma
-         * ação.
-         *
-         * Aqui desfazemos o base e, se ainda assim não houver rota conhecida,
-         * restauramos a última tela válida da sessão.
-         */
-        const base = (import.meta.env?.BASE_URL || "/").toLowerCase();
-        const semBase =
-          base.length > 1 && path.startsWith(base)
-            ? path.slice(base.length - 1)
-            : path;
-
-        if (semBase !== "/") {
-          const porRota: Record<string, string> = {
-            "/escolas": "schools",
-            "/map": "map",
-            "/mapa": "map",
-            "/calendar": "calendar",
-            "/calendario": "calendar",
-            "/feed": "feed",
-            "/eventos": "feed",
-            "/login": "login",
-            "/settings": "settings",
-            "/configuracoes": "settings",
-            "/admin": "admin",
-          };
-          if (porRota[semBase]) return porRota[semBase];
-          if (semBase.startsWith("/escolas/") && semBase.length > 9) return "schoolDetail";
+      /*
+        Toda a lógica de "onde estou ao abrir o app" mora em
+        `lib/navigation.ts` (funções puras, testadas). Antes ela estava
+        duplicada aqui e no popstate, e as duas cópias divergiram: a do
+        popstate não descontava o prefixo do GitHub Pages e devolvia o usuário
+        ao mural.
+      */
+      const ultima = sessionStorage.getItem("ultima_tela");
+      const logado = (() => {
+        try {
+          return Boolean(localStorage.getItem("local_user"));
+        } catch {
+          return false;
         }
+      })();
 
-        // Última tela conhecida nesta sessão de navegação.
-        const ultima = sessionStorage.getItem("ultima_tela");
-        if (ultima && !["splash", "welcome", "login", "register", "recovery"].includes(ultima)) {
-          return ultima;
-        }
-      }
+      return resolverTelaInicial({
+        pathname: window.location.pathname,
+        base: import.meta.env?.BASE_URL || "/",
+        ultimaTela: ultima,
+        logado,
+      });
     } catch {}
     return "splash";
   });
@@ -235,8 +204,28 @@ export default function App() {
     }
   }, [theme]);
 
+  /**
+   * Avisa o App qual é a tela de origem antes de navegar.
+   *
+   * Existe para o botão de voltar saber para onde ir. `undefined` significa
+   * "não sei a origem" — nesse caso o voltar cai no destino natural
+   * (dashboard/mural).
+   */
+  const [telaAnterior, setTelaAnterior] = useState<string | null>(null);
+
   // Universal Navigation & Browser History Sync (Etapa 7)
-  const navigateTo = (screen: string, param?: string | number) => {
+  /**
+   * @param opcoes.substituir  Troca a entrada atual do histórico em vez de
+   *   empilhar uma nova. Usado quando a navegação é consequência de uma ação
+   *   (ex.: depois do login ir para o mural) e não um passo do usuário —
+   *   assim o botão "voltar" do navegador não devolve a tela de login.
+   */
+  const navigateTo = (
+    screen: string,
+    param?: string | number,
+    opcoes: { substituir?: boolean } = {}
+  ) => {
+    setTelaAnterior((atual) => (atual === screen ? atual : activeScreen));
     setActiveScreen(screen);
     try {
       // Lembra a tela para sobreviver a um recarregamento (Splash/refresh).
@@ -256,15 +245,26 @@ export default function App() {
       if (screen === "eventDetail" && selectedEvent) {
         path = `/eventos/${selectedEvent.id}`;
       }
-      window.history.pushState(
-        { screen, param, slug: screen === "schoolDetail" ? param : undefined },
-        "",
-        path
-      );
+      const estado = { screen, param, slug: screen === "schoolDetail" ? param : undefined };
+      if (opcoes.substituir) {
+        window.history.replaceState(estado, "", path);
+      } else {
+        window.history.pushState(estado, "", path);
+      }
     } catch (e) {
       console.warn("History pushState notice:", e);
     }
   };
+
+  /**
+   * Destino depois de entrar na conta: o Mural de Eventos.
+   *
+   * `substituir: true` troca a entrada do histórico em vez de empilhar. Sem
+   * isso, o botão "voltar" do navegador/celular devolvia o usuário à tela de
+   * login logo depois de entrar — o que parece um bug e obriga a refazer o
+   * login no caminho de volta.
+   */
+  const entrarNoApp = () => navigateTo("feed", undefined, { substituir: true });
 
   /**
    * Uma única restauração da tela, no primeiro carregamento.
@@ -291,37 +291,42 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Popstate listener for back/forward browser buttons
+  /*
+    Botão "voltar" do navegador e do celular (popstate).
+
+    Regra única, em `lib/navigation.ts`: usa o `state` do histórico quando
+    existe; senão tenta a URL (já sem o prefixo do GitHub Pages); senão cai na
+    última tela da sessão. Antes havia duas cópias da lógica e a daqui não
+    descontava o prefixo — por isso o voltar às vezes jogava o usuário no
+    mural.
+  */
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
-      if (event.state && event.state.screen) {
-        setActiveScreen(event.state.screen);
-        if (event.state.slug) {
-          setSelectedSchoolSlug(event.state.slug);
-        }
-      } else {
-        const path = window.location.pathname.toLowerCase();
-        if (path.startsWith("/escolas/") && path.length > 9) {
-          const slug = window.location.pathname.replace("/escolas/", "").split("/")[0];
-          setSelectedSchoolSlug(slug);
-          setActiveScreen("schoolDetail");
-        } else if (path === "/escolas") {
-          setActiveScreen("schools");
-        } else if (path === "/map" || path === "/mapa") {
-          setActiveScreen("map");
-        } else if (path === "/calendar" || path === "/calendario") {
-          setActiveScreen("calendar");
-        } else if (path === "/feed" || path === "/eventos") {
-          setActiveScreen("feed");
-        } else if (path === "/login") {
-          setActiveScreen("login");
-        } else if (path === "/settings") {
-          setActiveScreen("settings");
-        } else if (path === "/admin") {
-          setActiveScreen("admin");
-        } else {
-          setActiveScreen(currentUser ? "feed" : "welcome");
-        }
+      let ultima: string | null = null;
+      try {
+        ultima = sessionStorage.getItem("ultima_tela");
+      } catch {
+        /* sessionStorage bloqueado */
+      }
+
+      const destino = resolverTelaDoPopState({
+        state: (event.state as { screen?: string } | null) ?? null,
+        pathname: window.location.pathname,
+        base: import.meta.env?.BASE_URL || "/",
+        ultimaTela: ultima,
+        logado: Boolean(currentUser),
+      });
+
+      // Restaura o slug quando se trata do detalhe de uma escola.
+      const slugDoEstado = (event.state as { slug?: string } | null)?.slug;
+      if (slugDoEstado) setSelectedSchoolSlug(slugDoEstado);
+
+      setActiveScreen(destino);
+      try {
+        // Mantém a restauração de tela coerente com o que o usuário fez.
+        sessionStorage.setItem("ultima_tela", destino);
+      } catch {
+        /* ignora */
       }
     };
 
@@ -394,7 +399,7 @@ export default function App() {
         setCurrentUser(data.user);
         localStorage.setItem("local_user", JSON.stringify(data.user));
         localStorage.setItem("token", data.token);
-        navigateTo("feed");
+        entrarNoApp();
         showToast(`Bem-vindo(a), gestão do ${data.user.nome}!`, "success");
         return;
       }
@@ -411,7 +416,7 @@ export default function App() {
       if (instUser) {
         setCurrentUser(instUser);
         localStorage.setItem("local_user", JSON.stringify(instUser));
-        navigateTo("feed");
+        entrarNoApp();
         showToast(`Bem-vindo(a), gestão do ${instUser.nome}!`, "success");
         return;
       }
@@ -1220,7 +1225,7 @@ export default function App() {
             await loadAllUsers(data.token);
           }
           showToast(`Bem-vindo(a) de volta, ${synchronizedUser.nome}!`, "success");
-          setActiveScreen("feed");
+          entrarNoApp();
           return;
         }
       } else if (res && (res.status === 401 || res.status === 403 || res.status === 404)) {
@@ -1252,7 +1257,7 @@ export default function App() {
           }
           await loadEvents();
           showToast(`Bem-vindo(a) de volta, ${authUser.nome}!`, "success");
-          setActiveScreen("feed");
+          entrarNoApp();
           return;
         } else if (authErr) {
           setLoginError(authErr);
@@ -1305,7 +1310,7 @@ export default function App() {
       setCurrentUser(found);
       localStorage.setItem("local_user", JSON.stringify(found));
       showToast(`Bem-vindo(a) de volta, ${found.nome}!`, "success");
-      setActiveScreen("feed");
+      entrarNoApp();
     } catch (err: any) {
       console.error(err);
       const offlineMsg = "Erro de autenticação. Verifique suas credenciais.";
@@ -1354,7 +1359,7 @@ export default function App() {
         const synchronizedUser = resData.user;
         setCurrentUser(synchronizedUser);
         localStorage.setItem("local_user", JSON.stringify(synchronizedUser));
-        setActiveScreen("feed");
+        entrarNoApp();
         setLoginError(null);
         showToast("Conta escolar criada com sucesso!", "success");
         // Load events and user lists in background without stalling the screen transition
@@ -1379,7 +1384,7 @@ export default function App() {
         if (newUser) {
           setCurrentUser(newUser);
           localStorage.setItem("local_user", JSON.stringify(newUser));
-          setActiveScreen("feed");
+          entrarNoApp();
           showToast(
             "Conta escolar criada! No primeiro acesso, troque sua senha provisória.",
             "success"
@@ -1437,7 +1442,7 @@ export default function App() {
       saveUsersCache(localUsersList);
       setCurrentUser(newUser);
       localStorage.setItem("local_user", JSON.stringify(newUser));
-      setActiveScreen("feed");
+      entrarNoApp();
       showToast("Conta escolar criada com sucesso!", "success");
       return { success: true };
     } catch (err: any) {
@@ -1979,7 +1984,14 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0"
+            /*
+              A tela de introdução é mais alta que a viewport no celular.
+              Com `absolute inset-0` sozinho, o conteúdo era CORTADO e não
+              havia como rolar com o dedo — o excedente simplesmente não
+              aparecia. Aqui o wrapper passa a ser o contêiner de rolagem,
+              com `overscroll-contain` para não arrastar a página atrás.
+            */
+            className="absolute inset-0 overflow-y-auto overflow-x-hidden overscroll-y-contain welcome-scroll"
           >
             <WelcomeScreen
               onNavigate={navigateTo}
@@ -2378,6 +2390,32 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/*
+        Botão de voltar ao dashboard na tela de introdução.
+
+        A introdução é a primeira tela ao abrir o app, e o menu só existe nas
+        outras telas — então quem caía ali (por logout, por link direto ou por
+        clique na marca) ficava sem caminho de volta ao painel, principalmente
+        no celular. Com isso, a volta funciona por toque, pela seta do
+        navegador e pelo botão "voltar" do próprio aparelho (ver o listener de
+        `popstate`, que restaura a tela empilhada no histórico).
+      */}
+      <BackToDashboardButton
+        telaAnterior={telaAnterior}
+        podeVerDashboard={Boolean(currentUser) && canAccessAdminPanel(currentUser)}
+        naIntroducao={activeScreen === "welcome"}
+        onVoltar={() => {
+          const destino = destinoDoBotaoVoltar({
+            telaAnterior,
+            podeVerDashboard: Boolean(currentUser) && canAccessAdminPanel(currentUser),
+            logado: Boolean(currentUser),
+          });
+          // `substituir`: sai da introdução sem deixá-la no histórico, para o
+          // "voltar" seguinte não trazer o usuário de volta a ela.
+          navigateTo(destino, undefined, { substituir: true });
+        }}
+      />
 
       {/* Assistente Elo Virtual Floating Assistant */}
       <AIChatAssistant

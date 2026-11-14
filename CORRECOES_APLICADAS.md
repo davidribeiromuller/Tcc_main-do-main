@@ -922,3 +922,83 @@ regenerado, mas **não foi publicada** — a rede deste ambiente bloqueia a API
 do Supabase (`api.supabase.com` inacessível). O deploy pode ser feito pelo CLI
 (`supabase functions deploy ai-event-scout`) ou pelo painel. A busca de links
 **não depende disso**: ela roda no front-end, no botão do painel.
+
+---
+
+## 17. Rodada 13 — rolagem na introdução e volta ao dashboard
+
+### 17.1 Rolar com o dedo na tela de introdução (mobile)
+
+**Sintoma**: no celular, a tela inicial (dashboard) não rolava com o dedo — o
+conteúdo de baixo (SOS, parceiros, rodapé) simplesmente não aparecia.
+
+**Causa raiz**: o wrapper da tela no `App.tsx` tinha só `absolute inset-0`,
+ou seja, a altura exata da viewport. O conteúdo interno usava `min-h-screen`
+(100vh), que **não** cria rolagem: ele é cortado pelo pai. Não havia contêiner
+com `overflow-y: auto`, então o gesto de arrastar não tinha o que rolar.
+
+**Correção**:
+- O wrapper da introdução passou a ser o contêiner de rolagem:
+  `overflow-y-auto overscroll-y-contain welcome-scroll`.
+- O conteúdo interno passou de `min-h-screen` para `min-h-full`, evitando
+  somar 100vh ao conteúdo e criar um trecho em branco depois do rodapé.
+- `.welcome-scroll` em `index.css`: `-webkit-overflow-scrolling: touch`
+  (momentum no iOS), `touch-action: pan-y` e barra de rolagem visível apenas
+  onde há mouse.
+
+### 17.2 Login leva ao Mural, sem "voltar" para o login
+
+A navegação pós-login passou a usar **`entrarNoApp()`**, que faz
+`replaceState` em vez de `pushState`. Antes, o histórico empilhava a tela de
+login; o botão "voltar" do navegador/celular devolvia o usuário ao formulário,
+o que parece bug e obriga a refazer o login. Agora o login é substituído pelo
+mural no histórico. Aplicado nos 6 caminhos de entrada (senha, institucional,
+Google, funcionário, cadastro e fallback local).
+
+### 17.3 Botão de voltar ao dashboard na tela inicial
+
+Não havia caminho de volta ao dashboard a partir da introdução: o menu só
+existe nas outras telas, e a introdução é a primeira coisa que aparece ao abrir
+o app.
+
+- `src/components/BackToDashboardButton.tsx` **(novo)** — botão flutuante no
+  canto inferior esquerdo (o assistente ocupa o direito), com ícone de seta +
+  rótulo. Aparece **só na introdução** e **só para quem tem dashboard**
+  (usuário conectado com acesso administrativo). Visitante não vê nada.
+- O rótulo muda conforme a origem: **"Voltar ao dashboard"** se o usuário veio
+  do painel; **"Ir para o dashboard"** se chegou ali por outro caminho.
+- A navegação usa `replaceState`, para a introdução não voltar a aparecer no
+  histórico.
+
+### 17.4 A seta do navegador e o "voltar" do celular
+
+`src/lib/navigation.ts` **(novo)** centraliza as regras que estavam duplicadas
+e divergentes entre o boot e o listener de `popstate`:
+
+| Função | Responsabilidade |
+|---|---|
+| `removerBase` | desconta `/Tcc_main-do-main/` do caminho |
+| `telaDoCaminho` | URL → tela |
+| `resolverTelaInicial` | onde abrir no primeiro carregamento |
+| `resolverTelaDoPopState` | destino ao apertar voltar/avançar |
+| `destinoDoBotaoVoltar` | destino do botão flutuante |
+
+**Regras que passaram a valer**:
+1. O `state` do histórico manda, quando existe.
+2. Sem `state`, a URL é lida **já sem o prefixo do GitHub Pages** — era aqui
+   que a versão antiga falhava e devolvia o usuário ao mural.
+3. Sem URL reconhecível, usa a última tela da sessão.
+4. Só então cai no destino natural (`feed` logado / `welcome` deslogado).
+5. Painel e Configurações **exigem sessão**: URL direta ou histórico com
+   `admin` não devolve um painel vazio para quem saiu da conta.
+6. Ao voltar, a tela restaurada também atualiza `ultima_tela`, mantendo
+   coerência com o próximo recarregamento.
+
+### Validação
+
+| Suíte | Resultado |
+|---|---|
+| `test-round13.mjs` — navegação, popstate, permissões, botão de voltar | **31/31** |
+| Verificação jsdom — `min-h-full` no conteúdo, botão só onde deve aparecer | 5/5 |
+| `tsc --noEmit` | 0 erros |
+| `npm run build` | ok (5.25 s) |
