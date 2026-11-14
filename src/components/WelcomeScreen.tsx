@@ -15,7 +15,9 @@ import {
   Phone,
   User as UserIcon,
   ChevronRight,
-  ExternalLink
+  ExternalLink,
+  Moon,
+  Sun
 } from "lucide-react";
 import { User, Event } from "../types.ts";
 import { SchoolCarousel } from "./SchoolCarousel";
@@ -51,6 +53,10 @@ interface WelcomeScreenProps {
   onGuestLogin?: (destination: string) => Promise<void>;
   onSelectSchool?: (slug: string) => void;
   events?: Event[];
+  /** Tema atual, para o alternador na tela de introdução. */
+  theme?: "light" | "dark";
+  /** Alterna claro/escuro. */
+  onToggleTheme?: () => void;
 }
 
 interface EmergencyContact {
@@ -115,6 +121,8 @@ export default function WelcomeScreen({
   onLogout,
   onGuestLogin,
   onSelectSchool,
+  theme = "light",
+  onToggleTheme,
 }: WelcomeScreenProps) {
   const [showSosModal, setShowSosModal] = useState(false);
   const [copiedNumber, setCopiedNumber] = useState<string | null>(null);
@@ -169,8 +177,25 @@ export default function WelcomeScreen({
             </span>
           </div>
 
-          {/* Right: User Login / Profile */}
+          {/* Right: Theme toggle + User Login / Profile */}
           <div className="flex items-center gap-2 sm:gap-3">
+            {/*
+              Alternador de tema na tela de introdução.
+              A tela já tinha todas as classes `dark:` prontas, mas não havia
+              como acionar o modo escuro antes de entrar no app — era preciso
+              fazer login e ir em Configurações.
+            */}
+            {onToggleTheme && (
+              <button
+                onClick={onToggleTheme}
+                aria-label={theme === "dark" ? "Ativar modo claro" : "Ativar modo escuro"}
+                title={theme === "dark" ? "Modo claro" : "Modo escuro"}
+                className="p-2 rounded-full bg-[#cbe7d0]/80 dark:bg-[#1f3825] hover:bg-[#bde0c3] dark:hover:bg-[#284930] border border-[#a3cfa9]/60 dark:border-[#3a6341] text-[#163a20] dark:text-[#d3eed7] transition-all cursor-pointer"
+              >
+                {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+              </button>
+            )}
+
             {currentUser ? (
               <div className="flex items-center gap-2">
                 <button

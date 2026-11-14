@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import AddressSearchInput from "./AddressSearchInput";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -92,6 +92,27 @@ interface AdminPanelProps {
   theme?: "light" | "dark";
   /** Alterna claro/escuro. */
   onToggleTheme?: () => void;
+  /**
+   * Dados de evento pedidos pelo Assistente Elo (por voz ou chat).
+   *
+   * Chegam preenchidos e apenas AGUARDAM revisão humana. O painel joga esses
+   * valores no formulário, o usuário confere e publica — o assistente não
+   * grava nada sozinho.
+   */
+  preRascunho?: {
+    title?: string;
+    location?: string;
+    day?: number;
+    month?: number;
+    year?: number;
+    time?: string;
+    requirements?: string;
+    isPaid?: boolean;
+    price?: string;
+    website?: string;
+  } | null;
+  /** Avisa que o pré-rascunho foi aplicado, para não reaplicar a cada render. */
+  onConsumirPreRascunho?: () => void;
 }
 
 export default function AdminPanel({
@@ -110,7 +131,9 @@ export default function AdminPanel({
   onShowToast,
   onRefreshEvents,
   theme = "light",
-  onToggleTheme
+  onToggleTheme,
+  preRascunho,
+  onConsumirPreRascunho,
 }: AdminPanelProps) {
   const isChefe = isChefeAdmin(currentUser);
   const isFuncionario = isFuncionarioAdmin(currentUser);
@@ -291,6 +314,43 @@ export default function AdminPanel({
     website: "",
     image: "https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=600&auto=format&fit=crop"
   });
+
+  /**
+   * Aplica no formulário o que o Assistente Elo entendeu do pedido do usuário.
+   *
+   * Só preenche o que veio; o resto fica como estava. Depois de aplicar, avisa
+   * o App para limpar o valor — senão o formulário seria reescrito a cada
+   * re-render e o usuário não conseguiria editar.
+   *
+   * Nada é publicado aqui: o botão "Publicar Evento" continua sendo do usuário.
+   */
+  useEffect(() => {
+    if (!preRascunho) return;
+
+    setEventFormData((prev) => ({
+      ...prev,
+      ...(preRascunho.title ? { title: preRascunho.title } : {}),
+      ...(preRascunho.location ? { location: preRascunho.location } : {}),
+      ...(preRascunho.day !== undefined ? { day: preRascunho.day } : {}),
+      ...(preRascunho.month !== undefined ? { month: preRascunho.month } : {}),
+      ...(preRascunho.year !== undefined ? { year: preRascunho.year } : {}),
+      ...(preRascunho.time ? { time: preRascunho.time } : {}),
+      ...(preRascunho.requirements ? { requirements: preRascunho.requirements } : {}),
+      ...(preRascunho.isPaid !== undefined ? { isPaid: preRascunho.isPaid } : {}),
+      ...(preRascunho.price ? { price: preRascunho.price } : {}),
+      ...(preRascunho.website ? { website: preRascunho.website } : {}),
+    }));
+
+    // Leva o usuário até a aba de eventos, onde o formulário vive.
+    setActiveTab("events");
+
+    onShowToast?.(
+      "O Assistente Elo preencheu o formulário. Revise os dados e clique em Publicar Evento.",
+      "info"
+    );
+
+    onConsumirPreRascunho?.();
+  }, [preRascunho]);
 
   // Filtered lists
   const filteredUsers = usersList.filter((u) => {
