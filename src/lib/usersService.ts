@@ -58,7 +58,14 @@ export async function fetchUsersDirectFromSupabase(): Promise<{ users: User[]; e
   try {
     const { data, error } = await supabase
       .from("users")
-      .select("id, uid, nome, email, foto_perfil, provider, role, ativo, is_admin, cpf, phone, birthdate, gender, institution, last_active_at, last_login, created_at, updated_at")
+      /*
+        `password` é necessário: o Chefe Administrador precisa VER a senha na
+        ficha do usuário (requisito do projeto — o app guarda a senha em texto
+        por decisão de escopo do TCC) e poder corrigi-la. Sem esta coluna no
+        SELECT, `userToViewDetails.password` chegava sempre `undefined` e a
+        ficha mostrava "não definida" mesmo para contas com senha.
+      */
+      .select("id, uid, nome, email, foto_perfil, provider, role, ativo, is_admin, cpf, phone, birthdate, gender, institution, password, matricula, personal_email, must_change_password, link_verified_at, last_active_at, last_login, created_at, updated_at")
       .order("id", { ascending: true });
 
     if (error) {
@@ -108,6 +115,14 @@ export async function updateUserDirectInSupabase(
   if (updateData.gender !== undefined) payload.gender = updateData.gender;
   if (updateData.institution !== undefined) payload.institution = updateData.institution;
   if (updateData.lastActiveAt !== undefined) payload.last_active_at = updateData.lastActiveAt;
+  /*
+    Permite ao Chefe Administrador redefinir a senha pela ficha do usuário.
+    Só grava se veio um valor não vazio — assim o campo em branco no formulário
+    nunca apaga a senha de ninguém por acidente.
+  */
+  if (typeof updateData.password === "string" && updateData.password.trim() !== "") {
+    payload.password = updateData.password.trim();
+  }
 
   try {
     let query = supabase.from("users").update(payload).eq("id", userId).select();

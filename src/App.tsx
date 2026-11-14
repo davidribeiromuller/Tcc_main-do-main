@@ -52,6 +52,7 @@ import {
 import { canAccessAdminPanel, isChefeAdmin } from "./lib/permissions.ts";
 import { saveUsersCache, readUsersCache } from "./lib/userCache.ts";
 import { isEventRetentionExpired } from "./lib/eventLifecycle.ts";
+import { confirmarPresenca } from "./lib/participationsService.ts";
 
 export default function App() {
   const [resetTokenParam, setResetTokenParam] = useState<string | null>(() => {
@@ -265,6 +266,31 @@ export default function App() {
     }
   };
 
+  /**
+   * Uma única restauração da tela, no primeiro carregamento.
+   *
+   * Se o usuário já estava navegando (ex.: no painel), um refresh não deve
+   * jogá-lo no mural. Só vale quando a tela inicial resolvida é de entrada.
+   */
+  useEffect(() => {
+    try {
+      const ultima = sessionStorage.getItem("ultima_tela");
+      if (!ultima) return;
+      setActiveScreen((atual) => {
+        if (!["splash", "welcome", "feed"].includes(atual)) return atual;
+        // Não restaura telas que exigem contexto (detalhe de escola/evento).
+        if (["schoolDetail", "eventDetail"].includes(ultima)) return atual;
+        if (!currentUser && !["welcome", "login", "register", "schools", "feed"].includes(ultima)) {
+          return atual;
+        }
+        return ultima;
+      });
+    } catch {
+      /* sessionStorage bloqueado */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Popstate listener for back/forward browser buttons
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
@@ -410,25 +436,35 @@ export default function App() {
       showToast("Acesse uma conta para registrar sua presença no histórico permanente do portal.", "info");
       return;
     }
+    /*
+      Antes isto fazia POST /api/users/:id/participations, rota que só existe no
+      servidor Express local. No GitHub Pages (estático) a chamada dava 404 e o
+      usuário via "erro ao confirmar". Agora grava direto no Supabase, com
+      fallback para o backend e cópia local.
+    */
     try {
-      const token = localStorage.getItem("token") || "";
-      const res = await fetch(`/api/users/${currentUser.id}/participations`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          eventId: eventData.id,
-          eventTitle: eventData.title,
-          eventLocation: eventData.location,
-          eventDate: eventData.date,
-          eventTime: eventData.time
-        })
+      const resultado = await confirmarPresenca({
+        userId: currentUser.id,
+        eventId: eventData.id,
+        eventTitle: eventData.title,
+        eventLocation: eventData.location,
+        eventDate: eventData.date,
+        eventTime: eventData.time,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Falha ao registrar participação.");
-      showToast("Presença confirmada e salva permanentemente no seu histórico!", "success");
+
+      if (!resultado.sucesso) {
+        showToast(resultado.erro || "Não foi possível confirmar sua presença.", "error");
+        return;
+      }
+
+      if (resultado.jaConfirmado) {
+        showToast("Sua presença neste evento já estava confirmada.", "info");
+      } else if (resultado.erro) {
+        // Salvou localmente, mas não sincronizou: avisa sem chamar de erro.
+        showToast(resultado.erro, "warning");
+      } else {
+        showToast("Presença confirmada e salva permanentemente no seu histórico!", "success");
+      }
     } catch (err: any) {
       showToast(err.message || "Erro ao registrar confirmação.", "error");
     }
@@ -573,7 +609,16 @@ export default function App() {
 
     // 1. Tentar primeiro via endpoint backend /api/events (que consulta o Postgres do Supabase)
     try {
-      const res = await resilientFetch("/api/events", { retries: 2, retryDelay: 500 });
+      /*
+        `fetchJsonApi` devolve `null` imediatamente em hospedagem estática.
+        Antes, `/api/events` era chamado mesmo no GitHub Pages: a rota não
+        existe, o host devolve 404 e o console enchia de
+        "Failed to load resource: 404" a cada carregamento e a cada troca de
+        tela. O fallback do Supabase já fazia o trabalho — agora ele é o
+        caminho normal, sem erro na rede.
+      */
+      const res = await fetchJsonApi("/api/events");
+      if (!res) throw new Error("sem backend local (hospedagem estática)");
       const parsed = await safeParseJsonResponse<{ events?: Event[] }>(res);
       if (parsed.ok && parsed.data && Array.isArray(parsed.data.events)) {
         const incomingEvents = parsed.data.events;
@@ -980,7 +1025,27 @@ export default function App() {
       }
 
       await loadEvents();
-      setActiveScreen("feed");
+
+      /*
+        NÃO forçar "feed" aqui.
+        ---------------------------------------------------------------
+        Este handler roda em TODO evento de autenticação, inclusive
+        TOKEN_REFRESHED e INITIAL_SESSION — que o Supabase dispara sozinho,
+        a cada ~50 minutos e também quando a aba volta a ficar visível. Como
+        ele chamava setActiveScreen("feed"), o usuário era jogado de volta ao
+        mural no meio do cadastro de um evento, da leitura de uma escola ou de
+        uma busca no mapa. Era esse o "volta para a tela de início do nada".
+
+        Agora só redireciona quem ainda está numa tela de entrada — quem já
+        está navegando fica onde está.
+      */
+      setActiveScreen((atual) => {
+        const telasDeEntrada = ["splash", "welcome", "login", "register", "codeSent", "passwordRecovery"];
+        const deveRedirecionar = telasDeEntrada.includes(atual);
+        // Mantém a tela no sessionStorage coerente com o que está na tela.
+        return deveRedirecionar ? "feed" : atual;
+      });
+
       showToast(`Bem-vindo(a), ${synchronizedUser.nome}! Conectado via Google.`, "success");
     } catch (err: any) {
       console.error("[Google Auth] Synchronization error:", err);
@@ -1452,15 +1517,13 @@ export default function App() {
       const token = await getAuthToken();
       let res: Response | null = null;
       if (token) {
-        res = await resilientFetch("/api/events", {
+        res = await fetchJsonApi("/api/events", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify(eventData),
-          retries: 1,
-          retryDelay: 400,
         });
       }
 
@@ -2317,7 +2380,11 @@ export default function App() {
       </AnimatePresence>
 
       {/* Assistente Elo Virtual Floating Assistant */}
-      <AIChatAssistant contextoAcoes={contextoAcoes} />
+      <AIChatAssistant
+        contextoAcoes={contextoAcoes}
+        eventos={events}
+        nomeUsuario={currentUser?.nome}
+      />
 
     </div>
   );

@@ -184,7 +184,14 @@ html.dark .admin-scrollable::-webkit-scrollbar-thumb {
    Aqui a rolagem horizontal fica explícita e visível.
    ------------------------------------------------------------------ */
 .admin-scroll-x {
-  overflow-x: auto !important;
+  /*
+    No celular, rolagem horizontal no CONTAINER PRINCIPAL faz a página toda
+    deslizar para o lado — e como o cabeçalho é `sticky`, ele descola e sobra
+    espaço em branco. Em telas pequenas deixamos só a vertical aqui; o
+    `overflow-x-auto` fica nos blocos que realmente precisam (tabelas e
+    barra de abas, que já têm a classe própria).
+  */
+  overflow-x: hidden;
   overflow-y: auto !important;
   scrollbar-width: thin !important;
   scrollbar-color: rgba(76, 107, 76, 0.45) transparent !important;
@@ -233,6 +240,12 @@ html.dark .admin-scroll-x::-webkit-scrollbar-thumb {
   }
 }
 
+@media (min-width: 768px) {
+  .admin-scroll-x {
+    overflow-x: auto !important;
+  }
+}
+
 /* Tabelas do painel: garante largura mínima confortável, para as colunas
    não serem esmagadas antes da rolagem horizontal entrar em ação. */
 .admin-table {
@@ -243,4 +256,74 @@ html.dark .admin-scroll-x::-webkit-scrollbar-thumb {
 
 html.dark .admin-scrollable::-webkit-scrollbar-thumb:hover {
   background: rgba(163, 198, 157, 0.65) !important;
+}
+
+/* ============================================================
+   Ajustes de mobile (rodada 12)
+   ============================================================
+   Três problemas reais que apareciam em celular:
+
+   1. O Safari do iOS dá ZOOM automático ao focar um campo cuja fonte é menor
+      que 16px. O app usa `text-xs` (12px) em praticamente todos os inputs —
+      no celular, cada toque em um campo dava um salto de zoom e a tela ficava
+      deslocada. Aqui a fonte sobe para 16px SÓ em telas pequenas; no desktop
+      o design continua idêntico.
+   2. altura de viewport: `100vh` no iOS inclui a barra de endereço, então o
+      rodapé ficava escondido. `dvh` acompanha a barra.
+   3. alvos de toque: botões de ícone (olho, copiar, fechar) tinham ~24px.
+      O mínimo confortável é 44px; garantimos isso sem mudar o visual.
+*/
+
+@media (max-width: 640px) {
+  /* Evita o zoom automático do iOS ao focar campos. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
+  /* Mantém os rótulos e textos de apoio pequenos, mas legíveis. */
+  input::placeholder,
+  textarea::placeholder {
+    font-size: 14px;
+  }
+}
+
+/* Viewport dinâmico: a barra do navegador mobile deixa de cortar o rodapé. */
+.app-viewport {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Área segura do iPhone (notch / barra inferior). */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .bottom-nav-safe {
+    padding-bottom: calc(env(safe-area-inset-bottom) + 8px);
+  }
+}
+
+/*
+  Alvo de toque mínimo em telas de toque.
+  Usa `min-height`/`min-width` em vez de padding para não alterar o layout dos
+  botões que já têm tamanho definido.
+*/
+@media (pointer: coarse) {
+  button[aria-label],
+  a[aria-label] {
+    min-height: 40px;
+    min-width: 40px;
+  }
+}
+
+/* Nada deve causar rolagem horizontal na página inteira. */
+html,
+body {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+/* Textos longos (e-mails, URLs, códigos) quebram em vez de estourar a tela. */
+.break-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }

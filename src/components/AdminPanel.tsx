@@ -36,6 +36,7 @@ import {
   EyeOff,
   KeyRound,
   Copy,
+  Pencil,
   Table as TableIcon,
   LayoutGrid,
   Check,
@@ -158,6 +159,12 @@ export default function AdminPanel({
   const [showUserPassword, setShowUserPassword] = useState(false);
   /** Confirmação visual do botão "copiar senha". */
   const [passwordCopied, setPasswordCopied] = useState(false);
+  /** Nova senha digitada pelo Chefe Admin ao editar a ficha. */
+  const [novaSenha, setNovaSenha] = useState("");
+  /** Mostra o campo de edição de senha. */
+  const [editandoSenha, setEditandoSenha] = useState(false);
+  /** Salvando a nova senha. */
+  const [salvandoSenha, setSalvandoSenha] = useState(false);
   const [userForMobileActions, setUserForMobileActions] = useState<User | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [eventSearchTerm, setEventSearchTerm] = useState("");
@@ -950,22 +957,11 @@ export default function AdminPanel({
               </p>
             </div>
 
-            {/* Alternador de tema — o painel já tinha todas as classes `dark:`,
-                mas não havia como acionar o modo escuro estando aqui dentro:
-                era preciso sair para Configurações. */}
-            {onToggleTheme && (
-              <button
-                type="button"
-                onClick={onToggleTheme}
-                aria-label={theme === "dark" ? "Ativar modo claro" : "Ativar modo escuro"}
-                title={theme === "dark" ? "Modo claro" : "Modo escuro"}
-                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors cursor-pointer self-start md:self-auto"
-              >
-                {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
-                <span className="hidden sm:inline">{theme === "dark" ? "Claro" : "Escuro"}</span>
-              </button>
-            )}
-
+            {/*
+              Sem alternador de tema aqui, por decisão do usuário: o modo
+              escuro fica em Configurações e na tela de introdução. O painel
+              continua com todas as classes `dark:` — só não controla o tema.
+            */}
             {/* Main Tabs (Ativos, Bloqueados, Eventos, Escolas) */}
             <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-black/30 p-1 rounded-2xl border border-slate-200 dark:border-white/10 shrink-0 overflow-x-auto">
               <button
@@ -3801,6 +3797,19 @@ export default function AdminPanel({
 
                             <button
                               type="button"
+                              onClick={() => {
+                                setEditandoSenha((v) => !v);
+                                setNovaSenha("");
+                              }}
+                              className="p-1 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-white/60 dark:hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+                              title={editandoSenha ? "Cancelar alteração" : "Alterar senha"}
+                              aria-label={editandoSenha ? "Cancelar alteração de senha" : "Alterar senha"}
+                            >
+                              <Pencil size={13} />
+                            </button>
+
+                            <button
+                              type="button"
                               onClick={async () => {
                                 try {
                                   await navigator.clipboard.writeText(userToViewDetails.password || "");
@@ -3827,6 +3836,55 @@ export default function AdminPanel({
                     <p className="text-[10px] text-amber-700/80 dark:text-amber-400/70 mt-1 leading-snug">
                       Visível apenas para o Chefe Administrador. Oriente o usuário a trocar no primeiro acesso.
                     </p>
+
+                    {/* Alteração da senha — o Chefe Admin pode corrigir a senha do usuário */}
+                    {editandoSenha && (
+                      <div className="mt-2 pt-2 border-t border-amber-200/70 dark:border-amber-900/40 space-y-1.5">
+                        <label
+                          htmlFor="nova-senha-ficha"
+                          className="block text-[10px] font-semibold text-amber-800 dark:text-amber-300"
+                        >
+                          Nova senha para este usuário
+                        </label>
+                        <div className="flex gap-1.5">
+                          <input
+                            id="nova-senha-ficha"
+                            type="text"
+                            value={novaSenha}
+                            onChange={(e) => setNovaSenha(e.target.value)}
+                            placeholder="Digite a nova senha"
+                            autoComplete="new-password"
+                            className="flex-1 min-w-0 px-2 py-1.5 rounded-lg border border-amber-300 dark:border-amber-800 bg-white dark:bg-black/30 text-xs font-mono text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                          />
+                          <button
+                            type="button"
+                            disabled={salvandoSenha || novaSenha.trim().length < 4}
+                            onClick={async () => {
+                              if (!userToViewDetails || novaSenha.trim().length < 4) return;
+                              setSalvandoSenha(true);
+                              try {
+                                await onUpdateUser(userToViewDetails.id, {
+                                  password: novaSenha.trim(),
+                                });
+                                setEditandoSenha(false);
+                                setNovaSenha("");
+                                notifyAdmin("Senha alterada com sucesso.", "success");
+                              } catch (err: any) {
+                                notifyAdmin(err?.message || "Não foi possível alterar a senha.", "error");
+                              } finally {
+                                setSalvandoSenha(false);
+                              }
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                          >
+                            {salvandoSenha ? "Salvando..." : "Salvar"}
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-amber-700/70 dark:text-amber-400/60 leading-snug">
+                          Mínimo de 4 caracteres. A senha fica visível na ficha depois de salva.
+                        </p>
+                      </div>
+                    )}
                   </div>
                   )}
 

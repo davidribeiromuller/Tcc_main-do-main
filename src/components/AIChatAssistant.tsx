@@ -4,7 +4,6 @@ import {
   Sparkles, Send, X, Bot, User, MessageSquare, AlertCircle,
   Mic, MicOff, Volume2, VolumeX, Check, Ban, Ear, Square,
 } from "lucide-react";
-import { ARAUCARIA_SCHOOLS } from "../lib/schoolsData";
 import {
   falar,
   pararFala,
@@ -20,6 +19,7 @@ import {
   type AcaoInterpretada,
   type ContextoAcoes,
 } from "../lib/voiceActions";
+import { responderLocalmente } from "../lib/assistantKnowledge";
 
 interface Message {
   id: string;
@@ -31,6 +31,10 @@ interface Message {
 }
 
 interface AIChatAssistantProps {
+  /** Eventos atuais — usados pelo repertório local para falar de agenda real. */
+  eventos?: Array<any>;
+  /** Usuário conectado (para personalizar a saudação). */
+  nomeUsuario?: string;
   /**
    * Contexto para o assistente executar ações no app.
    *
@@ -52,7 +56,11 @@ interface AIChatAssistantProps {
  * A leitura automática é desligada por padrão: falar sem o usuário pedir é
  * invasivo e atrapalha em ambiente escolar.
  */
-export default function AIChatAssistant({ contextoAcoes }: AIChatAssistantProps = {}) {
+export default function AIChatAssistant({
+  contextoAcoes,
+  eventos,
+  nomeUsuario,
+}: AIChatAssistantProps = {}) {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -154,27 +162,19 @@ export default function AIChatAssistant({ contextoAcoes }: AIChatAssistantProps 
     }
   };
 
-  /** Resposta do modo de contingência (sem servidor de IA). */
-  const respostaLocal = (texto: string): string => {
-    let reply =
-      "Olá! Como **Assistente Elo**, estou operando em modo de contingência local do **eloEscola**.\n\n" +
-      "O portal conecta as 6 escolas estaduais de Araucária (Szymanski, Helena Wysocki, Maria da Graça, Campo Guajuvira, Marilze Brand e Cecília Meireles) e os eventos escolares de Araucária e Curitiba.";
-
-    const lower = texto.toLowerCase();
-    if (lower.includes("escola") || lower.includes("colegio") || lower.includes("szymanski") || lower.includes("wysocki")) {
-      reply =
-        "🏫 **Escolas de Araucária conectadas ao eloEscola**:\n" +
-        ARAUCARIA_SCHOOLS.map((s, i) => `${i + 1}. **${s.name}** (${s.neighborhood}) • Tel: ${s.phone}`).join("\n\n") +
-        "\n\nVocê pode clicar na aba **Escolas** no menu para conhecer a página completa de cada uma!";
-    } else if (lower.includes("evento") || lower.includes("agenda") || lower.includes("feira") || lower.includes("festival")) {
-      reply =
-        "📅 **Agenda Escolar & Cultural**:\nO portal reúne eventos de Araucária e Curitiba. Confira a lista completa na aba **Mural & Eventos**!";
-    } else if (lower.includes("gratis") || lower.includes("gratuito")) {
-      reply =
-        "🆓 **Eventos Gratuitos**:\nA maioria dos eventos listados, como feiras científicas, mostras culturais e encontros nas escolas, são totalmente gratuitos e abertos às famílias e estudantes!";
-    }
-    return reply;
-  };
+  /**
+   * Resposta quando não há servidor de IA.
+   *
+   * No GitHub Pages o `/api/ai/chat` não existe, então este é o caminho
+   * normal — e não mais um plano B pobre. O repertório em
+   * `assistantKnowledge.ts` cobre escolas, telefones, endereços, modalidades,
+   * cadastro, presença, autorização, acessibilidade, permissões e agenda.
+   */
+  const respostaLocal = (texto: string): string =>
+    responderLocalmente(texto, {
+      eventos: eventos ?? [],
+      nomeUsuario,
+    });
 
   /**
    * Tenta executar a mensagem como uma AÇÃO no app.

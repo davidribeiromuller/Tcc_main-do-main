@@ -180,6 +180,11 @@ Regras obrigatórias:
   a data é confiável.
 - Em "source_name"/"source_url", informe a origem (site oficial, calendário
   escolar, edital). Se não houver URL oficial, deixe "source_url" vazio.
+- Em "website", coloque o LINK DE INSCRIÇÃO ou a página oficial do evento
+  (onde o aluno se inscreve ou vê a programação). Use apenas URLs que você
+  conhece de fato — de organizadores como OBMEP, OBI, ONHB, UFPR, UTFPR,
+  SEED-PR, JEPS. NUNCA monte uma URL por dedução: link errado manda o aluno
+  para o site errado. Se não souber, deixe "website" vazio.
 - NUNCA invente um evento. Se não tiver confiança mínima, não inclua.
 - Descrições objetivas, de 1 a 3 frases, em português do Brasil.
 
