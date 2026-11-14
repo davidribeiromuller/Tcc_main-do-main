@@ -1002,3 +1002,79 @@ e divergentes entre o boot e o listener de `popstate`:
 | Verificação jsdom — `min-h-full` no conteúdo, botão só onde deve aparecer | 5/5 |
 | `tsc --noEmit` | 0 erros |
 | `npm run build` | ok (5.25 s) |
+
+---
+
+## 18. Rodada 14 — design mobile, cabeçalho duplicado e agenda pessoal
+
+### 18.1 Cabeçalho duplicado na tela de eventos
+
+**Sintoma**: no celular, a tela de Eventos mostrava **duas barras** no topo —
+uma com "eloEscola / Mural & Eventos" + avatar (o `MobileHeader` global) e
+outra logo abaixo com "Eventos" + lupa + botão + **outro** avatar de perfil.
+
+**Causa**: o `Feed` tinha o próprio cabeçalho completo, herdado de quando era
+a única tela do app. Depois que o `MobileHeader` global entrou, os dois
+passaram a coexistir.
+
+**Correção** — uma barra só:
+- **Mobile**: título compacto + **lupa** + botão **"Compromisso"**. O avatar
+  saiu (ele já está no `MobileHeader`).
+- **Desktop**: versão completa com as mesmas ações.
+- A lupa agora alterna o rótulo ("Pesquisar"/"Fechar busca") e o ícone vira X
+  quando a busca está aberta — antes o botão ficava sem feedback visual.
+
+### 18.2 Agenda pessoal
+
+Novo recurso: o usuário pode cadastrar **compromissos próprios** (prova,
+trabalho, reunião de família) sem sujar o mural público.
+
+- `src/lib/personalEventsService.ts` **(novo)** — CRUD no Supabase
+  (`personal_events`) com fallback local. Lista por dono (agenda) ou todos
+  (painel).
+- `src/components/PersonalEventModal.tsx` **(novo)** — bottom sheet no celular,
+  diálogo no desktop. Campos: título, data, horário, local, tipo, detalhes,
+  anotações e lembrete. Rodapé fixo para o botão "Salvar" não sair da tela.
+- No `Feed`: seção **"Minha agenda"** acima do mural, com rolagem horizontal e
+  botão de remover por item. Compromissos passados ficam esmaecidos no fim.
+
+**Regras respeitadas**: só datas de hoje em diante (mesma regra dos eventos da
+escola) e cada compromisso fica amarrado ao `owner_id` de quem criou.
+
+### 18.3 Tabela no Painel ADM
+
+Nova aba **"Agenda pessoal"** com **todos** os compromissos de **todos** os
+usuários, cada um com seu dono:
+
+| Coluna | Conteúdo |
+|---|---|
+| Compromisso | título + anotação |
+| **Dono** | avatar com iniciais, nome e e-mail |
+| Data | dd mmm aaaa + horário (marca "já passou") |
+| Local | local ou cidade |
+| Tipo | Pessoal, Estudo, Prova... |
+| Ações | remover (com confirmação) |
+
+Contador no botão da aba, busca por dono/título/cidade e botão de atualizar.
+Abrir a aba carrega do banco; criar ou remover no Feed atualiza o painel via
+contador (`recarregarPessoais`).
+
+### 18.4 Design mobile — respiro em vez de tudo compacto
+
+| Onde | Antes | Depois |
+|---|---|---|
+| Cabeçalho do Feed | `p-6` (24px em 360px de tela) | `px-4 py-3` |
+| Filtros | `px-6` | `px-4`, duas linhas com `gap-3` |
+| Cards | `h-44` fixo, `p-4` | `h-40` no mobile, `p-3.5`; título com `line-clamp-2` |
+| Chips de filtro | `py-1.5` (~28px de alvo) | `py-2` no mobile (alvo confortável) |
+| Configurações / Calendário | `p-6` | `px-4 py-4 sm:p-6` |
+| Modal | diálogo centralizado | bottom sheet com alça e `max-h-[92dvh]` |
+
+### Validação
+
+| Suíte | Resultado |
+|---|---|
+| `test-round14.mjs` — CRUD, validações, isolamento por dono, ordenação e regressão do cabeçalho | **36/36** |
+| jsdom — `PersonalEventModal` (abre, valida, salva, mês 0-indexado) | 9/9 |
+| `tsc --noEmit` | 0 erros |
+| `npm run build` | ok (5.86 s) |

@@ -273,7 +273,7 @@ export default function Settings({
     >
       {/* Header */}
       <div className="border-b border-brand-primary/10">
-        <div className="max-w-4xl mx-auto w-full flex items-center gap-3 p-6">
+        <div className="max-w-4xl mx-auto w-full flex items-center gap-3 px-4 py-4 sm:p-6">
           {editMode ? (
             <button
               onClick={() => setEditMode(false)}
@@ -307,7 +307,7 @@ export default function Settings({
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -15 }}
-            className="max-w-4xl mx-auto w-full p-6 flex flex-col gap-6"
+            className="max-w-4xl mx-auto w-full px-4 py-4 sm:p-6 flex flex-col gap-4 sm:gap-6"
           >
             {/* Short User Snapshot */}
             <div className="bg-brand-secondary/30 dark:bg-brand-card-dark rounded-3xl p-4 flex items-center gap-4 border border-brand-primary/10">
@@ -613,7 +613,7 @@ export default function Settings({
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -15 }}
-            className="max-w-4xl mx-auto w-full p-6"
+            className="max-w-4xl mx-auto w-full px-4 py-4 sm:p-6"
           >
             <form onSubmit={handleSaveProfile} className="flex flex-col gap-4">
               {/* Profile Image Section */}

@@ -1,10 +1,23 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Search, MapPin, Calendar, CircleDollarSign, PlusCircle, X, Map as MapIcon, GraduationCap, Globe2 } from "lucide-react";
+import {
+  Search, MapPin, Calendar, CircleDollarSign, PlusCircle, X, GraduationCap, Globe2,
+  CalendarPlus, Trash2, Clock, User, Sparkles, ArrowRight,
+} from "lucide-react";
 import { Event } from "../types";
 import { resolveEventCity, classifyEventAsSchool } from "../lib/eventClassification";
 import AIChatAssistant from "./AIChatAssistant";
 import EventLocationModal from "./EventLocationModal";
+import PersonalEventModal from "./PersonalEventModal";
+import {
+  listarEventosPessoais,
+  criarEventoPessoal,
+  removerEventoPessoal,
+  ordenarEventosPessoais,
+  eventoPessoalPassou,
+  type PersonalEvent,
+  type NovoEventoPessoal,
+} from "../lib/personalEventsService.ts";
 
 interface FeedProps {
   events: Event[];
@@ -20,6 +33,8 @@ interface FeedProps {
   onUserCoordsChange?: (coords: { lat: number; lng: number }) => void;
   isLoading?: boolean;
   onReload?: () => void;
+  /** Avisa o App que um compromisso pessoal foi criado (para o painel). */
+  onEventoPessoalCriado?: () => void;
 }
 
 const normalizeString = (str: string) => {
@@ -43,6 +58,7 @@ export default function Feed({
   onUserCoordsChange,
   isLoading,
   onReload,
+  onEventoPessoalCriado,
 }: FeedProps) {
   const [localSearchOpen, setLocalSearchOpen] = useState(false);
   const [localSearchTerm, setLocalSearchTerm] = useState("");
@@ -52,6 +68,63 @@ export default function Feed({
   const [cityFilter, setCityFilter] = useState<CityFilter>("todas");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("todos");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  /** Agenda pessoal do usuário conectado. */
+  const [eventosPessoais, setEventosPessoais] = useState<PersonalEvent[]>([]);
+  const [modalPessoalAberto, setModalPessoalAberto] = useState(false);
+  const [mostrarPessoais, setMostrarPessoais] = useState(true);
+
+  /**
+   * Carrega os compromissos pessoais de quem está conectado.
+   *
+   * Não entram em `events` de propósito: são agenda particular e não devem
+   * aparecer no mural público, no mapa nem no calendário da escola.
+   */
+  useEffect(() => {
+    let cancelado = false;
+
+    const carregar = async () => {
+      if (!currentUser?.id) {
+        setEventosPessoais([]);
+        return;
+      }
+      const lista = await listarEventosPessoais(currentUser.id);
+      if (!cancelado) setEventosPessoais(ordenarEventosPessoais(lista));
+    };
+
+    void carregar();
+    return () => {
+      cancelado = true;
+    };
+  }, [currentUser?.id]);
+
+  /** Salva um compromisso novo. Devolve mensagem de erro, ou null se deu certo. */
+  const salvarEventoPessoal = async (
+    dados: Omit<NovoEventoPessoal, "ownerId" | "ownerName" | "ownerEmail">
+  ): Promise<string | null> => {
+    if (!currentUser?.id) {
+      return "Entre na sua conta para salvar compromissos na sua agenda.";
+    }
+
+    const { evento, erro } = await criarEventoPessoal({
+      ...dados,
+      ownerId: currentUser.id,
+      ownerName: currentUser.nome || currentUser.email || "Usuário",
+      ownerEmail: currentUser.email || null,
+    });
+
+    if (erro || !evento) return erro || "Não foi possível salvar o compromisso.";
+
+    setEventosPessoais((prev) => ordenarEventosPessoais([evento, ...prev]));
+    onEventoPessoalCriado?.();
+    return null;
+  };
+
+  const apagarEventoPessoal = async (id: number) => {
+    await removerEventoPessoal(id, currentUser?.id);
+    setEventosPessoais((prev) => prev.filter((e) => e.id !== id));
+    onEventoPessoalCriado?.();
+  };
 
   // State for location permission modal on entering event from feed
   const [selectedEventForLocation, setSelectedEventForLocation] = useState<Event | null>(null);
@@ -146,59 +219,61 @@ export default function Feed({
       animate={{ opacity: 1 }}
       className="flex flex-col h-full overflow-y-auto pb-24 text-brand-text-light dark:text-brand-text-dark"
     >
-      {/* Header */}
-      <div className="border-b border-brand-primary/10 bg-brand-bg-light/80 dark:bg-brand-bg-dark/80 backdrop-blur-md sticky top-0 z-30">
-        <div className="max-w-6xl mx-auto w-full flex justify-between items-center p-6">
-          <div>
-            <h1 className="text-2xl font-display font-medium tracking-tight">Eventos</h1>
-            <p className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">
-              Escola estadual Helena Wysocki
+      {/*
+        Cabeçalho do Feed.
+        ---------------------------------------------------------------
+        No celular, o MobileHeader (do App) já mostra "eloEscola / Mural &
+        Eventos" e o avatar — e este bloco repetia "Eventos" + avatar do
+        perfil logo abaixo, formando duas barras empilhadas.
+
+        Agora existe UMA barra só:
+        - mobile: título compacto + lupa + "+" de compromisso pessoal.
+          Nada de avatar aqui (ele já está no MobileHeader).
+        - desktop: versão completa com título e as mesmas ações.
+      */}
+      <div className="border-b border-brand-primary/10 bg-brand-bg-light/90 dark:bg-brand-bg-dark/90 backdrop-blur-md sticky top-0 z-30">
+        <div className="max-w-6xl mx-auto w-full flex items-center justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4">
+          <div className="min-w-0">
+            <h1 className="text-lg sm:text-2xl font-display font-semibold tracking-tight text-slate-900 dark:text-white truncate">
+              Eventos
+            </h1>
+            <p className="text-[10px] text-slate-400 font-mono uppercase tracking-wider truncate">
+              {currentUser?.nome ? `Olá, ${currentUser.nome.split(" ")[0]}` : "Araucária · Curitiba"}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Lupa: sempre no canto superior, ao lado das ações */}
             <button
+              type="button"
               onClick={toggleSearchOpen}
-              className={`p-2.5 rounded-full hover:scale-105 active:scale-95 transition-all shadow-sm ${
+              aria-label={isSearchOpen ? "Fechar busca" : "Pesquisar eventos"}
+              aria-expanded={isSearchOpen}
+              title={isSearchOpen ? "Fechar busca" : "Pesquisar eventos"}
+              className={`w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-sm ${
                 isSearchOpen
                   ? "bg-brand-accent text-white"
-                  : "bg-white dark:bg-brand-card-dark text-slate-600 dark:text-brand-text-dark"
+                  : "bg-white dark:bg-brand-card-dark text-slate-600 dark:text-brand-text-dark border border-brand-primary/15"
               }`}
-              title="Pesquisar eventos"
             >
-              <Search size={18} />
+              {isSearchOpen ? <X size={18} /> : <Search size={18} />}
             </button>
-            
+
+            {/* Adicionar compromisso pessoal */}
             <button
-              onClick={() => onNavigate("calendar")}
-              className="p-2.5 rounded-full bg-brand-primary/20 text-brand-accent dark:text-brand-primary hover:scale-105 active:scale-95 transition-all"
-              title="Adicionar evento"
+              type="button"
+              onClick={() => setModalPessoalAberto(true)}
+              aria-label="Adicionar compromisso pessoal"
+              title="Adicionar compromisso pessoal"
+              className="h-10 px-3 sm:px-3.5 rounded-full bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
             >
-              <PlusCircle size={18} />
-            </button>
- 
-            {/* Profile link for mobile settings */}
-            <button
-              onClick={() => onNavigate("settings")}
-              className="md:hidden flex items-center justify-center w-10 h-10 rounded-full bg-white dark:bg-brand-card-dark border border-brand-primary/15 hover:scale-105 active:scale-95 transition-all shadow-sm overflow-hidden"
-              title="Configurações"
-            >
-              {currentUser?.foto_perfil ? (
-                <img
-                  src={currentUser.foto_perfil}
-                  alt={currentUser.nome || "Perfil"}
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="w-full h-full bg-slate-100 flex items-center justify-center text-xs font-semibold text-slate-600 uppercase">
-                  {(currentUser?.nome || currentUser?.email || "U").substring(0, 2)}
-                </div>
-              )}
+              <CalendarPlus size={17} />
+              <span className="hidden xs:inline sm:inline">Compromisso</span>
             </button>
           </div>
         </div>
       </div>
- 
+
       {/* Search Input block */}
       <AnimatePresence>
         {isSearchOpen && (
@@ -208,7 +283,7 @@ export default function Feed({
             exit={{ height: 0, opacity: 0 }}
             className="bg-slate-50 dark:bg-brand-card-dark/30 border-b border-brand-primary/10 overflow-hidden"
           >
-            <div className="max-w-6xl mx-auto w-full px-6 py-3">
+            <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 py-3">
               <div className="relative flex items-center w-full">
                 <Search className="absolute left-4 text-slate-400 dark:text-slate-500" size={18} />
                 <input
@@ -235,8 +310,10 @@ export default function Feed({
       </AnimatePresence>
 
       {/* Filtros: localidade e tipo de evento */}
-      <div className="max-w-6xl mx-auto w-full px-6 pt-5">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 flex-wrap">
+      {/* Filtros: no celular ficam em duas linhas com respiro, em vez de
+          espremidos numa faixa só. */}
+      <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 pt-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 sm:flex-wrap">
           <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Filtrar por localidade">
             <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mr-0.5">Cidade</span>
             {([
@@ -249,7 +326,7 @@ export default function Feed({
                 type="button"
                 onClick={() => setCityFilter(opt.id)}
                 aria-pressed={cityFilter === opt.id}
-                className={`px-3 py-1.5 rounded-full text-[11px] font-semibold transition-all cursor-pointer active:scale-95 border ${
+                className={`px-3 py-2 sm:py-1.5 rounded-full text-[11px] font-semibold transition-all cursor-pointer active:scale-95 border ${
                   cityFilter === opt.id
                     ? "bg-brand-accent text-white border-brand-accent shadow-sm"
                     : "bg-white dark:bg-brand-card-dark text-slate-600 dark:text-slate-300 border-brand-primary/20 dark:border-white/10 hover:border-brand-accent/40"
@@ -276,7 +353,7 @@ export default function Feed({
                   type="button"
                   onClick={() => setTypeFilter(opt.id)}
                   aria-pressed={typeFilter === opt.id}
-                  className={`px-3 py-1.5 rounded-full text-[11px] font-semibold transition-all cursor-pointer active:scale-95 border flex items-center gap-1.5 ${
+                  className={`px-3 py-2 sm:py-1.5 rounded-full text-[11px] font-semibold transition-all cursor-pointer active:scale-95 border flex items-center gap-1.5 ${
                     typeFilter === opt.id
                       ? "bg-brand-accent text-white border-brand-accent shadow-sm"
                       : "bg-white dark:bg-brand-card-dark text-slate-600 dark:text-slate-300 border-brand-primary/20 dark:border-white/10 hover:border-brand-accent/40"
@@ -308,8 +385,90 @@ export default function Feed({
         )}
       </div>
 
+      {/*
+        Minha agenda — compromissos pessoais do usuário.
+        Fica ANTES dos eventos da escola, porque é o que ele mesmo marcou e
+        costuma ser mais urgente. Só aparece para quem está conectado e tem
+        algum compromisso.
+      */}
+      {currentUser?.id && eventosPessoais.length > 0 && (
+        <section className="max-w-6xl mx-auto w-full px-4 sm:px-6 pt-5">
+          <div className="flex items-center justify-between gap-2 mb-2.5">
+            <button
+              type="button"
+              onClick={() => setMostrarPessoais((v) => !v)}
+              aria-expanded={mostrarPessoais}
+              className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 cursor-pointer"
+            >
+              <Sparkles size={13} className="text-emerald-700 dark:text-emerald-400" />
+              Minha agenda
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 normal-case tracking-normal">
+                {eventosPessoais.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setModalPessoalAberto(true)}
+              className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 hover:underline cursor-pointer flex items-center gap-1"
+            >
+              <PlusCircle size={12} /> Adicionar
+            </button>
+          </div>
+
+          {mostrarPessoais && (
+            <ul className="flex gap-2.5 overflow-x-auto pb-1 -mx-1 px-1 snap-x">
+              {eventosPessoais.map((pessoal) => {
+                const MESES_CURTOS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+                const passou = eventoPessoalPassou(pessoal);
+
+                return (
+                  <li
+                    key={pessoal.id}
+                    className={`snap-start shrink-0 w-[230px] rounded-2xl border p-3 ${
+                      passou
+                        ? "bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 opacity-60"
+                        : "bg-white dark:bg-brand-card-dark border-emerald-200 dark:border-emerald-900/50 shadow-xs"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] font-mono uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                          {pessoal.day} {MESES_CURTOS[pessoal.month]} · {pessoal.year}
+                          {pessoal.time ? ` · ${pessoal.time}` : ""}
+                        </p>
+                        <p className="text-xs font-bold text-slate-900 dark:text-white mt-0.5 line-clamp-2">
+                          {pessoal.title}
+                        </p>
+                        {pessoal.location && (
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1 truncate">
+                            <MapPin size={9} className="shrink-0" />
+                            {pessoal.location}
+                          </p>
+                        )}
+                        {passou && (
+                          <p className="text-[9px] font-semibold text-slate-400 mt-1">já passou</p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void apagarEventoPessoal(pessoal.id)}
+                        aria-label={`Remover ${pessoal.title}`}
+                        title="Remover da agenda"
+                        className="p-1 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer shrink-0"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      )}
+
       {/* Events List */}
-      <div className="max-w-6xl mx-auto w-full p-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+      <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 pt-5 pb-24 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
         {isLoading && filteredEvents.length === 0 ? (
           // Skeleton loading state
           Array.from({ length: 4 }).map((_, i) => (
@@ -351,7 +510,7 @@ export default function Feed({
               className="relative rounded-3xl overflow-hidden bg-white dark:bg-brand-card-dark shadow-sm hover:shadow-md hover:scale-[1.01] active:scale-[0.99] transition-all duration-200 cursor-pointer group border border-brand-primary/15"
             >
               {/* Image banner with Gradient Overlay */}
-              <div className="relative w-full h-44 overflow-hidden">
+              <div className="relative w-full h-40 sm:h-44 overflow-hidden">
                 <img
                   src={event.image || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600"}
                   alt={event.title}
@@ -361,7 +520,7 @@ export default function Feed({
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-black/10" />
                 
                 {/* Title Overlay in Banner */}
-                <h3 className="absolute bottom-4 left-4 right-4 text-white font-display font-semibold text-lg leading-tight drop-shadow-md">
+                <h3 className="absolute bottom-3 left-3.5 right-3.5 text-white font-display font-semibold text-base sm:text-lg leading-tight drop-shadow-md line-clamp-2">
                   {event.title}
                 </h3>
 
@@ -395,7 +554,7 @@ export default function Feed({
               </div>
 
               {/* Feed Meta Info */}
-              <div className="p-4 flex flex-col gap-2 bg-white dark:bg-brand-card-dark">
+              <div className="p-3.5 sm:p-4 flex flex-col gap-2 bg-white dark:bg-brand-card-dark">
                 <div 
                   onClick={(e) => {
                     if (onOpenMap) {
@@ -433,6 +592,14 @@ export default function Feed({
         }}
         onAuthorize={handleAuthorizeLocation}
         onSkip={handleSkipLocation}
+      />
+
+      {/* Formulário de compromisso pessoal (bottom sheet no celular) */}
+      <PersonalEventModal
+        isOpen={modalPessoalAberto}
+        onClose={() => setModalPessoalAberto(false)}
+        onSalvar={salvarEventoPessoal}
+        nomeUsuario={currentUser?.nome}
       />
 
       <AIChatAssistant />

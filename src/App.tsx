@@ -489,6 +489,13 @@ export default function App() {
   const [eventoPreRascunho, setEventoPreRascunho] = useState<CamposEvento | null>(null);
 
   /**
+   * Contador que muda quando um compromisso pessoal é criado/removido.
+   * O painel usa como dependência para recarregar a tabela sem precisar
+   * reabrir a aba.
+   */
+  const [recarregarPessoais, setRecarregarPessoais] = useState(0);
+
+  /**
    * Descreve a tela atual em texto — é o que o assistente lê em voz alta
    * quando o usuário pede "leia a tela".
    *
@@ -2141,6 +2148,11 @@ export default function App() {
                         navigateTo("map");
                       }}
                       onUserCoordsChange={setUserCoords}
+                      onEventoPessoalCriado={() => {
+                        // O painel lê direto do banco quando abre a aba; nada a
+                        // sincronizar aqui além de manter o contador coerente.
+                        setRecarregarPessoais((n) => n + 1);
+                      }}
                     />
                   </motion.div>
                 )}
@@ -2253,6 +2265,7 @@ export default function App() {
                       onToggleTheme={toggleTheme}
                       preRascunho={eventoPreRascunho}
                       onConsumirPreRascunho={() => setEventoPreRascunho(null)}
+                      recarregarPessoais={recarregarPessoais}
                     />
                   </motion.div>
                 )}

@@ -328,7 +328,7 @@ export default function CalendarView({
     >
       {/* Top Header */}
       <div className="border-b border-brand-primary/10 bg-white/70 dark:bg-brand-card-dark/60 backdrop-blur-md sticky top-0 z-30 shadow-xs">
-        <div className="max-w-6xl mx-auto w-full flex justify-between items-center px-6 py-4">
+        <div className="max-w-6xl mx-auto w-full flex justify-between items-center px-4 sm:px-6 py-3 sm:py-4 gap-3">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-2xl bg-brand-primary/15 text-brand-primary dark:text-emerald-400 flex items-center justify-center">
               <CalendarIcon size={22} />
