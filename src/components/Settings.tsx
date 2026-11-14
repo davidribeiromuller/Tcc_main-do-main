@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { getUserDisplayName, getUserInitials, isGuestSession } from "../lib/userDisplay.ts";
+import { listarParticipacoes } from "../lib/participationsService.ts";
 import { 
   User, 
   Bell, 
@@ -88,17 +89,16 @@ export default function Settings({
   // Load user's permanent participation history
   useEffect(() => {
     if (user?.id) {
+      /*
+        Lê do Supabase (com fallback para o backend local e para o cache). A
+        versão anterior chamava /api/... direto e, no GitHub Pages, recebia 404
+        — o histórico aparecia sempre vazio.
+      */
       const fetchParticipations = async () => {
         setLoadingParticipations(true);
         try {
-          const token = localStorage.getItem("token") || "";
-          const res = await fetch(`/api/users/${user.id}/participations`, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          const data = await res.json();
-          if (data.participations) {
-            setParticipations(data.participations);
-          }
+          const lista = await listarParticipacoes(user.id);
+          setParticipations(lista);
         } catch (err) {
           console.warn("Aviso ao carregar participações:", err);
         } finally {

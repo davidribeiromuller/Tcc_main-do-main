@@ -775,3 +775,150 @@ o que faltava era um resumo curto, com a informação que importa em cada tela.
 | Pergunta comum não vira ação | 4 |
 
 `tsc --noEmit`: 0 erros · `npm run build`: ok.
+
+---
+
+## 16. Rodada 12 — mobile, comandos da IA, links de inscrição, presença e painel
+
+### 16.1 "Erro ao confirmar presença" (e os 404 do console)
+
+**Sintoma**: a screenshot do console mostra uma sequência de
+`Failed to load resource: the server responded with a status of 404` em
+`/api/events`, `/api/users/200/participations` e `/api/events/:id/...`.
+
+**Causa raiz**: o app roda em **GitHub Pages (estático)** — não existe servidor
+Express em produção. Todas as chamadas `/api/...` vão para uma rota que só
+existe no `server.ts` local. Pior: a de participações **nem tabela tinha** no
+banco (`event_participations` não existia), então a confirmação de presença
+NUNCA funcionou em produção — só no `npm run dev`.
+
+**Correção**:
+- Tabela `event_participations` criada no Supabase, com restrição única
+  `(user_id, event_id)` e RLS de leitura/escrita.
+- `src/lib/participationsService.ts` **(novo)** — grava direto no Supabase,
+  com fallback para o backend local e cópia em `localStorage`. A confirmação é
+  **idempotente**: confirmar de novo devolve "já confirmada", não erro.
+- `App.tsx` e `Settings.tsx` passaram a usar o serviço.
+- As demais rotas `/api/*` (`events`, `authorizations`) agora passam por
+  `fetchJsonApi`, que em hospedagem estática nem toca na rede — o console
+  deixa de encher de 404 e o fallback do Supabase assume na hora.
+
+### 16.2 Modo escuro removido do painel
+
+A pedido: o alternador fica **apenas em Configurações e na tela de
+introdução**. As classes `dark:` continuam no painel (ele segue o tema global),
+mas não há mais botão ali.
+
+### 16.3 Senha visível e editável na ficha do usuário
+
+**Causa raiz**: o `SELECT` de `fetchUsersDirectFromSupabase` não incluía a
+coluna `password`. O campo chegava `undefined` na interface e a ficha mostrava
+"não definida" para todo mundo — mesmo com a senha gravada no banco.
+
+**Correção**:
+- `password` (e também `matricula`, `personal_email`, `must_change_password`,
+  `link_verified_at`) incluída no `SELECT`.
+- `updateUserDirectInSupabase` passou a aceitar `password`, **só gravando
+  quando o valor não é vazio** — campo em branco nunca apaga a senha de
+  ninguém.
+- Botão de lápis na ficha abre o campo "Nova senha", com validação mínima de
+  4 caracteres e confirmação visual.
+
+### 16.4 O app "voltava para a tela de início do nada"
+
+**Causa raiz (finalmente identificada)**: `handleAuthenticatedGoogleUser`
+terminava com `setActiveScreen("feed")`. Esse handler é chamado em **todo**
+evento de autenticação do Supabase — `SIGNED_IN`, `INITIAL_SESSION` e,
+principalmente, **`TOKEN_REFRESHED`**, que acontece sozinho a cada ~50 minutos e
+também quando a aba volta a ficar visível. Resultado: quem estava no meio do
+cadastro de um evento era jogado ao mural sem ter feito nada.
+
+**Correção**:
+- O redirecionamento agora só acontece se a tela atual for uma **tela de
+  entrada** (`splash`, `welcome`, `login`, `register`, `codeSent`).
+  Quem já está navegando fica onde está.
+- Restauração de tela no primeiro carregamento (uma única vez), a partir do
+  `sessionStorage`, sem sobrescrever uma tela já navegada e ignorando telas que
+  dependem de contexto (`schoolDetail`, `eventDetail`).
+
+### 16.5 Design no mobile
+
+Auditoria com foco nos problemas que realmente atrapalham no celular:
+
+| Problema encontrado | Correção |
+|---|---|
+| Inputs com `text-xs` (12px) → **iOS dava zoom automático** ao focar, deslocando a tela | `font-size: 16px` em campos de formulário **abaixo de 640px**, via CSS |
+| `100vh` no iOS inclui a barra de endereço → rodapé/nav escondidos | `min-height: 100dvh` |
+| Painel com `overflow-x: auto !important` no container principal → **a página toda deslizava para o lado** e o cabeçalho `sticky` descolava | Rolagem horizontal só a partir de 768px; no celular, `overflow-x: hidden` (as tabelas e a barra de abas mantêm a rolagem própria) |
+| Botões de ícone (olho, copiar, fechar) com ~24px → difíceis de acertar | mínimo de 40×40px em `@media (pointer: coarse)` |
+| Textos longos (e-mail, URL) estourando a largura | `overflow-wrap: anywhere`; `html/body` com `overflow-x: hidden` |
+| Notch do iPhone | `padding-bottom: env(safe-area-inset-bottom)` |
+
+### 16.6 Repertório de comandos da IA ampliado
+
+Antes, fora do servidor Express o assistente só sabia responder **três**
+assuntos (escolas, eventos, "gratuito") — qualquer outra pergunta caía na
+mesma resposta genérica.
+
+`src/lib/assistantKnowledge.ts` **(novo)** traz um repertório que roda 100% no
+navegador (sem chave, sem rede), com pontuação por palavras-chave:
+
+| Tópico | Exemplo de pergunta |
+|---|---|
+| Escola específica (6) | "me fala da Helena Wysocki" |
+| Telefones | "qual o telefone das escolas?" |
+| Endereços / CEP | "onde fica a escola?" |
+| Modalidades e cursos | "quais cursos técnicos têm?" |
+| Cadastro e login | "como crio conta?" |
+| Confirmar presença | "como confirmar presença?" |
+| Eventos gratuitos / pagos | "tem evento grátis?" |
+| Agenda | "o que tem no calendário?" |
+| Escolar × aberto ao público | "o que é evento escolar?" |
+| Autorização de responsável | "precisa de autorização?" |
+| Acessibilidade | "tem modo escuro?" |
+| Quem publica | "quem pode publicar?" |
+| Sugestões/motor local | "como funcionam as sugestões?" |
+| Serviços (transporte, merenda) | "como faço matrícula?" |
+| Ajuda do assistente | "o que você faz?" |
+| Saudações | "oi" |
+
+Escolas específicas têm peso maior, então "telefone da Wysocki" traz o telefone
+da escola e não a lista genérica.
+
+### 16.7 Busca na internet pelo link de inscrição
+
+`src/lib/eventLinksService.ts` **(novo)** — em três camadas:
+
+1. **Catálogo curado** (sem rede, o mais confiável): OBMEP, OBI, ONHB, MOBFOG,
+   OBA, OBQ, OBF, OBB, OLP, Vestibular UFPR/UTFPR, PUCPR, JEPS, JEBS, ENEM,
+   SEED-PR, entre outros.
+2. **Busca na internet** — API pública do DuckDuckGo (sem chave), com timeout
+   de 4 s, filtrando domínios de terceiros (encurtadores, redes sociais,
+   agregadores).
+3. **Nada** — quando não acha, devolve `null` e a interface diz "sem link
+   oficial encontrado — confirme na escola".
+
+**Regra rígida: nunca inventar URL.** Um link errado manda o aluno para o site
+errado — pior do que não ter link.
+
+No painel (**Sugestões**), o botão **"Buscar links de inscrição"** preenche o
+link de cada sugestão pendente, com selo **oficial** (catálogo) ou
+**verificar** (busca na web), e o link abre em nova aba.
+
+### Validação executada
+
+| Suíte | Resultado |
+|---|---|
+| `test-round12.mjs` — links de inscrição + repertório do assistente | **32/32** |
+| `test-round12b.mjs` — confirmação de presença (mock do Supabase, idempotência, offline) | **18/18** |
+| `test-round12c.mjs` — regressão do redirecionamento / restauração de tela | **21/21** |
+| `tsc --noEmit` | 0 erros |
+| `npm run build` | ok (9.39 s) |
+| Bundle da Edge Function | 75304 bytes, 5 imports, `is_school` e `schema cache` preservados |
+
+**Pendência de deploy**: a melhoria do *prompt* da Edge Function (instrução
+para devolver `website` de inscrição) está no repositório e no bundle
+regenerado, mas **não foi publicada** — a rede deste ambiente bloqueia a API
+do Supabase (`api.supabase.com` inacessível). O deploy pode ser feito pelo CLI
+(`supabase functions deploy ai-event-scout`) ou pelo painel. A busca de links
+**não depende disso**: ela roda no front-end, no botão do painel.

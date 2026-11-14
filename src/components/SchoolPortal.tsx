@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { User, Event } from "../types.ts";
 import { SchoolProfile, ARAUCARIA_SCHOOLS, SCHOOL_IMAGES } from "../lib/schoolsData.ts";
+import { fetchJsonApi } from "../lib/staticHosting.ts";
 import { mergeNews, saveNews } from "../lib/schoolNewsStore.ts";
 import { safeParseJsonResponse } from "../lib/apiResilience.ts";
 
@@ -283,12 +284,14 @@ export default function SchoolPortal({
       if (onAddEvent) {
         await onAddEvent(eventPayload);
       } else {
-        const res = await fetch("/api/events", {
+        // Sem backend (GitHub Pages) `fetchJsonApi` devolve null: quem grava é o
+        // fallback do Supabase chamado pelo App após esta função.
+        const res = await fetchJsonApi("/api/events", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(eventPayload)
         });
-        if (!res.ok) throw new Error("Erro ao salvar evento.");
+        if (res && !res.ok) throw new Error("Erro ao salvar evento.");
       }
 
       setShowEventModal(false);

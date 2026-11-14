@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { buscarLinkInscricao, type ResultadoBuscaInscricao } from "../lib/eventLinksService.ts";
 import {
   Sparkles,
   RefreshCw,
@@ -13,6 +14,7 @@ import {
   ShieldCheck,
   Cpu,
   AlertTriangle,
+  Link as LinkIcon,
 } from "lucide-react";
 import {
   fetchEventSuggestions,
@@ -77,6 +79,18 @@ export default function EventSuggestionsTab({
   } | null>(null);
   const [mostrarConfigIA, setMostrarConfigIA] = useState(false);
 
+  /**
+   * Links de inscrição descobertos por sugestão.
+   *
+   * Guardado por id da sugestão. `undefined` = ainda não buscou; `null` = já
+   * buscou e não achou nada confiável. Separamos os dois estados para não
+   * repetir a busca e para poder mostrar "nenhum link oficial encontrado".
+   */
+  const [linksInscricao, setLinksInscricao] = useState<
+    Record<number, ResultadoBuscaInscricao | null>
+  >({});
+  const [buscandoLinks, setBuscandoLinks] = useState(false);
+
   const notify = (message: string, type: "error" | "warning" | "success" | "info" = "warning") => {
     if (onShowToast) onShowToast(message, type);
   };
@@ -92,6 +106,53 @@ export default function EventSuggestionsTab({
   useEffect(() => {
     void load();
   }, []);
+
+  /**
+   * Busca o link de inscrição/site oficial de cada sugestão pendente.
+   *
+   * Só roda quando o Chefe Administrador pede: não queremos uma rajada de
+   * requisições toda vez que ele abre a aba. O serviço tem catálogo curado
+   * (sem rede) para os organizadores conhecidos e só cai na busca na internet
+   * para os demais — e nunca inventa URL.
+   */
+  const buscarLinksDeTodas = async () => {
+    if (buscandoLinks || suggestions.length === 0) return;
+    setBuscandoLinks(true);
+
+    try {
+      const resultados: Record<number, ResultadoBuscaInscricao | null> = {};
+      // Sequencial de propósito: respeitar os serviços de busca e não abrir 20
+      // conexões simultâneas em uma rede escolar.
+      for (const sugestao of suggestions) {
+        const existente = sugestao.website || sugestao.sourceUrl;
+        if (existente) {
+          resultados[sugestao.id] = {
+            url: existente,
+            organizador: sugestao.sourceName ?? null,
+            fonte: "existente" as any,
+            observacao: "Link já cadastrado na sugestão.",
+          };
+          continue;
+        }
+
+        resultados[sugestao.id] = await buscarLinkInscricao(sugestao.title, {
+          cidade: sugestao.city,
+          organizador: sugestao.sourceName,
+        });
+      }
+
+      setLinksInscricao((prev) => ({ ...prev, ...resultados }));
+      const achados = Object.values(resultados).filter((r) => r?.url).length;
+      notify(
+        achados > 0
+          ? `${achados} link(s) de inscrição encontrado(s). Confira antes de aprovar.`
+          : "Nenhum link oficial foi encontrado para estas sugestões.",
+        achados > 0 ? "success" : "info"
+      );
+    } finally {
+      setBuscandoLinks(false);
+    }
+  };
 
   const handleRunScout = async () => {
     setRunning(true);
@@ -250,6 +311,18 @@ export default function EventSuggestionsTab({
           >
             {running ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
             <span>{running ? "Pesquisando..." : "Buscar novos eventos"}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void buscarLinksDeTodas()}
+            disabled={buscandoLinks || suggestions.length === 0}
+            title="Procurar o site oficial / link de inscrição de cada sugestão"
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-slate-800 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+          >
+            {buscandoLinks ? <Loader2 size={13} className="animate-spin" /> : <LinkIcon size={13} />}
+            <span className="hidden sm:inline">
+              {buscandoLinks ? "Procurando links..." : "Buscar links de inscrição"}
+            </span>
           </button>
           <button
             type="button"
@@ -431,6 +504,55 @@ export default function EventSuggestionsTab({
                       {s.category ? ` • ${s.category}` : ""}
                     </span>
                   )}
+
+                  {/* Link de inscrição / site oficial */}
+                  {(() => {
+                    const info = linksInscricao[s.id];
+                    const urlDoCard = s.website || s.sourceUrl;
+
+                    if (info === undefined && !urlDoCard) return null;
+
+                    const urlFinal = info?.url ?? urlDoCard;
+                    if (!urlFinal) {
+                      return (
+                        <p className="mt-2 text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1">
+                          <LinkIcon size={10} className="shrink-0" />
+                          Sem link oficial encontrado — confirme na escola.
+                        </p>
+                      );
+                    }
+
+                    return (
+                      <a
+                        href={urlFinal}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 hover:underline break-all"
+                        title={info?.observacao || "Abrir site oficial do evento"}
+                      >
+                        <LinkIcon size={11} className="shrink-0" />
+                        <span className="truncate max-w-[280px]">
+                          {(() => {
+                            try {
+                              return new URL(urlFinal).hostname.replace(/^www\./, "");
+                            } catch {
+                              return "site oficial";
+                            }
+                          })()}
+                        </span>
+                        {info?.fonte === "catalogo" && (
+                          <span className="text-[9px] font-normal px-1 rounded bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 shrink-0">
+                            oficial
+                          </span>
+                        )}
+                        {info?.fonte === "web" && (
+                          <span className="text-[9px] font-normal px-1 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 shrink-0">
+                            verificar
+                          </span>
+                        )}
+                      </a>
+                    );
+                  })()}
 
                   {s.description && (
                     <p className={`text-[11px] text-slate-600 dark:text-slate-400 mt-2 leading-relaxed ${isExpanded ? "" : "line-clamp-2"}`}>
