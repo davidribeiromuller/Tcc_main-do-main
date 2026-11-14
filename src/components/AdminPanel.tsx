@@ -37,6 +37,7 @@ import {
   KeyRound,
   Copy,
   Pencil,
+  CalendarPlus,
   Table as TableIcon,
   LayoutGrid,
   Check,
@@ -51,6 +52,12 @@ import {
   Sun
 } from "lucide-react";
 import { User, Event } from "../types";
+import {
+  listarEventosPessoais,
+  removerEventoPessoal,
+  eventoPessoalPassou,
+  type PersonalEvent,
+} from "../lib/personalEventsService.ts";
 import {
   fetchDeletedEvents,
   restoreDeletedEvent,
@@ -114,6 +121,8 @@ interface AdminPanelProps {
   } | null;
   /** Avisa que o pré-rascunho foi aplicado, para não reaplicar a cada render. */
   onConsumirPreRascunho?: () => void;
+  /** Contador que muda quando um compromisso pessoal é criado/removido. */
+  recarregarPessoais?: number;
 }
 
 export default function AdminPanel({
@@ -135,6 +144,7 @@ export default function AdminPanel({
   onToggleTheme,
   preRascunho,
   onConsumirPreRascunho,
+  recarregarPessoais = 0,
 }: AdminPanelProps) {
   const isChefe = isChefeAdmin(currentUser);
   const isFuncionario = isFuncionarioAdmin(currentUser);
@@ -146,7 +156,7 @@ export default function AdminPanel({
     }
   };
 
-  const [activeTab, setActiveTab] = useState<"users" | "blocked" | "events" | "schools" | "suggestions">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "blocked" | "events" | "schools" | "suggestions" | "personal">("users");
   const [viewMode, setViewMode] = useState<"table" | "cards">(() => {
     if (typeof window !== "undefined" && window.innerWidth < 768) {
       return "cards";
@@ -410,6 +420,49 @@ export default function AdminPanel({
   const blockedUsers = filteredUsers.filter((u) => u.ativo === false);
 
   // KPIs do topo — calculados sobre a lista COMPLETA, não sobre o filtro de busca.
+  /**
+   * Eventos pessoais de TODOS os usuários — visão do painel.
+   *
+   * Carregados só quando a aba abre (ou quando o contador `recarregarPessoais`
+   * muda, sinal de que alguém criou/removeu um compromisso no Feed).
+   */
+  const [pessoais, setPessoais] = useState<PersonalEvent[]>([]);
+  const [carregandoPessoais, setCarregandoPessoais] = useState(false);
+  const [buscaPessoal, setBuscaPessoal] = useState("");
+
+  useEffect(() => {
+    if (activeTab !== "personal") return;
+    let cancelado = false;
+
+    const carregar = async () => {
+      setCarregandoPessoais(true);
+      try {
+        const lista = await listarEventosPessoais();
+        if (!cancelado) setPessoais(lista);
+      } finally {
+        if (!cancelado) setCarregandoPessoais(false);
+      }
+    };
+
+    void carregar();
+    return () => {
+      cancelado = true;
+    };
+  }, [activeTab, recarregarPessoais]);
+
+  /** Filtro por dono, título ou cidade — a tabela pode ficar grande. */
+  const pessoaisFiltrados = React.useMemo(() => {
+    const termo = buscaPessoal.trim().toLowerCase();
+    if (!termo) return pessoais;
+    return pessoais.filter((p) => {
+      const alvo = [p.title, p.ownerName, p.ownerEmail, p.city, p.location]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return alvo.includes(termo);
+    });
+  }, [pessoais, buscaPessoal]);
+
   const kpi = React.useMemo(() => {
     const total = usersList.length;
     const ativos = usersList.filter((u) => u.ativo !== false).length;
@@ -1014,6 +1067,29 @@ export default function AdminPanel({
               >
                 <Sparkles size={14} />
                 <span>Sugestões</span>
+              </button>
+
+              {/*
+                Agenda pessoal: compromissos que cada usuário cadastrou na
+                própria conta. Não são eventos da escola (não passam por
+                aprovação nem expiram), mas a gestão precisa enxergar o uso.
+              */}
+              <button
+                type="button"
+                onClick={() => setActiveTab("personal")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                  activeTab === "personal"
+                    ? "bg-emerald-800 text-white shadow-xs font-bold"
+                    : "text-emerald-800 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
+                }`}
+              >
+                <CalendarPlus size={14} />
+                <span>Agenda pessoal</span>
+                {pessoais.length > 0 && (
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-black/15 dark:bg-white/15">
+                    {pessoais.length}
+                  </span>
+                )}
               </button>
 
               {isChefe && (
@@ -2226,6 +2302,172 @@ export default function AdminPanel({
             onShowToast={notifyAdmin}
             onRefreshEvents={onRefreshEvents}
           />
+        )}
+
+        {/* TAB: Agenda pessoal de todos os usuários (com o dono de cada compromisso) */}
+        {activeTab === "personal" && (
+          <div className="mt-4 space-y-3">
+            <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 rounded-2xl p-4">
+              <h3 className="text-sm font-serif font-bold text-emerald-950 dark:text-emerald-200 flex items-center gap-2">
+                <CalendarPlus size={16} className="text-emerald-700 dark:text-emerald-400" />
+                Agenda pessoal dos usuários
+              </h3>
+              <p className="text-xs text-emerald-800 dark:text-emerald-400 mt-0.5 leading-relaxed">
+                Compromissos que cada pessoa cadastrou na própria conta. Não passam por
+                aprovação e não aparecem no mural público — aqui serve para acompanhar o uso.
+              </p>
+            </div>
+
+            {/* Resumo e busca */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  {pessoaisFiltrados.length} de {pessoais.length} compromisso(s)
+                </span>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  · {new Set(pessoais.map((p) => p.ownerId)).size} usuário(s)
+                </span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setCarregandoPessoais(true);
+                    try {
+                      setPessoais(await listarEventosPessoais());
+                    } finally {
+                      setCarregandoPessoais(false);
+                    }
+                  }}
+                  className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <RefreshCw size={11} className={carregandoPessoais ? "animate-spin" : ""} /> Atualizar
+                </button>
+              </div>
+
+              <div className="relative w-full sm:w-64">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="search"
+                  value={buscaPessoal}
+                  onChange={(e) => setBuscaPessoal(e.target.value)}
+                  placeholder="Buscar por dono, título ou cidade"
+                  aria-label="Buscar compromissos pessoais"
+                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-white dark:bg-black/25 border border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                />
+              </div>
+            </div>
+
+            {carregandoPessoais && pessoais.length === 0 ? (
+              <div className="bg-white dark:bg-brand-card-dark rounded-2xl border border-slate-200 dark:border-white/10 py-12 text-center">
+                <RefreshCw size={22} className="animate-spin text-emerald-700 mx-auto mb-2" />
+                <p className="text-xs text-slate-500">Carregando compromissos...</p>
+              </div>
+            ) : pessoaisFiltrados.length === 0 ? (
+              <div className="bg-white dark:bg-brand-card-dark rounded-2xl border border-dashed border-slate-300 dark:border-white/15 py-12 px-6 text-center">
+                <CalendarPlus size={26} className="text-slate-300 dark:text-slate-600 mx-auto mb-2" />
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  {pessoais.length === 0 ? "Nenhum compromisso cadastrado ainda" : "Nada encontrado"}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-md mx-auto">
+                  {pessoais.length === 0
+                    ? 'Quando alguém usar o botão "Compromisso" no Mural, o item aparece aqui com o nome do dono.'
+                    : "Tente outro termo de busca."}
+                </p>
+              </div>
+            ) : (
+              <div className="bg-white dark:bg-brand-card-dark rounded-2xl border border-slate-200 dark:border-white/10 overflow-hidden">
+                <div className="overflow-x-auto admin-scroll-x">
+                  <table className="w-full text-xs min-w-[52rem]">
+                    <thead>
+                      <tr className="bg-slate-50 dark:bg-white/5 text-left text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        <th scope="col" className="py-2.5 px-3 font-semibold">Compromisso</th>
+                        <th scope="col" className="py-2.5 px-3 font-semibold">Dono</th>
+                        <th scope="col" className="py-2.5 px-3 font-semibold">Data</th>
+                        <th scope="col" className="py-2.5 px-3 font-semibold">Local</th>
+                        <th scope="col" className="py-2.5 px-3 font-semibold">Tipo</th>
+                        <th scope="col" className="py-2.5 px-3 font-semibold text-right">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                      {pessoaisFiltrados.map((p) => {
+                        const MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+                        const passou = eventoPessoalPassou(p);
+
+                        return (
+                          <tr
+                            key={p.id}
+                            className={passou ? "opacity-55" : "hover:bg-slate-50/60 dark:hover:bg-white/[0.03]"}
+                          >
+                            <td className="py-2.5 px-3">
+                              <p className="font-semibold text-slate-800 dark:text-slate-100 max-w-[16rem] truncate">
+                                {p.title}
+                              </p>
+                              {p.notes && (
+                                <p className="text-[10px] text-slate-400 max-w-[16rem] truncate">{p.notes}</p>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className="w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 flex items-center justify-center text-[9px] font-bold shrink-0 uppercase">
+                                  {(p.ownerName || "?").slice(0, 2)}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-slate-700 dark:text-slate-200 truncate max-w-[11rem]">
+                                    {p.ownerName}
+                                  </p>
+                                  {p.ownerEmail && (
+                                    <p className="text-[10px] text-slate-400 truncate max-w-[11rem]">
+                                      {p.ownerEmail}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3 whitespace-nowrap font-mono text-[11px] text-slate-600 dark:text-slate-300">
+                              {String(p.day).padStart(2, "0")} {MESES[p.month]} {p.year}
+                              {p.time && <span className="block text-[10px] text-slate-400">{p.time}</span>}
+                              {passou && (
+                                <span className="block text-[9px] font-sans font-semibold text-slate-400">já passou</span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300">
+                              <span className="max-w-[12rem] truncate block">
+                                {p.location || p.city || "—"}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300">
+                                {p.category || "Pessoal"}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-right">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (!window.confirm(`Remover "${p.title}" da agenda de ${p.ownerName}?`)) return;
+                                  const ok1 = await removerEventoPessoal(p.id, p.ownerId);
+                                  if (ok1) {
+                                    setPessoais((prev) => prev.filter((x) => x.id !== p.id));
+                                    notifyAdmin("Compromisso removido.", "success");
+                                  } else {
+                                    notifyAdmin("Não foi possível remover o compromisso.", "error");
+                                  }
+                                }}
+                                aria-label={`Remover ${p.title}`}
+                                title="Remover compromisso"
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         {/* TAB 4: Gestão de Contas Institucionais das Escolas (Exclusivo ADM Chefe) */}
