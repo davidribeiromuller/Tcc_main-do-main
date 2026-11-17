@@ -1974,7 +1974,7 @@ export default function App() {
   return (
     <div
       id="app-root-container"
-      className="app-viewport relative flex flex-col justify-between bg-brand-bg-light text-brand-text-light"
+      className="app-viewport relative flex flex-col justify-between bg-brand-bg-light text-brand-text-light h-[100dvh] min-h-0 overflow-hidden"
     >
       <AnimatePresence mode="wait">
         
@@ -2248,7 +2248,7 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="absolute inset-0 flex flex-col overflow-hidden"
+                    className="flex-1 min-h-0 flex flex-col overflow-hidden"
                   >
                     <AdminPanel
                       usersList={usersList}

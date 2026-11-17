@@ -977,17 +977,24 @@ export default function AdminPanel({
         tela. `overflow-x-clip` corta o excesso horizontal SEM criar
         scroller — a rolagem horizontal fica restrita aos blocos de tabela.
       */
-      className="flex flex-col flex-1 h-full min-h-0 admin-page admin-scrollable overflow-y-auto overflow-x-clip pb-bottom-nav text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark transition-colors"
+      className="admin-page flex-1 min-h-0 w-full flex flex-col overflow-y-auto overflow-x-clip pb-bottom-nav text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark transition-colors"
     >
-      {/* Top Bar / Header */}
-      <div className="border-b border-brand-primary/10 dark:border-white/10 bg-brand-bg-light/90 dark:bg-brand-bg-dark/90 backdrop-blur-md sticky top-0 z-30 transition-colors">
+      {/*
+        Cabeçalho NÃO é mais `sticky`.
+        ---------------------------------------------------------------
+        No celular ele somava ~240px (título + badge + subtítulo + 6 abas +
+        KPIs + busca + alternador + filtros). Como é sticky, sobrava uma faixa
+        mínima de conteúdo e a sensação era de que "só a tabela rola". Agora
+        ele rola junto: a lista ocupa a tela inteira sob o dedo.
+      */}
+      <div className="shrink-0 border-b border-brand-primary/10 dark:border-white/10 bg-brand-bg-light dark:bg-brand-bg-dark transition-colors">
         <div className="w-full max-w-[110rem] mx-auto px-4 sm:px-6 py-3 sm:py-3.5">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 md:gap-4">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-lg sm:text-xl font-display font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-                  <ShieldCheck className="text-brand-accent dark:text-brand-primary shrink-0" size={20} />
-                  Painel de Controle Escolar
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-nowrap">
+                <h1 className="text-base sm:text-xl font-display font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-1.5 min-w-0">
+                  <ShieldCheck className="text-brand-accent dark:text-brand-primary shrink-0" size={18} />
+                  <span className="truncate">Painel de Controle</span>
                 </h1>
 
                 {/* Role Badge Indicator */}
@@ -1004,7 +1011,7 @@ export default function AdminPanel({
                 ) : null}
               </div>
 
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug truncate">
+              <p className="hidden sm:block text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug truncate">
                 {isChefe
                   ? "Contas, credenciais e eventos da rede de Araucária."
                   : "Consulta do diretório escolar e cadastro de eventos."}
@@ -1116,8 +1123,13 @@ export default function AdminPanel({
             </div>
           </div>
 
-          {/* Faixa de KPIs — leitura rápida do estado da rede */}
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          {/*
+            Faixa de KPIs — leitura rápida do estado da rede.
+            No celular era `flex-wrap`: cinco pílulas ocupavam 2-3 linhas
+            (~120px) e empurravam a lista para fora da tela. Agora é uma faixa
+            única com rolagem horizontal e snap.
+          */}
+          <div className="mt-2.5 sm:mt-3 flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar scroll-x-snap -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap">
             {[
               {
                 label: "Contas totais",
@@ -1152,11 +1164,11 @@ export default function AdminPanel({
             ].map((card) => (
               <div
                 key={card.label}
-                className={`rounded-xl border pl-2.5 pr-3 py-1.5 flex items-center gap-2 ${card.tone} transition-colors`}
+                className={`shrink-0 rounded-xl border pl-2 pr-2.5 sm:pl-2.5 sm:pr-3 py-1.5 flex items-center gap-1.5 sm:gap-2 ${card.tone} transition-colors`}
                 title={card.label}
               >
                 <div className="shrink-0 opacity-70">{card.icon}</div>
-                <span className="text-sm font-display font-bold leading-none tabular-nums">
+                <span className="text-[13px] sm:text-sm font-display font-bold leading-none tabular-nums">
                   {card.value}
                 </span>
                 <span className="text-[10px] font-semibold uppercase tracking-wide opacity-70 whitespace-nowrap">
@@ -1340,7 +1352,7 @@ export default function AdminPanel({
           de ficarem espremidos em 1152px. Em telas pequenas o excesso
           horizontal é cortado com `overflow-x-clip` na raiz e a rolagem
           lateral fica só nos blocos `.admin-table-scroll`. */}
-      <div className="w-full max-w-[110rem] mx-auto p-3 sm:p-6 flex flex-col gap-3.5 sm:gap-4">
+      <div className="w-full max-w-[110rem] mx-auto p-3 sm:p-6 flex flex-col gap-3.5 sm:gap-4 shrink-0">
         {/* ================= ACTIVE USERS TAB ================= */}
         {activeTab === "users" && (
           <>
@@ -1610,7 +1622,7 @@ export default function AdminPanel({
                         }`}
                       />
 
-                      <div className="px-4 pb-4 flex flex-col gap-3">
+                      <div className="px-3.5 sm:px-4 pb-3.5 sm:pb-4 flex flex-col gap-2.5 sm:gap-3">
                       {/* Header: 👤 Nome & E-mail */}
                       <div className="flex items-start justify-between gap-2.5">
                         <div className="flex items-center gap-2.5 min-w-0">
@@ -1626,9 +1638,9 @@ export default function AdminPanel({
                               (u.nome || u.email || "U").slice(0, 1)
                             )}
                           </div>
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <h4 className="font-bold text-sm text-slate-900 dark:text-white truncate">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <h4 className="font-bold text-sm text-slate-900 dark:text-white truncate min-w-0">
                                 {u.nome || "Usuário Escolar"}
                               </h4>
                               {isMe && (
@@ -1637,7 +1649,7 @@ export default function AdminPanel({
                                 </span>
                               )}
                             </div>
-                            <span className="text-xs text-slate-500 dark:text-slate-400 font-mono block truncate mt-0.5">
+                            <span className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 font-mono block truncate mt-0.5">
                               {u.email}
                             </span>
                             {isChefe && u.cpf && (
@@ -1651,8 +1663,8 @@ export default function AdminPanel({
 
                       {/* Middle: Tipo / Cargo & Status */}
                       <div className="space-y-2 py-2 border-y border-slate-100 dark:border-white/5">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-slate-500 dark:text-slate-400 text-[11px] font-medium">Cargo:</span>
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <span className="shrink-0 text-slate-500 dark:text-slate-400 text-[11px] font-medium">Cargo:</span>
                           {userIsChefe ? (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-xs font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300/40">
                               <Crown size={12} /> Chefe ADM
@@ -1669,8 +1681,8 @@ export default function AdminPanel({
                           )}
                         </div>
 
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-slate-500 dark:text-slate-400 text-[11px] font-medium">Status:</span>
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <span className="shrink-0 text-slate-500 dark:text-slate-400 text-[11px] font-medium">Status:</span>
                           <div className="flex items-center gap-1.5">
                             <span className="relative flex h-2 w-2">
                               {activity.isOnline && (
@@ -1679,23 +1691,24 @@ export default function AdminPanel({
                               <span className={`relative inline-flex rounded-full h-2 w-2 ${u.ativo === false ? "bg-rose-500" : "bg-emerald-500"}`} />
                             </span>
                             <span className={`text-xs font-bold ${u.ativo === false ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}>
-                              {u.ativo === false ? "🔴 Bloqueado" : activity.isOnline ? "🟢 Ativo (Online)" : "🟢 Ativo"}
+                              {u.ativo === false ? "Bloqueado" : activity.isOnline ? "Online" : "Ativo"}
                             </span>
                           </div>
                         </div>
                       </div>
 
-                      {/* Stats Badges */}
-                      <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-slate-500 dark:text-slate-400 pt-0.5">
-                        <span className="bg-slate-100 dark:bg-black/30 px-2 py-0.5 rounded-md font-mono flex items-center gap-1">
+                      {/* Stats Badges — faixa única; antes quebravam em duas
+                          linhas em telas de 360px e empurravam os botões. */}
+                      <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400 pt-0.5 overflow-x-auto no-scrollbar">
+                        <span className="shrink-0 bg-slate-100 dark:bg-black/30 px-2 py-0.5 rounded-md font-mono flex items-center gap-1 whitespace-nowrap">
                           <Ticket size={11} className="text-blue-500" />
                           <span>{uStats.participatedEventsCount} inscr.</span>
                         </span>
-                        <span className="bg-slate-100 dark:bg-black/30 px-2 py-0.5 rounded-md font-mono flex items-center gap-1">
+                        <span className="shrink-0 bg-slate-100 dark:bg-black/30 px-2 py-0.5 rounded-md font-mono flex items-center gap-1 whitespace-nowrap">
                           <RouteIcon size={11} className="text-emerald-500" />
                           <span>{uStats.routesCalculatedCount} rotas</span>
                         </span>
-                        <span className="bg-slate-100 dark:bg-black/30 px-2 py-0.5 rounded-md font-mono flex items-center gap-1">
+                        <span className="shrink-0 bg-slate-100 dark:bg-black/30 px-2 py-0.5 rounded-md font-mono flex items-center gap-1 whitespace-nowrap">
                           <Calendar size={11} className="text-purple-500" />
                           <span>{uStats.createdEventsCount} criados</span>
                         </span>

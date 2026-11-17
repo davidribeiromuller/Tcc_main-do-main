@@ -1309,3 +1309,49 @@ scroller horizontal.
 | `test-round17.mjs` / `test-round16.mjs` | 49/49 · 39/39 |
 | Regressão 11–14 | 202/202 |
 | `tsc --noEmit` / `npm run build` | 0 erros / ok (6.15 s) |
+
+---
+
+## 24. Scroll do painel no mobile: a raiz do problema era a ALTURA (rodada 20)
+
+**Relato:** *"ainda não funciona, organize isso como eu já havia pedido e adicione o scroll solicitado"* — com print mostrando o conteúdo **cortado** atrás do menu inferior.
+
+### 24.1 A causa de verdade
+
+| Camada | Problema |
+|---|---|
+| `#app-root-container` (`.app-viewport`) | `height: 100%` de um pai sem altura resolvida → altura indefinida no mobile |
+| wrapper da tela admin | `absolute inset-0` dentro de um pai `overflow-hidden`; sem altura certa, o conteúdo transborda em vez de rolar |
+| raiz do painel | `h-full` **e** `flex-1` juntos, brigando; `admin-scrollable` forçava `overflow-y: auto !important` sem `min-height: 0` |
+
+Com altura zerada/indefinida, `overflow-y: auto` **não tem o que rolar**: o conteúdo simplesmente cresce para fora e some atrás da barra inferior. Por isso a sensação de que "só a tabela rola" — as tabelas tinham scroller próprio e o resto não rolava nada.
+
+### 24.2 Correções
+
+- Raiz do app: `h-[100dvh] min-h-0 overflow-hidden` + `.app-viewport { height: 100dvh; max-height: 100dvh }` com fallback `@supports not`.
+- Tela do painel: de `absolute inset-0` para **`flex-1 min-h-0`** (filho do flex, com altura previsível).
+- Raiz do painel: `admin-page flex-1 min-h-0 overflow-y-auto overflow-x-clip` — sem `h-full`, sem `admin-scrollable`, sem `!important` em `overflow-y`.
+- `.admin-page { min-height: 0; touch-action: pan-y }`: encolhe no flex e o gesto vertical é dele.
+- Cabeçalho do painel **deixou de ser sticky** (ocupava ~240px no celular: título + badge + subtítulo + 6 abas + KPIs + busca + alternador + filtros).
+
+### 24.3 Organização do cabeçalho (o "amontoado")
+
+| Elemento | Antes | Depois |
+|---|---|---|
+| título + badge | quebravam em 2 linhas | mesma linha, título truncado ("Painel de Controle") |
+| subtítulo | sempre visível (2 linhas no mobile) | `hidden sm:block` |
+| KPIs | `flex-wrap` → 2-3 linhas (~120px) | **faixa única** com rolagem horizontal e snap |
+| badges do card | quebravam e empurravam os botões | faixa única, `whitespace-nowrap` |
+| status | "🟢 Ativo (Online)" estourava | "Ativo" / "Online" / "Bloqueado" |
+| aviso inferior | último item ficava sob a barra | `.pb-bottom-nav` com 6,5rem + `scroll-padding-bottom` |
+
+### 24.4 Validação
+
+| Suíte | Resultado |
+|---|---|
+| `test-round20.mjs` — altura, cadeia de flex, cabeçalho e render real | **40/40** |
+| `test-round19.mjs` (ajustado: `pan-y` só em contêiner vertical) | 32/32 |
+| `test-round18.mjs` / `test-round18-mobile.mjs` | 50/50 · 21/21 |
+| `test-round17.mjs` / `test-round16.mjs` | 49/49 · 39/39 |
+| Regressão 11–14 | 202/202 |
+| `tsc --noEmit` / `npm run build` | 0 erros / ok (4.17 s) |
