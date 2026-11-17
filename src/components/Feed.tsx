@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Search, MapPin, Calendar, CircleDollarSign, PlusCircle, X, GraduationCap, Globe2,
@@ -6,7 +6,6 @@ import {
 } from "lucide-react";
 import { Event } from "../types";
 import { resolveEventCity, classifyEventAsSchool } from "../lib/eventClassification";
-import { visualDoEvento, imagemEhPlaceholder } from "../lib/eventVisuals.ts";
 import AIChatAssistant from "./AIChatAssistant";
 import EventLocationModal from "./EventLocationModal";
 import PersonalEventModal from "./PersonalEventModal";
@@ -44,6 +43,54 @@ const normalizeString = (str: string) => {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 };
+
+/**
+ * Grupo de filtros com rótulo.
+ *
+ * O rótulo fica em maiúsculas pequenas, alinhado com os chips — antes ele
+ * ficava numa linha própria no celular, gastando altura à toa.
+ */
+function FiltroGrupo({ rotulo, children }: { rotulo: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-1.5 shrink-0" role="group" aria-label={`Filtrar por ${rotulo.toLowerCase()}`}>
+      <span className="text-[9px] font-mono uppercase tracking-[0.12em] text-slate-400 dark:text-slate-500 mr-0.5">
+        {rotulo}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+/** Chip de filtro. Alvo de toque confortável (32px) e estado bem marcado. */
+function ChipFiltro({
+  ativo,
+  onClick,
+  label,
+  icone,
+}: {
+  ativo: boolean;
+  onClick: () => void;
+  label: string;
+  icone?: React.ReactNode;
+  /** Aceito explicitamente para o TypeScript não reclamar do `key` do map. */
+  key?: React.Key;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={ativo}
+      className={`shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-all cursor-pointer active:scale-95 ${
+        ativo
+          ? "bg-emerald-800 text-white border-emerald-800 dark:bg-emerald-700 dark:border-emerald-700"
+          : "bg-white dark:bg-brand-card-dark text-slate-600 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:border-emerald-400/60"
+      }`}
+    >
+      {icone}
+      {label}
+    </button>
+  );
+}
 
 export default function Feed({
   events,
@@ -232,84 +279,138 @@ export default function Feed({
           Nada de avatar aqui (ele já está no MobileHeader).
         - desktop: versão completa com título e as mesmas ações.
       */}
-      <div className="border-b border-brand-primary/10 bg-brand-bg-light/90 dark:bg-brand-bg-dark/90 backdrop-blur-md sticky top-0 z-30">
-        <div className="max-w-6xl mx-auto w-full flex items-center justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4">
+      <div className="sticky top-0 z-30 bg-brand-bg-light/95 dark:bg-brand-bg-dark/95 backdrop-blur-md border-b border-brand-primary/10">
+        {/* Barra principal: título + ações */}
+        <div className="max-w-6xl mx-auto w-full flex items-center justify-between gap-3 px-4 sm:px-6 pt-4 pb-3">
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg sm:text-2xl font-display font-semibold tracking-tight text-slate-900 dark:text-white truncate">
-                Eventos
-              </h1>
-              {/* Contador: dá noção de quanto conteúdo existe antes de rolar */}
-              {!isLoading && filteredEvents.length > 0 && (
-                <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300">
-                  {filteredEvents.length}
-                </span>
-              )}
-            </div>
-            <p className="text-[10px] text-slate-400 font-mono uppercase tracking-wider truncate">
-              {currentUser?.nome ? `Olá, ${currentUser.nome.split(" ")[0]}` : "Araucária · Curitiba"}
+            <h1 className="text-xl sm:text-[1.7rem] font-display font-semibold tracking-tight text-slate-900 dark:text-white leading-none">
+              Eventos
+            </h1>
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono uppercase tracking-[0.14em] mt-1.5 truncate">
+              {filteredEvents.length === 0
+                ? "Araucária · Curitiba"
+                : `${filteredEvents.length} ${filteredEvents.length === 1 ? "evento" : "eventos"}${
+                    cityFilter !== "todas" ? ` · ${cityFilter}` : ""
+                  }`}
             </p>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {/* Lupa: sempre no canto superior, ao lado das ações */}
             <button
               type="button"
               onClick={toggleSearchOpen}
               aria-label={isSearchOpen ? "Fechar busca" : "Pesquisar eventos"}
               aria-expanded={isSearchOpen}
               title={isSearchOpen ? "Fechar busca" : "Pesquisar eventos"}
-              className={`w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-sm ${
+              className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors active:scale-95 cursor-pointer ${
                 isSearchOpen
                   ? "bg-brand-accent text-white"
-                  : "bg-white dark:bg-brand-card-dark text-slate-600 dark:text-brand-text-dark border border-brand-primary/15"
+                  : "bg-white dark:bg-brand-card-dark text-slate-600 dark:text-white border border-brand-primary/20 dark:border-white/10"
               }`}
             >
-              {isSearchOpen ? <X size={18} /> : <Search size={18} />}
+              {isSearchOpen ? <X size={17} /> : <Search size={17} />}
             </button>
 
-            {/* Adicionar compromisso pessoal */}
             <button
               type="button"
               onClick={() => setModalPessoalAberto(true)}
               aria-label="Adicionar compromisso pessoal"
               title="Adicionar compromisso pessoal"
-              className="h-10 px-3 sm:px-3.5 rounded-full bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
+              className="h-10 px-3 sm:px-3.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center gap-1.5 transition-colors active:scale-95 cursor-pointer"
             >
-              <CalendarPlus size={17} />
-              <span className="hidden xs:inline sm:inline">Compromisso</span>
+              <CalendarPlus size={16} />
+              <span className="hidden xs:inline">Compromisso</span>
             </button>
+          </div>
+        </div>
+
+        {/* Filtros: faixa própria, com rolagem horizontal no celular em vez de
+            quebrar em várias linhas e empurrar o conteúdo para baixo. */}
+        <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 pb-2.5">
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-1 px-1">
+            <FiltroGrupo rotulo="Cidade">
+              {([
+                { id: "todas" as const, label: "Todas" },
+                { id: "Araucária" as const, label: "Araucária" },
+                { id: "Curitiba" as const, label: "Curitiba" },
+              ]).map((opt) => (
+                <ChipFiltro
+                  key={opt.id}
+                  ativo={cityFilter === opt.id}
+                  onClick={() => setCityFilter(opt.id)}
+                  label={opt.label}
+                />
+              ))}
+            </FiltroGrupo>
+
+            <span className="w-px h-5 bg-brand-primary/20 dark:bg-white/10 shrink-0" aria-hidden="true" />
+
+            <FiltroGrupo rotulo="Tipo">
+              {([
+                { id: "todos" as const, label: "Todos", icone: null },
+                { id: "escolar" as const, label: "Escolar", icone: GraduationCap },
+                { id: "publico" as const, label: "Aberto", icone: Globe2 },
+              ]).map((opt) => {
+                const Icone = opt.icone;
+                return (
+                  <ChipFiltro
+                    key={opt.id}
+                    ativo={typeFilter === opt.id}
+                    onClick={() => setTypeFilter(opt.id)}
+                    label={opt.label}
+                    icone={Icone ? <Icone size={12} /> : undefined}
+                  />
+                );
+              })}
+            </FiltroGrupo>
+
+            {(cityFilter !== "todas" || typeFilter !== "todos") && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCityFilter("todas");
+                  setTypeFilter("todos");
+                }}
+                className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-white dark:hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                <X size={11} /> Limpar
+              </button>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Search Input block */}
+
+      {/* Campo de busca: aparece logo abaixo da barra, ocupando a largura toda */}
       <AnimatePresence>
         {isSearchOpen && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="bg-slate-50 dark:bg-brand-card-dark/30 border-b border-brand-primary/10 overflow-hidden"
+            className="overflow-hidden bg-white/60 dark:bg-white/[0.03] border-b border-brand-primary/10"
           >
-            <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 py-3">
-              <div className="relative flex items-center w-full">
-                <Search className="absolute left-4 text-slate-400 dark:text-slate-500" size={18} />
+            <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 py-2.5">
+              <div className="relative flex items-center w-full max-w-xl">
+                <Search className="absolute left-3.5 text-slate-400 dark:text-slate-500" size={16} />
                 <input
                   ref={inputRef}
-                  type="text"
+                  type="search"
                   value={currentSearchTerm}
                   onChange={(e) => changeSearchTerm(e.target.value)}
                   placeholder="Pesquisar por título ou local..."
-                  className="w-full h-11 pl-11 pr-11 text-sm bg-white dark:bg-brand-card-dark border border-brand-primary rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-accent/50 text-brand-text-light dark:text-brand-text-dark"
+                  aria-label="Pesquisar eventos"
+                  className="w-full h-11 pl-10 pr-10 text-sm bg-white dark:bg-brand-card-dark border border-slate-200 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/40 text-slate-900 dark:text-white placeholder:text-slate-400"
                 />
                 {currentSearchTerm && (
                   <button
+                    type="button"
                     onClick={() => changeSearchTerm("")}
-                    className="absolute right-4 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 rounded-full transition-colors"
+                    className="absolute right-2.5 p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
                     title="Limpar pesquisa"
+                    aria-label="Limpar pesquisa"
                   >
-                    <X size={16} />
+                    <X size={15} />
                   </button>
                 )}
               </div>
@@ -318,100 +419,23 @@ export default function Feed({
         )}
       </AnimatePresence>
 
-      {/* Filtros: localidade e tipo de evento */}
-      {/* Filtros: no celular ficam em duas linhas com respiro, em vez de
-          espremidos numa faixa só. */}
-      <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 pt-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 sm:flex-wrap">
-          <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Filtrar por localidade">
-            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mr-0.5 w-full sm:w-auto">Cidade</span>
-            {([
-              { id: "todas" as const, label: "Todas" },
-              { id: "Araucária" as const, label: "Araucária" },
-              { id: "Curitiba" as const, label: "Curitiba" },
-            ]).map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => setCityFilter(opt.id)}
-                aria-pressed={cityFilter === opt.id}
-                className={`px-3 py-2 sm:py-1.5 rounded-full text-[11px] font-semibold transition-all cursor-pointer active:scale-95 border ${
-                  cityFilter === opt.id
-                    ? "bg-brand-accent text-white border-brand-accent shadow-sm"
-                    : "bg-white dark:bg-brand-card-dark text-slate-600 dark:text-slate-300 border-brand-primary/20 dark:border-white/10 hover:border-brand-accent/40"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="hidden sm:block h-5 w-px bg-brand-primary/15 dark:bg-white/10" />
-
-          <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Filtrar por tipo de evento">
-            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mr-0.5 w-full sm:w-auto">Tipo</span>
-            {([
-              { id: "todos" as const, label: "Todos", icon: null },
-              { id: "escolar" as const, label: "Escolar", icon: GraduationCap },
-              { id: "publico" as const, label: "Aberto ao público", icon: Globe2 },
-            ]).map((opt) => {
-              const Icone = opt.icon;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => setTypeFilter(opt.id)}
-                  aria-pressed={typeFilter === opt.id}
-                  className={`px-3 py-2 sm:py-1.5 rounded-full text-[11px] font-semibold transition-all cursor-pointer active:scale-95 border flex items-center gap-1.5 ${
-                    typeFilter === opt.id
-                      ? "bg-brand-accent text-white border-brand-accent shadow-sm"
-                      : "bg-white dark:bg-brand-card-dark text-slate-600 dark:text-slate-300 border-brand-primary/20 dark:border-white/10 hover:border-brand-accent/40"
-                  }`}
-                >
-                  {Icone && <Icone size={12} />}
-                  {opt.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {(cityFilter !== "todas" || typeFilter !== "todos") && (
-          <div className="flex items-center gap-2 mt-2.5 text-[11px] text-slate-500 dark:text-slate-400">
-            <span>
-              {filteredEvents.length} {filteredEvents.length === 1 ? "evento" : "eventos"}
-              {cityFilter !== "todas" ? ` em ${cityFilter}` : ""}
-              {typeFilter === "escolar" ? " • escolares" : typeFilter === "publico" ? " • abertos ao público" : ""}
-            </span>
-            <button
-              type="button"
-              onClick={() => { setCityFilter("todas"); setTypeFilter("todos"); }}
-              className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-white/10 hover:bg-slate-200 dark:hover:bg-white/20 font-semibold transition-colors cursor-pointer"
-            >
-              Limpar filtros
-            </button>
-          </div>
-        )}
-      </div>
-
       {/*
         Minha agenda — compromissos pessoais do usuário.
-        Fica ANTES dos eventos da escola, porque é o que ele mesmo marcou e
-        costuma ser mais urgente. Só aparece para quem está conectado e tem
-        algum compromisso.
+        Fica acima do mural porque é o que ele mesmo marcou e costuma ser mais
+        urgente. Só aparece para quem está conectado e tem algum compromisso.
       */}
       {currentUser?.id && eventosPessoais.length > 0 && (
-        <section className="max-w-6xl mx-auto w-full px-4 sm:px-6 pt-5">
-          <div className="flex items-center justify-between gap-2 mb-2.5">
+        <section className="max-w-6xl mx-auto w-full px-4 sm:px-6 pt-4">
+          <div className="flex items-center justify-between gap-2 mb-2">
             <button
               type="button"
               onClick={() => setMostrarPessoais((v) => !v)}
               aria-expanded={mostrarPessoais}
-              className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 cursor-pointer"
+              className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600 dark:text-slate-300 cursor-pointer"
             >
-              <Sparkles size={13} className="text-emerald-700 dark:text-emerald-400" />
+              <Sparkles size={12} className="text-emerald-700 dark:text-emerald-400" />
               Minha agenda
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 normal-case tracking-normal">
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 tracking-normal">
                 {eventosPessoais.length}
               </span>
             </button>
@@ -420,12 +444,12 @@ export default function Feed({
               onClick={() => setModalPessoalAberto(true)}
               className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 hover:underline cursor-pointer flex items-center gap-1"
             >
-              <PlusCircle size={12} /> Adicionar
+              <PlusCircle size={11} /> Adicionar
             </button>
           </div>
 
           {mostrarPessoais && (
-            <ul className="flex gap-2.5 overflow-x-auto pb-1 -mx-1 px-1 snap-x">
+            <ul className="flex gap-2.5 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1 snap-x">
               {eventosPessoais.map((pessoal) => {
                 const MESES_CURTOS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
                 const passou = eventoPessoalPassou(pessoal);
@@ -433,7 +457,7 @@ export default function Feed({
                 return (
                   <li
                     key={pessoal.id}
-                    className={`snap-start shrink-0 w-[230px] rounded-2xl border p-3 ${
+                    className={`snap-start shrink-0 w-[230px] rounded-xl border p-3 ${
                       passou
                         ? "bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 opacity-60"
                         : "bg-white dark:bg-brand-card-dark border-emerald-200 dark:border-emerald-900/50 shadow-xs"
@@ -476,8 +500,8 @@ export default function Feed({
         </section>
       )}
 
-      {/* Events List */}
-      <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 pt-5 pb-24 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
+      {/* Grade de eventos */}
+      <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 pt-4 pb-24 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5 sm:gap-5">
         {isLoading && filteredEvents.length === 0 ? (
           // Skeleton loading state
           Array.from({ length: 4 }).map((_, i) => (
@@ -485,8 +509,8 @@ export default function Feed({
               key={`skeleton-${i}`}
               className="relative rounded-3xl overflow-hidden bg-white dark:bg-brand-card-dark shadow-sm border border-brand-primary/15 animate-pulse"
             >
-              <div className="w-full h-44 bg-slate-200 dark:bg-slate-700/50" />
-              <div className="p-4 flex flex-col gap-3">
+              <div className="w-full h-40 sm:h-44 bg-slate-200 dark:bg-slate-700/50" />
+              <div className="p-3.5 sm:p-4 flex flex-col gap-3">
                 <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded-md w-3/4" />
                 <div className="h-3 bg-slate-100 dark:bg-slate-800 rounded-md w-1/2" />
                 <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-slate-800">
@@ -497,157 +521,139 @@ export default function Feed({
             </div>
           ))
         ) : filteredEvents.length === 0 ? (
-          <div className="col-span-full flex flex-col items-center justify-center py-16 text-center text-slate-400">
-            <Calendar size={48} className="stroke-1 mb-3 text-slate-300" />
-            <p className="text-sm font-medium">Nenhum evento encontrado</p>
-            <p className="text-xs text-slate-500 mt-1">Experimente outro termo de busca ou sincronize os dados escolares</p>
-            {onReload && (
+          <div className="col-span-full flex flex-col items-center justify-center py-14 px-4 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-white/5 flex items-center justify-center mb-3.5">
+              <Calendar size={26} className="stroke-[1.5] text-slate-400 dark:text-slate-500" />
+            </div>
+
+            <p className="text-sm font-bold text-slate-700 dark:text-slate-200">
+              {events.length === 0 ? "Nenhum evento na agenda ainda" : "Nada com esses filtros"}
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm leading-relaxed">
+              {events.length === 0
+                ? "Assim que a escola publicar novos eventos, eles aparecem aqui. Você também pode criar um compromisso pessoal na sua agenda."
+                : "Tente remover um filtro ou buscar por outro termo."}
+            </p>
+
+            <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
+              {(cityFilter !== "todas" || typeFilter !== "todos") && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCityFilter("todas");
+                    setTypeFilter("todos");
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold transition-colors active:scale-95 cursor-pointer"
+                >
+                  Limpar filtros
+                </button>
+              )}
+              {currentSearchTerm && (
+                <button
+                  type="button"
+                  onClick={() => changeSearchTerm("")}
+                  className="px-3.5 py-2 rounded-xl bg-white dark:bg-brand-card-dark border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 text-xs font-bold hover:bg-slate-50 dark:hover:bg-white/10 transition-colors active:scale-95 cursor-pointer"
+                >
+                  Limpar busca
+                </button>
+              )}
               <button
-                onClick={onReload}
-                className="mt-4 px-4 py-2 bg-brand-primary text-slate-800 font-semibold text-xs rounded-xl shadow hover:opacity-90 active:scale-95 transition-all cursor-pointer"
+                type="button"
+                onClick={() => setModalPessoalAberto(true)}
+                className="px-3.5 py-2 rounded-xl bg-white dark:bg-brand-card-dark border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 text-xs font-bold hover:bg-slate-50 dark:hover:bg-white/10 transition-colors active:scale-95 cursor-pointer inline-flex items-center gap-1.5"
               >
-                Atualizar eventos do banco
+                <CalendarPlus size={13} /> Criar compromisso
               </button>
-            )}
+              {onReload && (
+                <button
+                  type="button"
+                  onClick={onReload}
+                  className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                >
+                  Atualizar
+                </button>
+              )}
+            </div>
           </div>
         ) : (
-          filteredEvents.map((event) => {
-            /*
-              Design do card.
-              ---------------------------------------------------------------
-              Antes: foto de plateia genérica em TODOS os eventos sem arte,
-              título branco sobre preto e metadados em cinza minúsculo. O
-              resultado era uma fileira de cards iguais, escuros e sem
-              hierarquia.
-
-              Agora:
-              - só usa foto quando o evento realmente tem uma (o placeholder do
-                banco é ignorado — ver `imagemEhPlaceholder`);
-              - sem foto, um cabeçalho com o ícone e as cores da ÁREA do evento
-                (matemática, robótica, biologia, cultura...), o que dá
-                identidade imediata;
-              - a data ganha um bloco destacado, porque é a informação que o
-                aluno procura primeiro;
-              - título sai do banner e vai para o corpo, em cor de texto —
-                muito mais legível que branco sobre imagem.
-            */
-            const visual = visualDoEvento(event);
-            const Icone = visual.Icone;
-            const temFoto = !imagemEhPlaceholder(event.image);
-            const dataFormatada = new Date(event.year, event.month, event.day).toLocaleDateString(
-              "pt-BR",
-              { day: "2-digit", month: "short" }
-            );
-
-            return (
+          filteredEvents.map((event) => (
             <motion.div
               key={event.id}
               layoutId={`card-container-${event.id}`}
               onClick={() => handleCardClick(event)}
-              className="group relative flex flex-col rounded-2xl overflow-hidden bg-white dark:bg-brand-card-dark border border-slate-200/80 dark:border-white/10 shadow-xs hover:shadow-lg hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-200 cursor-pointer"
+              className="relative rounded-3xl overflow-hidden bg-white dark:bg-brand-card-dark shadow-sm hover:shadow-md hover:scale-[1.01] active:scale-[0.99] transition-all duration-200 cursor-pointer group border border-brand-primary/15"
             >
-              {/* Mídia: foto do evento ou cabeçalho com a identidade da área */}
-              <div className="relative w-full h-32 sm:h-36 overflow-hidden bg-slate-100 dark:bg-slate-800">
-                {temFoto ? (
-                  <>
-                    <img
-                      src={event.image as string}
-                      alt={event.title}
-                      referrerPolicy="no-referrer"
-                      loading="lazy"
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/10 to-transparent" />
-                  </>
-                ) : (
-                  <>
-                    {/* Cabeçalho por área: gradiente + ícone grande e discreto */}
-                    <div className={`absolute inset-0 bg-gradient-to-br ${visual.gradiente}`} />
-                    <div className="absolute inset-0 opacity-[0.18] bg-[radial-gradient(circle_at_75%_20%,white,transparent_55%)]" />
-                    <Icone
-                      className="absolute right-3 bottom-2 text-white/25"
-                      size={74}
-                      strokeWidth={1.25}
-                      aria-hidden="true"
-                    />
-                    <span className="absolute left-3 bottom-2.5 text-white/95 text-[11px] font-bold uppercase tracking-wider">
-                      {visual.rotulo}
-                    </span>
-                  </>
-                )}
+              {/* Image banner with Gradient Overlay */}
+              <div className="relative w-full h-40 sm:h-44 overflow-hidden">
+                <img
+                  src={event.image || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600"}
+                  alt={event.title}
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-black/10" />
 
-                {/* Etiquetas no topo: cidade e tipo */}
-                <div className="absolute top-2 left-2 flex items-center gap-1 flex-wrap max-w-[calc(100%-1rem)]">
+                {/* Title Overlay in Banner */}
+                <h3 className="absolute bottom-3 left-3.5 right-3.5 text-white font-display font-semibold text-base sm:text-lg leading-tight drop-shadow-md line-clamp-2">
+                  {event.title}
+                </h3>
+
+                {/* Badges: localidade + tipo escolar */}
+                <div className="absolute top-3 left-3 flex items-center gap-1.5 flex-wrap">
                   {getEventCity(event) && (
-                    <span className="bg-white/95 dark:bg-black/60 backdrop-blur-sm text-slate-800 dark:text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-xs">
-                      <MapPin size={9} className="text-red-500" />
+                    <span className="bg-white/95 dark:bg-black/70 backdrop-blur-sm text-slate-800 dark:text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
+                      <MapPin size={10} className="text-red-500" />
                       {getEventCity(event)}
                     </span>
                   )}
                   <span
-                    className={`backdrop-blur-sm text-[10px] font-semibold px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-xs ${
+                    className={`backdrop-blur-sm text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm ${
                       getEventIsSchool(event)
-                        ? "bg-emerald-700/95 text-white"
-                        : "bg-white/95 dark:bg-black/60 text-slate-700 dark:text-white"
+                        ? "bg-brand-accent/95 text-white"
+                        : "bg-white/95 dark:bg-black/70 text-slate-800 dark:text-white"
                     }`}
                   >
-                    {getEventIsSchool(event) ? <GraduationCap size={9} /> : <Globe2 size={9} />}
+                    {getEventIsSchool(event) ? <GraduationCap size={10} /> : <Globe2 size={10} />}
                     {getEventIsSchool(event) ? "Escolar" : "Público"}
                   </span>
                 </div>
 
-                {/* Preço, quando houver */}
+                {/* Price indicator badge */}
                 {event.isPaid && (
-                  <span className="absolute top-2 right-2 bg-amber-300 text-amber-950 text-[10px] font-bold px-1.5 py-0.5 rounded-md flex items-center gap-0.5 shadow-xs">
-                    <CircleDollarSign size={10} />
+                  <span className="absolute top-3 right-3 bg-yellow-400 text-slate-900 text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 shadow">
+                    <CircleDollarSign size={12} />
                     {event.price || "Pago"}
                   </span>
                 )}
-
-                {/* Bloco de data: destacado, é o que o aluno procura primeiro */}
-                <div className="absolute bottom-2 right-2 bg-white/95 dark:bg-black/70 backdrop-blur-sm rounded-lg px-2 py-1 text-center shadow-sm leading-none">
-                  <span className="block text-sm font-black text-slate-900 dark:text-white">
-                    {String(event.day).padStart(2, "0")}
-                  </span>
-                  <span className="block text-[9px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-300 mt-0.5">
-                    {dataFormatada.split(" ").slice(-1)[0].replace(".", "")}
-                  </span>
-                </div>
               </div>
 
-              {/* Corpo: título e local */}
-              <div className="flex flex-col flex-1 p-3 gap-1.5">
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white leading-snug line-clamp-2 group-hover:text-emerald-800 dark:group-hover:text-emerald-300 transition-colors">
-                  {event.title}
-                </h3>
-
-                <button
-                  type="button"
+              {/* Feed Meta Info */}
+              <div className="p-3.5 sm:p-4 flex flex-col gap-2 bg-white dark:bg-brand-card-dark">
+                <div
                   onClick={(e) => {
                     if (onOpenMap) {
                       e.stopPropagation();
                       onOpenMap(event.id);
                     }
                   }}
-                  className="flex items-start gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors text-left cursor-pointer"
+                  className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300 hover:text-brand-accent transition-colors"
                   title="Ver localização no mapa"
                 >
-                  <MapPin size={11} className="shrink-0 mt-0.5 text-red-500" />
-                  <span className="line-clamp-1">{event.location || "Local a confirmar"}</span>
-                </button>
+                  <MapPin size={14} className="text-red-500 shrink-0 mt-0.5" />
+                  <span className="line-clamp-1 underline-offset-2 hover:underline">{event.location}</span>
+                </div>
 
-                {/* Rodapé do card: horário e ano, discretos */}
-                <div className="mt-auto pt-2 flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 border-t border-slate-100 dark:border-white/5">
-                  <span className="flex items-center gap-1 font-medium">
-                    <Clock size={10} />
-                    {event.time || "A confirmar"}
+                <div className="flex justify-between items-center text-[10px] font-mono uppercase tracking-widest text-slate-400 mt-1 border-t border-slate-100 dark:border-slate-800 pt-2">
+                  <span className="flex items-center gap-1">
+                    <Calendar size={12} />
+                    {event.day}/{event.month + 1}/{event.year}
                   </span>
-                  <span className="font-mono">{event.year}</span>
+                  <span>{event.time}</span>
                 </div>
               </div>
             </motion.div>
-            );
-          })        )}
+          ))
+        )}
       </div>
 
       {/* Location Permission Modal when entering an event from the Feed (Tela Inicial) */}
