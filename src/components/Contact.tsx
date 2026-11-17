@@ -29,7 +29,7 @@ export default function Contact({ onNavigate, currentUser }: ContactProps) {
     <motion.div
       initial={{ opacity: 0, x: 30 }}
       animate={{ opacity: 1, x: 0 }}
-      className="flex flex-col h-full overflow-y-auto pb-24 text-brand-text-light dark:text-brand-text-dark"
+      className="flex flex-col h-full overflow-y-auto pb-bottom-nav touch-scroll text-brand-text-light dark:text-brand-text-dark"
     >
       {/* Header */}
       <div className="border-b border-brand-primary/10">

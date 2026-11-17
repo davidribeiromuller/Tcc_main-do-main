@@ -1200,3 +1200,55 @@ ainda não foi aplicada. `src/lib/institutionalAdminService.ts` foi **removido**
 
 **Banco:** tabela criada e conta `helena.wysocki@escola.pr.gov.br` migrada
 para a lista separada; nenhuma linha com `role = 'Escola'` restou em `users`.
+
+---
+
+## 22. Responsividade mobile, rolagem por toque e fim da matrícula (rodada 18)
+
+**Relatos:** *"reajuste a responsividade do mobile, o design está tudo amontoado e feio, AJUSTE TUDO"*; *"não consigo dar scroll com o dedo se o dedo estiver em cima de algo"*; *"remova a opção de matrícula do cadastro"*.
+
+### 22.1 A causa raiz da rolagem travada
+
+| Causa | Efeito |
+|---|---|
+| `touch-action: pan-y` no **`body`** | o documento inteiro "reservava" o gesto vertical; o contêiner que rola de verdade (`.welcome-scroll`, telas `absolute inset-0 overflow-y-auto`) perdia o arrasto quando o dedo começava em cima de um card/imagem |
+| `touch-action: pan-y` em **todas** as `.overflow-y-auto`/`.overflow-x-auto` | bloqueava rolagem horizontal nativa (faixa de filtros, agenda pessoal) e cortava o gesto em contêineres aninhados |
+| Imagens arrastáveis + `select-none` em blocos grandes | o navegador mobile interpreta o toque como "arrastar elemento" e travar o gesto |
+| `active:scale-[0.99]` nos cards | a escala disparava no início do gesto e dava sensação de travado |
+| Carrossel com `onTouchEnd` retomando o autoplay | o trilho "brigava" com o dedo no meio da inércia |
+
+**Correções**
+- `body` e os contêineres de rolagem passam a usar `touch-action: manipulation` (pan livre em qualquer direção + pinch-zoom).
+- Nova classe `.touch-scroll` aplicada em Feed, Calendário, Detalhe do evento, Configurações, Contato, Portal da Escola e Painel.
+- `.scroll-x-snap` para as faixas horizontais (filtros, agenda pessoal, carrossel de escolas, faixa do calendário): `pan-x pan-y` + `scroll-snap` + `overscroll-behavior-x: contain`.
+- Leaflet continua com `touch-action: none` **isolado** em `.touch-map` (o mapa precisa capturar o gesto).
+- Imagens com `-webkit-user-drag: none`; carrossel retoma o autoplay 1,2 s depois do toque.
+
+### 22.2 Respiro e densidade no mobile
+
+- **Feed:** cabeçalho com `pt-3.5 pb-2.5`, título de 1,35 rem, botões 40×40 (o de compromisso vira ícone), grade `gap-4`, banner do card `h-36`, badges que não colidem com o preço, rodapé do card com respiro.
+- **Painel ADM:** as 6 abas agora **rolam na horizontal** com snap, altura de toque `py-2` e `whitespace-nowrap` (antes ficavam espremidas numa linha só); o alternador Tabela/Cartões ocupa a linha toda no mobile; filtros com snapshot horizontal.
+- **Calendário:** cabeçalho empilhado no mobile, grade com `gap-1`, dia sem `scale` no toque, padding `p-3.5`.
+- **Detalhe do evento:** banner `h-48`, título `text-xl`, botão voltar com 36px.
+- **Login/Cadastro:** cartões com `p-4` e `rounded-2xl` no mobile; Nascimento/Gênero empilham abaixo de 380px.
+- **MobileHeader:** menu do usuário com `max-h-[70dvh]`, largura limitada à tela e itens de 44px; `safe-top` para o notch. Corrigido também o `xs:` (breakpoint inexistente no Tailwind 4) que nunca escondia os rótulos "Chefe"/"Admin".
+- **Modais:** todos os overlays ganharam `overflow-y-auto` com `p-3` no mobile — antes os mais altos estouravam a tela e o botão de salvar ficava inacessível.
+- **Barra inferior:** nova `.pb-bottom-nav` (safe-area + 5,5rem) substitui os `pb-24` fixos, que deixavam um vão morto no desktop.
+
+### 22.3 Matrícula removida do cadastro
+
+- Campo "Matrícula / RA" removido do formulário (estado, ícone `Hash` e validação).
+- `validateSchoolRegistration` não exige mais matrícula; `SchoolRegistrationInput.matricula` passou a ser opcional.
+- O vínculo escolar passa a ser conferido por **CPF + instituição** (`verifyInstitutionalLink` recebe `""`), sem quebrar contas já criadas.
+
+### 22.4 Validação
+
+| Suíte | Resultado |
+|---|---|
+| `test-round18.mjs` — rolagem, respiro, modais e matrícula | **50/50** |
+| `test-round18-mobile.mjs` — render real em 390px (Feed, Cadastro, Painel) | **21/21** |
+| `test-round17.mjs` | 49/49 |
+| `test-round16.mjs` (jsdom) | 39/39 |
+| Regressão 11–14 | 202/202 |
+| `tsc --noEmit` | 0 erros |
+| `npm run build` | ok (5.58 s) |

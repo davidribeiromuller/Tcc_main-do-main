@@ -190,7 +190,8 @@ export function validateProvisionalPassword(password: string): string | null {
 export type SchoolRegistrationInput = {
   nome: string;
   email: string;
-  matricula: string;
+  /** Removido do formulário na rodada 18; opcional para não quebrar chamadas antigas. */
+  matricula?: string;
   cpf: string;
   birthdate: string;
   personalEmail: string;
@@ -222,9 +223,13 @@ export function validateSchoolRegistration(
     errors.email = emailCheck.reason || "E-mail institucional inválido.";
   }
 
-  if (!isValidMatricula(input.matricula)) {
-    errors.matricula = "Informe a matrícula/RA fornecida pela escola (4 a 20 caracteres).";
-  }
+  /*
+    Matrícula/RA saiu do cadastro por decisão do autor do TCC (rodada 18):
+    o aluno informava o número de forma livre e, quando divergia do vínculo
+    carregado pela secretaria, o cadastro falhava sem que ele tivesse como
+    corrigir. A validação de CPF, e-mail institucional e data de nascimento
+    continua sendo o que garante a coerência da conta.
+  */
 
   if (!isValidCPF(input.cpf)) {
     errors.cpf = "CPF inválido. Confira os 11 dígitos.";

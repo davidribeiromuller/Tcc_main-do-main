@@ -498,7 +498,7 @@ export default function EventDetail({
     <motion.div
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="flex flex-col h-full overflow-y-auto pb-24 text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark"
+      className="flex flex-col h-full overflow-y-auto pb-bottom-nav touch-scroll text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark"
     >
       {/* Sticky Top Header with Prominent Back Button */}
       <div className="sticky top-0 z-40 bg-brand-bg-light/95 dark:bg-brand-bg-dark/95 backdrop-blur-md px-4 py-3 border-b border-brand-primary/15 flex items-center justify-between shadow-xs">
@@ -533,7 +533,7 @@ export default function EventDetail({
       </div>
 
       {/* Visual Banner */}
-      <div className="relative w-full h-60 overflow-hidden">
+      <div className="relative w-full h-48 sm:h-60 overflow-hidden">
         <img
           src={event.image || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600"}
           alt={event.title}
@@ -546,7 +546,7 @@ export default function EventDetail({
         {!showEditModal && (
           <button
             onClick={onNavigateBack}
-            className="absolute top-4 left-4 px-3.5 py-2 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center gap-1.5 backdrop-blur-md active:scale-95 transition-all cursor-pointer shadow-lg text-xs font-semibold"
+            className="absolute top-3 left-3 sm:top-4 sm:left-4 h-9 px-3 sm:px-3.5 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center gap-1.5 backdrop-blur-md active:scale-95 transition-all cursor-pointer shadow-lg text-xs font-semibold"
             id="btn-event-back-floating"
           >
             <ArrowLeft size={15} />
@@ -555,7 +555,7 @@ export default function EventDetail({
         )}
 
         {!showEditModal && (
-          <div className="absolute top-4 right-4 flex items-center gap-2">
+          <div className="absolute top-3 right-3 sm:top-4 sm:right-4 flex items-center gap-2">
             {canEdit && onUpdateEvent && (
               <button
                 onClick={() => setShowEditModal(true)}
@@ -588,11 +588,11 @@ export default function EventDetail({
           </div>
         )}
 
-        <div className="absolute bottom-4 left-6 right-6 flex flex-col gap-1 text-white">
+        <div className="absolute bottom-3.5 left-4 right-4 sm:bottom-4 sm:left-6 sm:right-6 flex flex-col gap-1 text-white">
           <span className="text-[10px] uppercase font-mono tracking-widest font-bold text-white/80">
             {event.creatorRole || "Evento Institucional"}
           </span>
-          <h1 className="font-display font-bold text-2xl tracking-tight leading-tight">
+          <h1 className="font-display font-bold text-xl sm:text-2xl tracking-tight leading-tight pr-2">
             {event.title}
           </h1>
         </div>
@@ -840,7 +840,7 @@ export default function EventDetail({
       {/* Modal de Permissão de Localização sob demanda */}
       <AnimatePresence>
         {showLocationPermissionModal && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -899,7 +899,7 @@ export default function EventDetail({
 
         {/* Modal de Edição de Evento por Administradores */}
         {showEditModal && (
-          <div className="fixed inset-0 z-[9999] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[9999] bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ scale: 0.9, opacity: 0, y: 30 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
@@ -1078,7 +1078,7 @@ export default function EventDetail({
 
         {/* Enroll confirmation modal */}
         {showEnrollSuccessModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}

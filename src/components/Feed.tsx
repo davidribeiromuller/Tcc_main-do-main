@@ -265,7 +265,7 @@ export default function Feed({
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="flex flex-col h-full overflow-y-auto pb-24 text-brand-text-light dark:text-brand-text-dark"
+      className="flex flex-col h-full overflow-y-auto touch-scroll text-brand-text-light dark:text-brand-text-dark"
     >
       {/*
         Cabeçalho do Feed.
@@ -281,12 +281,12 @@ export default function Feed({
       */}
       <div className="sticky top-0 z-30 bg-brand-bg-light/95 dark:bg-brand-bg-dark/95 backdrop-blur-md border-b border-brand-primary/10">
         {/* Barra principal: título + ações */}
-        <div className="max-w-6xl mx-auto w-full flex items-center justify-between gap-3 px-4 sm:px-6 pt-4 pb-3">
-          <div className="min-w-0">
-            <h1 className="text-xl sm:text-[1.7rem] font-display font-semibold tracking-tight text-slate-900 dark:text-white leading-none">
+        <div className="max-w-6xl mx-auto w-full flex items-start justify-between gap-2 px-4 sm:px-6 pt-3.5 pb-2.5 sm:pt-4 sm:pb-3">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-[1.35rem] sm:text-[1.7rem] font-display font-semibold tracking-tight text-slate-900 dark:text-white leading-tight">
               Eventos
             </h1>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono uppercase tracking-[0.14em] mt-1.5 truncate">
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono uppercase tracking-[0.14em] mt-1 truncate">
               {filteredEvents.length === 0
                 ? "Araucária · Curitiba"
                 : `${filteredEvents.length} ${filteredEvents.length === 1 ? "evento" : "eventos"}${
@@ -316,10 +316,10 @@ export default function Feed({
               onClick={() => setModalPessoalAberto(true)}
               aria-label="Adicionar compromisso pessoal"
               title="Adicionar compromisso pessoal"
-              className="h-10 px-3 sm:px-3.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center gap-1.5 transition-colors active:scale-95 cursor-pointer"
+              className="h-10 w-10 sm:w-auto sm:px-3.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center justify-center sm:justify-start gap-1.5 transition-colors active:scale-95 cursor-pointer shrink-0"
             >
               <CalendarPlus size={16} />
-              <span className="hidden xs:inline">Compromisso</span>
+              <span className="hidden sm:inline">Compromisso</span>
             </button>
           </div>
         </div>
@@ -327,7 +327,7 @@ export default function Feed({
         {/* Filtros: faixa própria, com rolagem horizontal no celular em vez de
             quebrar em várias linhas e empurrar o conteúdo para baixo. */}
         <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 pb-2.5">
-          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-1 px-1">
+          <div className="flex items-center gap-2.5 overflow-x-auto no-scrollbar scroll-x-snap -mx-4 px-4 sm:-mx-1 sm:px-1 py-0.5">
             <FiltroGrupo rotulo="Cidade">
               {([
                 { id: "todas" as const, label: "Todas" },
@@ -390,7 +390,7 @@ export default function Feed({
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden bg-white/60 dark:bg-white/[0.03] border-b border-brand-primary/10"
           >
-            <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 py-2.5">
+            <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 py-3">
               <div className="relative flex items-center w-full max-w-xl">
                 <Search className="absolute left-3.5 text-slate-400 dark:text-slate-500" size={16} />
                 <input
@@ -449,7 +449,7 @@ export default function Feed({
           </div>
 
           {mostrarPessoais && (
-            <ul className="flex gap-2.5 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1 snap-x">
+            <ul className="flex gap-3 overflow-x-auto no-scrollbar scroll-x-snap pb-1.5 -mx-4 px-4 sm:-mx-1 sm:px-1">
               {eventosPessoais.map((pessoal) => {
                 const MESES_CURTOS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
                 const passou = eventoPessoalPassou(pessoal);
@@ -501,7 +501,7 @@ export default function Feed({
       )}
 
       {/* Grade de eventos */}
-      <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 pt-4 pb-24 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5 sm:gap-5">
+      <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 pt-4 pb-bottom-nav grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
         {isLoading && filteredEvents.length === 0 ? (
           // Skeleton loading state
           Array.from({ length: 4 }).map((_, i) => (
@@ -581,10 +581,15 @@ export default function Feed({
               key={event.id}
               layoutId={`card-container-${event.id}`}
               onClick={() => handleCardClick(event)}
-              className="relative rounded-3xl overflow-hidden bg-white dark:bg-brand-card-dark shadow-sm hover:shadow-md hover:scale-[1.01] active:scale-[0.99] transition-all duration-200 cursor-pointer group border border-brand-primary/15"
+              /*
+                `active:scale` só onde existe hover: no celular a escala
+                disparava no início do gesto e dava a sensação de "travado"
+                ao rolar com o dedo em cima do card.
+              */
+              className="relative rounded-3xl overflow-hidden bg-white dark:bg-brand-card-dark shadow-sm transition-shadow duration-200 cursor-pointer group border border-brand-primary/15 [@media(hover:hover)]:hover:shadow-md [@media(hover:hover)]:hover:scale-[1.01] [@media(hover:hover)]:active:scale-[0.995]"
             >
               {/* Image banner with Gradient Overlay */}
-              <div className="relative w-full h-40 sm:h-44 overflow-hidden">
+              <div className="relative w-full h-36 sm:h-44 overflow-hidden">
                 <img
                   src={event.image || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600"}
                   alt={event.title}
@@ -594,12 +599,12 @@ export default function Feed({
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-black/10" />
 
                 {/* Title Overlay in Banner */}
-                <h3 className="absolute bottom-3 left-3.5 right-3.5 text-white font-display font-semibold text-base sm:text-lg leading-tight drop-shadow-md line-clamp-2">
+                <h3 className="absolute bottom-2.5 left-3 right-3 sm:bottom-3 sm:left-3.5 sm:right-3.5 text-white font-display font-semibold text-[0.95rem] sm:text-lg leading-snug drop-shadow-md line-clamp-2 pr-1">
                   {event.title}
                 </h3>
 
                 {/* Badges: localidade + tipo escolar */}
-                <div className="absolute top-3 left-3 flex items-center gap-1.5 flex-wrap">
+                <div className="absolute top-2.5 left-2.5 right-2.5 sm:top-3 sm:left-3 sm:right-auto flex items-center gap-1.5 flex-wrap pr-16 sm:pr-0">
                   {getEventCity(event) && (
                     <span className="bg-white/95 dark:bg-black/70 backdrop-blur-sm text-slate-800 dark:text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
                       <MapPin size={10} className="text-red-500" />
@@ -620,7 +625,7 @@ export default function Feed({
 
                 {/* Price indicator badge */}
                 {event.isPaid && (
-                  <span className="absolute top-3 right-3 bg-yellow-400 text-slate-900 text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 shadow">
+                  <span className="absolute top-2.5 right-2.5 sm:top-3 sm:right-3 bg-yellow-400 text-slate-900 text-[10px] font-bold px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full uppercase tracking-wider flex items-center gap-1 shadow max-w-[7.5rem] truncate">
                     <CircleDollarSign size={12} />
                     {event.price || "Pago"}
                   </span>
@@ -628,7 +633,7 @@ export default function Feed({
               </div>
 
               {/* Feed Meta Info */}
-              <div className="p-3.5 sm:p-4 flex flex-col gap-2 bg-white dark:bg-brand-card-dark">
+              <div className="p-3.5 sm:p-4 flex flex-col gap-2.5 bg-white dark:bg-brand-card-dark">
                 <div
                   onClick={(e) => {
                     if (onOpenMap) {
@@ -643,7 +648,7 @@ export default function Feed({
                   <span className="line-clamp-1 underline-offset-2 hover:underline">{event.location}</span>
                 </div>
 
-                <div className="flex justify-between items-center text-[10px] font-mono uppercase tracking-widest text-slate-400 mt-1 border-t border-slate-100 dark:border-slate-800 pt-2">
+                <div className="flex items-center justify-between gap-2 text-[10px] font-mono uppercase tracking-wider text-slate-400 border-t border-slate-100 dark:border-slate-800 pt-2.5">
                   <span className="flex items-center gap-1">
                     <Calendar size={12} />
                     {event.day}/{event.month + 1}/{event.year}

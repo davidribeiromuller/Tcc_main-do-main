@@ -42,7 +42,7 @@ export default function GoogleAuthModal({
   const isProviderDisabled = errorType === "provider_disabled" || errorMessage?.toLowerCase().includes("provider") || errorMessage?.toLowerCase().includes("não habilitado");
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 font-sans antialiased">
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto font-sans antialiased">
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}

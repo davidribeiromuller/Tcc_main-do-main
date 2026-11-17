@@ -124,7 +124,9 @@ export async function registerSchoolAccount(
   // e dados coerentes cria a própria conta. O vínculo só é usado quando a
   // secretaria o cadastrou, para conferir a matrícula e definir a `role`.
   // `requireLink: true` continua disponível para quem quiser o modelo fechado.
-  const link = await verifyInstitutionalLink(data.institution, data.cpf, data.matricula);
+  // Matrícula saiu do cadastro (rodada 18): o vínculo é conferido só por
+  // CPF + instituição. `""` desativa a checagem de matrícula na função do banco.
+  const link = await verifyInstitutionalLink(data.institution, data.cpf, data.matricula || "");
   const shouldRequireLink = data.requireLink === true;
 
   if (shouldRequireLink && !link.skipped && !link.found) {
@@ -151,7 +153,7 @@ export async function registerSchoolAccount(
     gender: "Não informado",
     role,
     institution: data.institution,
-    matricula: data.matricula.trim(),
+    matricula: (data.matricula || "").trim(),
     personal_email: data.personalEmail.trim().toLowerCase(),
     must_change_password: true,
   } as any);
@@ -168,7 +170,7 @@ export async function registerSchoolAccount(
       await getSupabaseClient().rpc("activate_institutional_link", {
         p_institution: data.institution,
         p_cpf: normalizeCPF(data.cpf),
-        p_matricula: data.matricula.trim(),
+        p_matricula: (data.matricula || "").trim(),
         p_user_id: user.id,
       });
     } catch (err) {
