@@ -189,75 +189,64 @@ html.dark .admin-scrollable::-webkit-scrollbar-thumb {
 }
 
 /* ------------------------------------------------------------------
-   Rolagem horizontal do painel de administração
+   Rolagem do painel de administração (rodada 19)
    ------------------------------------------------------------------
-   As tabelas do painel (usuários, ex-alunos) têm muitas colunas e
-   `min-w-*` em várias células. Em telas estreitas o conteúdo passa da
-   largura disponível. Antes o container raiz usava `overflow-x-hidden`,
-   o que CORTAVA essas colunas em vez de permitir rolagem — a última
-   coluna ("Ações Administrativas") ficava inacessível no celular.
-   Aqui a rolagem horizontal fica explícita e visível.
+   Regra de ouro: a PÁGINA rola na vertical; as TABELAS rolam na
+   horizontal. Antes as duas coisas disputavam o mesmo contêiner, e o par
+   `overflow-x: hidden` + `overflow-y: auto` era promovido pelo navegador
+   para `auto/auto` — o painel inteiro virava um scroller horizontal de
+   736px (largura mínima das tabelas) e o gesto vertical só funcionava
+   quando o dedo caía exatamente sobre a tabela.
    ------------------------------------------------------------------ */
-.admin-scroll-x {
-  /*
-    No celular, rolagem horizontal no CONTAINER PRINCIPAL faz a página toda
-    deslizar para o lado — e como o cabeçalho é `sticky`, ele descola e sobra
-    espaço em branco. Em telas pequenas deixamos só a vertical aqui; o
-    `overflow-x-auto` fica nos blocos que realmente precisam (tabelas e
-    barra de abas, que já têm a classe própria).
-  */
-  overflow-x: hidden;
-  overflow-y: auto !important;
-  scrollbar-width: thin !important;
-  scrollbar-color: rgba(76, 107, 76, 0.45) transparent !important;
-  -webkit-overflow-scrolling: touch !important;
-  overscroll-behavior-x: contain;
+
+/* O conteúdo principal do painel respira e nunca ganha scroller lateral. */
+.admin-page {
+  overflow-x: clip;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
 }
 
-.admin-scroll-x::-webkit-scrollbar {
+/* Blocos de tabela: rolagem horizontal ISOLADA (o gesto morre aqui, não
+   vaza para a página) e vertical do documento preservada por `pan-y`. */
+.admin-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(76, 107, 76, 0.45) transparent;
+}
+
+.admin-table-scroll::-webkit-scrollbar {
   display: block !important;
-  width: 9px !important;
-  height: 9px !important;
+  height: 10px !important;
 }
 
-.admin-scroll-x::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.03) !important;
-  border-radius: 9999px !important;
+.admin-table-scroll::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 9999px;
 }
 
-.admin-scroll-x::-webkit-scrollbar-thumb {
-  background: rgba(76, 107, 76, 0.45) !important;
-  border-radius: 9999px !important;
-  border: 1px solid transparent !important;
+.admin-table-scroll::-webkit-scrollbar-thumb {
+  background: rgba(76, 107, 76, 0.45);
+  border-radius: 9999px;
 }
 
-.admin-scroll-x::-webkit-scrollbar-thumb:hover {
-  background: rgba(76, 107, 76, 0.75) !important;
+html.dark .admin-table-scroll {
+  scrollbar-color: rgba(163, 198, 157, 0.45) transparent;
 }
 
-html.dark .admin-scroll-x {
-  scrollbar-color: rgba(163, 198, 157, 0.45) transparent !important;
+html.dark .admin-table-scroll::-webkit-scrollbar-thumb {
+  background: rgba(163, 198, 157, 0.4);
 }
 
-html.dark .admin-scroll-x::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.03) !important;
-}
-
-html.dark .admin-scroll-x::-webkit-scrollbar-thumb {
-  background: rgba(163, 198, 157, 0.4) !important;
-}
-
-/* Em dispositivos de toque a barra fina é difícil de acertar; deixa mais
-   generosa para dar o "pega" da rolagem horizontal. */
+/* Em toque, a barra fininha é difícil de acertar; deixa mais generosa. */
 @media (pointer: coarse) {
-  .admin-scroll-x::-webkit-scrollbar {
+  .admin-table-scroll::-webkit-scrollbar {
     height: 12px !important;
-  }
-}
-
-@media (min-width: 768px) {
-  .admin-scroll-x {
-    overflow-x: auto !important;
   }
 }
 
@@ -451,4 +440,21 @@ body {
 .touch-map,
 .touch-map .leaflet-container {
   touch-action: none;
+}
+
+/* ============================================================
+   Rodada 19 — escala no toque só onde existe mouse
+   ============================================================
+   `active:scale-95` dispara no `touchstart`; no celular isso muda o alvo no
+   meio do gesto e o navegador cancela a rolagem. Em telas de toque o
+   feedback fica por conta da cor/sombra; a escala volta só com mouse.
+*/
+.hover-only-scale {
+  transition: transform 150ms ease, background-color 150ms ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .hover-only-scale:active {
+    transform: scale(0.97);
+  }
 }
