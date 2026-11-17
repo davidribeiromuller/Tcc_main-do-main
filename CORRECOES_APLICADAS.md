@@ -1079,81 +1079,59 @@ contador (`recarregarPessoais`).
 | `tsc --noEmit` | 0 erros |
 | `npm run build` | ok (5.86 s) |
 
+
 ---
 
-## 19. Rodada 15 — novo design dos cards de evento
+## 20. Rodada 16 — redesenho da ABA de eventos
 
-### 19.1 O problema da screenshot
+### 20.1 Correção de rota: os cards voltaram ao formato anterior
 
-O mural mostrava uma fileira de cards **visualmente idênticos**:
+A rodada anterior interpretou "design dos eventos" como "design dos cards" e
+trocou foto/título/data por um esquema de identidade por área. **Isso foi
+revertido**: `src/lib/eventVisuals.ts` e `test-round15.mjs` foram removidos e o
+card voltou ao formato que já existia (imagem no topo, título sobre o banner,
+metadados embaixo).
 
-| Problema | Por quê |
-|---|---|
-| Todos com a mesma foto escura de plateia | O banco grava `photo-1540575467063` como imagem padrão quando o evento não tem arte. O `Feed` usava `event.image \|\| placeholder` — como o valor **sempre existe**, o placeholder aparecia em todos |
-| Título branco sobre preto | Contraste ruim, e o texto competia com a imagem |
-| Metadados em cinza minúsculo (`20/12/2026`, `16:30`) | A data — informação mais procurada — era o elemento menos visível |
-| Nenhuma diferenciação por assunto | Um vestibular e uma olimpíada de astronomia tinham exatamente a mesma cara |
-| Cards escuros no portal verde claro | Peso visual desproporcional ao resto da interface |
+O pedido era o **design da aba**, não dos cards.
 
-### 19.2 A solução: identidade por área do conhecimento
+### 20.2 O que mudou na aba
 
-`src/lib/eventVisuals.ts` **(novo)** — cada evento ganha ícone, cores e rótulo
-conforme a área:
+**Cabeçalho**
+- Antes: título "Eventos" e uma linha fixa "Olá, David" que nunca mudava.
+- Agora: o subtítulo é **informativo** — mostra a contagem real
+  (`5 eventos`, `2 eventos · Curitiba`) e reflete o filtro ativo.
+- Lupa e botão "Compromisso" alinhados à direita, com altura consistente
+  (40px) e rótulo que alterna entre "Pesquisar" e "Fechar busca".
 
-| Área | Ícone | Cor |
-|---|---|---|
-| Matemática | Calculator | índigo |
-| Química | FlaskConical | fúcsia |
-| Física / Astronomia | Atom | azul |
-| Tecnologia / Robótica | Cpu | ciano |
-| Biologia | Dna | esmeralda |
-| Linguagens / História | BookOpen | âmbar |
-| Cultura / Teatro / Literatura | Palette | rosa |
-| Esporte | Trophy | laranja |
-| Vestibular / ENEM | GraduationCap | violeta |
-| Meio ambiente | Leaf | lima |
-| Música | Music | púrpura |
+**Filtros**
+- Antes: dois grupos em `flex-wrap` que, no celular, quebravam em 3–4 linhas e
+  empurravam a grade para baixo.
+- Agora: uma faixa única com **rolagem horizontal** (`FiltroGrupo` +
+  `ChipFiltro`), rótulos curtos ("Aberto" em vez de "Aberto ao público"), chips
+  de 32px com `aria-pressed` e um botão **Limpar** que só aparece quando há
+  filtro ativo.
 
-**Sem foto** → cabeçalho com gradiente + ícone grande e discreto + rótulo da
-área. **Com foto** → a foto, com gradiente apenas para legibilidade das
-etiquetas. O `imagemEhPlaceholder()` trata a foto de plateia como "sem imagem",
-então os events antigos passam a ganhar identidade sem migração de dados.
+**Grade**
+- `1 / 2 / 3 / 4` colunas (antes repetia `md:grid-cols-2`, que não fazia nada).
+- Espaçamento `gap-3.5` no mobile (antes 6 = 24px, muito para tela estreita).
 
-### 19.3 Card redesenhado
+**Estado vazio**
+- Antes: um ícone cinza e "Nenhum evento encontrado" — sendo que a lista
+  *nunca* esteve vazia por busca; o texto não dizia o que fazer.
+- Agora distingue os dois casos: **"Nenhum evento na agenda ainda"** (lista
+  vazia de verdade) e **"Nada com esses filtros"** (busca/filtro sem
+  resultado), cada um com as ações que fazem sentido ali: limpar filtros,
+  limpar busca, criar compromisso ou atualizar.
 
-- **Bloco de data destacado** no canto do card (`10` / `mar`), porque é o que o
-  aluno procura primeiro.
-- **Título no corpo**, em cor de texto — legível, com `line-clamp-2`.
-- **Etiquetas compactas** no topo: cidade (branca) e tipo (verde para escolar).
-- **Preço** em âmbar, só quando é pago.
-- **Rodapé** com horário e ano, discreto.
-- Cartão mais claro (sombra suave, borda fina) que combina com o verde do
-  portal; `hover` eleva levemente em vez de escurecer.
-- Imagem com `loading="lazy"` (antes todas carregavam de uma vez).
+**Campo de busca**
+- Sobreviveu à reescrita (foi restaurado após o teste apontar a falta):
+  aparece abaixo da barra, ocupa a largura toda e tem botão de limpar.
 
-### 19.4 Classificação correta importa
-
-A área é decidida por **categoria → título → descrição**, nessa ordem (a
-categoria declarada pelo autor é a pista mais confiável). Dois ajustes
-específicos:
-
-- `"UFPR"`/`"UTFPR"` **só** indicam vestibular junto de termos de seleção —
-  sozinhos, faziam "Feira de Profissões da UTFPR" virar Vestibular.
-- `"esporte"`/`"esportivo"` foram incluídos explicitamente (antes só havia
-  "jogo", "jeps", "torneio"...).
-
-### 19.5 Melhorias de leitura
-
-- Contador de eventos no cabeçalho.
-- Rótulos "Cidade"/"Tipo" quebram linha no celular, em vez de espremer os chips
-  na mesma faixa.
-
-### Validação
+### 20.3 Validação
 
 | Suíte | Resultado |
 |---|---|
-| `test-round15.mjs` — placeholder, 11 classificações, prioridades, regressão do card | **36/36** |
-| jsdom — card sem foto usa gradiente da área, com foto usa a foto, preço e contador | 8/8 |
-| Regressão completa (rodadas 11–14) | 181/181 |
+| `test-round16.mjs` — cards revertidos, cabeçalho, filtros, grade, estado vazio e render real | **39/39** |
+| Regressão rodadas 11–14 | 181/181 |
 | `tsc --noEmit` | 0 erros |
-| `npm run build` | ok (6.34 s) |
+| `npm run build` | ok (6.39 s) |
