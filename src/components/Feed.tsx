@@ -265,7 +265,7 @@ export default function Feed({
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="flex flex-col h-full overflow-y-auto touch-scroll text-brand-text-light dark:text-brand-text-dark"
+      className="flex flex-col w-full pb-bottom-nav touch-scroll text-brand-text-light dark:text-brand-text-dark"
     >
       {/*
         Cabeçalho do Feed.

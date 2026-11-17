@@ -139,7 +139,7 @@ export default function Login({
   // Subview: Institutional School Login
   if (activeSubView === "institutional") {
     return (
-      <div className="min-h-full w-full flex items-center justify-center p-4 md:p-8 bg-slate-50 dark:bg-slate-950 overflow-y-auto">
+      <div className="min-h-[100dvh] w-full flex items-center justify-center p-4 md:p-8 bg-slate-50 dark:bg-slate-950">
         <motion.div
           initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -246,7 +246,7 @@ export default function Login({
 
   // Main View
   return (
-    <div className="min-h-full w-full flex items-center justify-center px-3 py-5 sm:p-8 bg-slate-50 dark:bg-slate-950">
+    <div className="min-h-[100dvh] w-full flex items-center justify-center px-3 py-5 sm:p-8 bg-slate-50 dark:bg-slate-950">
       <motion.div
         initial={{ opacity: 0, scale: 0.98 }}
         animate={{ opacity: 1, scale: 1 }}

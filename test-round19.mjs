@@ -43,7 +43,7 @@ console.log("\n=== 1. A página rola; a tabela não é a única área ===\n");
   ok("contêiner raiz não usa mais `admin-scroll-x`", !/admin-scroll-x/.test(painelLimpo));
   ok("contêiner raiz não usa `overflow-x-hidden`", !/overflow-x-hidden/.test(painelLimpo));
   ok("contêiner raiz usa `overflow-x-clip` (não cria scroller)", !!raiz && /overflow-x-clip/.test(raiz[0]));
-  ok("contêiner raiz rola na vertical", !!raiz && /overflow-y-auto/.test(raiz[0]));
+  ok("quem rola é o documento — a raiz não monta scroller", !!raiz && !/overflow-y-auto/.test(raiz[0]));
   ok("classe `.admin-page` existe no CSS", /\.admin-page\s*\{/.test(cssLimpo));
 }
 

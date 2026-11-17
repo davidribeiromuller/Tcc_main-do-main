@@ -324,7 +324,7 @@ export default function CalendarView({
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="flex flex-col h-full overflow-y-auto pb-bottom-nav touch-scroll text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark"
+      className="flex flex-col w-full pb-bottom-nav touch-scroll text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark"
     >
       {/* Top Header */}
       <div className="border-b border-brand-primary/10 bg-white/70 dark:bg-brand-card-dark/60 backdrop-blur-md sticky top-0 z-30 shadow-xs">

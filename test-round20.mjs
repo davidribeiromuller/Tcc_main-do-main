@@ -1,6 +1,11 @@
 /**
- * Testes da rodada 20 — scroll do painel no mobile (a tela precisa rolar,
- * não só a tabela) + organização do cabeçalho.
+ * Testes da rodada 20 — organização do cabeçalho do painel.
+ *
+ * ATUALIZADO NA RODADA 21: as asserções sobre a CADEIA DE ALTURA
+ * (h-[100dvh], flex-1 min-h-0, overflow-y-auto no painel) foram
+ * substituídas pela arquitetura "o documento rola", validada em
+ * `test-round21.mjs`. Aqui ficam apenas as garantias de organização,
+ * respiro e reserva da barra inferior, que continuam valendo.
  *
  * Relato: "ainda não funciona, organize isso como eu já havia pedido e
  * adicione o scroll solicitado", com print mostrando o conteúdo CORTADO
@@ -38,45 +43,38 @@ function bloco(seletor) {
   return cssLimpo.slice(ini + 1, fim);
 }
 
-console.log("\n=== 1. Altura resolvida na raiz (a causa do corte) ===\n");
+console.log("\n=== 1. Rolagem é do documento, não da tela (rodada 21) ===\n");
 {
   const raiz = app.match(/id="app-root-container"[\s\S]{0,400}?className="([^"]+)"/);
   ok("raiz do app renderiza", raiz !== null);
-  ok("raiz usa altura de viewport dinâmica", !!raiz && /h-\[100dvh\]|h-dvh/.test(raiz[1]));
-  ok("raiz tem `min-h-0` (permite o filho rolar)", !!raiz && /min-h-0/.test(raiz[1]));
-  ok("raiz não deixa o conteúdo escapar", !!raiz && /overflow-hidden/.test(raiz[1]));
+  ok("raiz cresce com o conteúdo (não trava altura)", !!raiz && /min-h-\[100dvh\]/.test(raiz[1]));
+  ok("raiz não esconde o excedente", !!raiz && !/overflow-hidden/.test(raiz[1]));
 
-  // `.app-viewport` aparece mais de uma vez (progressivo); vale o conjunto.
-  ok(".app-viewport define height: 100dvh",
-    /\.app-viewport\s*\{[^}]*height:\s*100dvh/.test(cssLimpo));
-  ok(".app-viewport limita max-height",
-    /\.app-viewport\s*\{[^}]*max-height:\s*100dvh/.test(cssLimpo));
-  ok("há fallback para navegador sem dvh", /@supports not \(height: 100dvh\)/.test(cssLimpo));
+  ok(".app-viewport não cria scroller próprio",
+    !/\.app-viewport\s*\{[^}]*overflow:\s*hidden/.test(cssLimpo));
 }
 
-console.log("=== 2. O painel é filho do flex, não `absolute` ===\n");
+console.log("=== 2. O painel é conteúdo comum, não `absolute` ===\n");
 {
   const blocoPainel = app.match(/activeScreen === "admin" && \(([\s\S]{0,700}?)<AdminPanel/);
   ok("wrapper do painel encontrado", blocoPainel !== null);
   const cls = blocoPainel?.[1] || "";
   ok("wrapper não usa `absolute inset-0`", !/absolute inset-0/.test(cls));
-  ok("wrapper usa `flex-1 min-h-0`", /flex-1/.test(cls) && /min-h-0/.test(cls));
+  ok("wrapper usa a classe de tela padrão", /app-screen/.test(cls));
 }
 
-console.log("=== 3. Raiz do painel rola de verdade ===\n");
+console.log("=== 3. O painel não monta um segundo scroller ===\n");
 {
   const raiz = painel.match(/className="admin-page[^"]*"/);
   ok("raiz do painel usa `.admin-page`", raiz !== null);
-  ok("tem `overflow-y-auto`", !!raiz && /overflow-y-auto/.test(raiz[0]));
+  ok("não tem `overflow-y-auto` (quem rola é a página)", !!raiz && !/overflow-y-auto/.test(raiz[0]));
   ok("tem `overflow-x-clip` (não cria scroller lateral)", !!raiz && /overflow-x-clip/.test(raiz[0]));
-  ok("tem `flex-1 min-h-0` (encolhe e rola dentro do flex)", !!raiz && /flex-1/.test(raiz[0]) && /min-h-0/.test(raiz[0]));
-  ok("não usa `h-full` junto de `flex-1`", !!raiz && !/h-full/.test(raiz[0]));
+  ok("não usa `h-full`/`flex-1` para se esticar", !!raiz && !/h-full/.test(raiz[0]) && !/flex-1/.test(raiz[0]));
   ok("não usa a classe `admin-scrollable` (!important em overflow-y)",
     !!raiz && !/admin-scrollable/.test(raiz[0]));
 
   const adminPage = bloco(".admin-page");
-  ok(".admin-page tem min-height: 0", /min-height:\s*0/.test(adminPage));
-  ok(".admin-page tem touch-action: pan-y", /touch-action:\s*pan-y/.test(adminPage));
+  ok(".admin-page não declara overflow-y: auto", !/overflow-y:\s*auto/.test(adminPage));
   ok(".admin-page usa overflow-x: clip", /overflow-x:\s*clip/.test(adminPage));
 }
 
@@ -157,7 +155,7 @@ console.log("=== 8. Render real: cadeia de rolagem montada ===\n");
 
   const raiz = container.querySelector(".admin-page");
   ok("`.admin-page` montado", raiz !== null);
-  ok("é o elemento que rola (overflow-y-auto)", raiz?.className.includes("overflow-y-auto"));
+  ok("não monta scroller próprio (sem overflow-y-auto)", !raiz?.className.includes("overflow-y-auto"));
   ok("não corta na horizontal com hidden", !raiz?.className.includes("overflow-x-hidden"));
 
   const cabecalho = raiz?.firstElementChild;
