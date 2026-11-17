@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { motion } from "motion/react";
-import { User2, Mail, Lock, CreditCard, Calendar, Users, Building, ArrowLeft, Phone, Hash, AtSign } from "lucide-react";
+import { User2, Mail, Lock, CreditCard, Calendar, Users, Building, ArrowLeft, Phone, AtSign } from "lucide-react";
 import { SCHOOLS_LIST } from "../lib/schools.ts";
 import { fetchJsonApi } from "../lib/staticHosting.ts";
 import { formatCPF, validateSchoolRegistration } from "../lib/schoolAccountValidation.ts";
@@ -39,7 +39,6 @@ export default function Register({
   const [gender, setGender] = useState("");
   const [institution, setInstitution] = useState(SCHOOLS_LIST[0]);
   const [role, setRole] = useState("Aluno");
-  const [matricula, setMatricula] = useState("");
   const [personalEmail, setPersonalEmail] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
@@ -233,7 +232,6 @@ export default function Register({
     const erros = validateSchoolRegistration({
       nome,
       email,
-      matricula,
       cpf,
       birthdate,
       personalEmail,
@@ -260,7 +258,7 @@ export default function Register({
         gender: gender || "Não informado",
         role: "Aluno",
         institution: institution || SCHOOLS_LIST[0] || "Escola estadual Helena Wysocki",
-        matricula: matricula.trim(),
+        matricula: "",
         personalEmail: personalEmail.trim().toLowerCase(),
       } as any);
 
@@ -279,9 +277,9 @@ export default function Register({
     <motion.div
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="flex flex-col h-full overflow-y-auto p-6 text-brand-text-light dark:text-brand-text-dark max-w-md mx-auto w-full md:py-8"
+      className="flex flex-col h-full overflow-y-auto touch-scroll px-4 py-5 sm:p-6 text-brand-text-light dark:text-brand-text-dark max-w-md mx-auto w-full md:py-8"
     >
-      <div className="my-auto py-4">
+      <div className="my-auto py-2 sm:py-4">
         <div className="flex items-center gap-3 my-4">
         <button
           onClick={() => currentStep === 2 ? setCurrentStep(1) : onNavigate("login")}
@@ -447,8 +445,8 @@ export default function Register({
           </button>
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-3">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4 pb-2">
+          <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
               <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nascimento</label>
               <div className="relative">
@@ -478,33 +476,6 @@ export default function Register({
                 </select>
               </div>
             </div>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Matrícula / RA *
-            </label>
-            <div className="relative">
-              <Hash className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-              <input
-                type="text"
-                value={matricula}
-                onChange={(e) => setMatricula(e.target.value)}
-                placeholder="Ex: 2026-001234"
-                className={`w-full h-12 pl-9 pr-2 bg-white dark:bg-brand-card-dark border rounded-xl focus:ring-2 focus:ring-brand-accent/50 focus:outline-none text-sm ${
-                  fieldErrors.matricula
-                    ? "border-red-400 focus:border-red-400"
-                    : "border-brand-primary focus:border-brand-accent"
-                }`}
-              />
-            </div>
-            {fieldErrors.matricula ? (
-              <span className="text-[11px] text-red-600 dark:text-red-400">{fieldErrors.matricula}</span>
-            ) : (
-              <span className="text-[11px] text-slate-400">
-                Use a mesma que aparece no seu comprovante de matrícula.
-              </span>
-            )}
           </div>
 
           <div className="flex flex-col gap-1">

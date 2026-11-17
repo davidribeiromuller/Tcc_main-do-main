@@ -964,12 +964,12 @@ export default function AdminPanel({
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="flex flex-col flex-1 h-full min-h-0 admin-scrollable admin-scroll-x overflow-y-auto overflow-x-auto pb-24 sm:pb-16 text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark transition-colors scroll-smooth overscroll-contain"
+      className="flex flex-col flex-1 h-full min-h-0 admin-scrollable admin-scroll-x overflow-y-auto overflow-x-hidden pb-bottom-nav text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark transition-colors overscroll-contain touch-scroll"
     >
       {/* Top Bar / Header */}
       <div className="border-b border-brand-primary/10 dark:border-white/10 bg-brand-bg-light/90 dark:bg-brand-bg-dark/90 backdrop-blur-md sticky top-0 z-30 transition-colors">
-        <div className="w-full max-w-[110rem] mx-auto px-4 sm:px-6 py-3.5">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="w-full max-w-[110rem] mx-auto px-4 sm:px-6 py-3 sm:py-3.5">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 md:gap-4">
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-lg sm:text-xl font-display font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
@@ -1004,11 +1004,17 @@ export default function AdminPanel({
               continua com todas as classes `dark:` — só não controla o tema.
             */}
             {/* Main Tabs (Ativos, Bloqueados, Eventos, Escolas) */}
-            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-black/30 p-1 rounded-2xl border border-slate-200 dark:border-white/10 shrink-0 overflow-x-auto">
+            {/*
+              No celular as 6 abas não cabem numa linha e ficavam todas
+              espremidas ("design amontoado"). Agora a barra rola na horizontal
+              (com snap), cada aba tem altura de toque confortável e o rótulo
+              não quebra em duas linhas.
+            */}
+            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-black/30 p-1 rounded-2xl border border-slate-200 dark:border-white/10 shrink-0 overflow-x-auto no-scrollbar scroll-x-snap max-w-full -mx-1 px-1 md:mx-0 md:px-1">
               <button
                 type="button"
                 onClick={() => setActiveTab("users")}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                className={`px-3 py-2 md:py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all cursor-pointer ${
                   activeTab === "users"
                     ? "bg-white dark:bg-brand-card-dark text-brand-accent dark:text-brand-primary shadow-xs"
                     : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
@@ -1021,7 +1027,7 @@ export default function AdminPanel({
               <button
                 type="button"
                 onClick={() => setActiveTab("blocked")}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                className={`px-3 py-2 md:py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all cursor-pointer ${
                   activeTab === "blocked"
                     ? "bg-red-500 text-white shadow-xs font-bold"
                     : "text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20"
@@ -1034,7 +1040,7 @@ export default function AdminPanel({
               <button
                 type="button"
                 onClick={() => setActiveTab("events")}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                className={`px-3 py-2 md:py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all cursor-pointer ${
                   activeTab === "events"
                     ? "bg-white dark:bg-brand-card-dark text-brand-accent dark:text-brand-primary shadow-xs"
                     : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
@@ -1047,7 +1053,7 @@ export default function AdminPanel({
               <button
                 type="button"
                 onClick={() => setActiveTab("suggestions")}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                className={`px-3 py-2 md:py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all cursor-pointer ${
                   activeTab === "suggestions"
                     ? "bg-indigo-600 text-white shadow-xs"
                     : "text-indigo-700 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/20"
@@ -1065,7 +1071,7 @@ export default function AdminPanel({
               <button
                 type="button"
                 onClick={() => setActiveTab("personal")}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                className={`px-3 py-2 md:py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                   activeTab === "personal"
                     ? "bg-emerald-800 text-white shadow-xs font-bold"
                     : "text-emerald-800 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
@@ -1084,7 +1090,7 @@ export default function AdminPanel({
                 <button
                   type="button"
                   onClick={() => setActiveTab("schools")}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  className={`px-3 py-2 md:py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all cursor-pointer ${
                     activeTab === "schools"
                       ? "bg-emerald-800 text-white shadow-xs font-bold"
                       : "text-emerald-800 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
@@ -1150,7 +1156,7 @@ export default function AdminPanel({
           {/* Search & Secondary Action Bar */}
           {activeTab === "users" || activeTab === "blocked" ? (
             <>
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mt-3">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mt-2.5">
                 <div className="relative flex-1 w-full">
                   <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                   <input
@@ -1178,12 +1184,14 @@ export default function AdminPanel({
                   )}
                 </div>
 
-                {/* View Switcher (Table vs Cards) */}
-                <div className="flex items-center gap-1 bg-white dark:bg-brand-card-dark p-1 rounded-xl border border-brand-primary/20 dark:border-white/10 shadow-2xs shrink-0 self-end sm:self-auto">
+                {/* View Switcher (Table vs Cards) — no mobile fica em linha
+                    própria e com os dois botões dividindo a largura, em vez de
+                    encostados no canto. */}
+                <div className="flex items-center gap-1 bg-white dark:bg-brand-card-dark p-1 rounded-xl border border-brand-primary/20 dark:border-white/10 shadow-2xs shrink-0 w-full sm:w-auto">
                   <button
                     type="button"
                     onClick={() => setViewMode("table")}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                    className={`flex-1 sm:flex-none justify-center px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
                       viewMode === "table"
                         ? "bg-brand-primary/20 dark:bg-brand-primary/30 text-brand-accent dark:text-brand-primary font-bold shadow-2xs"
                         : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"
@@ -1197,7 +1205,7 @@ export default function AdminPanel({
                   <button
                     type="button"
                     onClick={() => setViewMode("cards")}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                    className={`flex-1 sm:flex-none justify-center px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
                       viewMode === "cards"
                         ? "bg-brand-primary/20 dark:bg-brand-primary/30 text-brand-accent dark:text-brand-primary font-bold shadow-2xs"
                         : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"
@@ -1232,7 +1240,7 @@ export default function AdminPanel({
               )}
 
               {/* Filtros rápidos — faixa alinhada com a barra de busca */}
-              <div className="flex items-center gap-1.5 overflow-x-auto py-1.5 px-2 mt-2 rounded-xl bg-white/60 dark:bg-brand-card-dark/60 border border-slate-200/80 dark:border-white/10 scrollbar-none w-full select-none text-xs">
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-x-snap py-1.5 px-2 mt-2 rounded-xl bg-white/60 dark:bg-brand-card-dark/60 border border-slate-200/80 dark:border-white/10 w-full text-xs">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 shrink-0 pl-1 pr-1.5 flex items-center gap-1 border-r border-slate-200 dark:border-white/10">
                   <Filter size={11} /> Filtros
                 </span>
@@ -1257,7 +1265,7 @@ export default function AdminPanel({
                           setActiveTab("users");
                         }
                       }}
-                      className={`px-3 py-1.5 rounded-full shrink-0 font-medium transition-all text-xs flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                      className={`px-3 py-2 sm:py-1.5 rounded-full shrink-0 font-medium transition-colors text-xs flex items-center gap-1.5 cursor-pointer ${
                         isSelected
                           ? "bg-brand-accent dark:bg-brand-primary text-white dark:text-slate-900 font-bold shadow-2xs"
                           : "bg-white dark:bg-brand-card-dark text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/5"
@@ -1318,12 +1326,12 @@ export default function AdminPanel({
           Em telas grandes os cards e tabelas ocupam o espaço disponível em vez
           de ficarem espremidos em 1152px. Em telas pequenas o container raiz
           permite rolagem horizontal (admin-scroll-x). */}
-      <div className="w-full max-w-[110rem] mx-auto p-4 sm:p-6 flex flex-col gap-4">
+      <div className="w-full max-w-[110rem] mx-auto p-3 sm:p-6 flex flex-col gap-3.5 sm:gap-4">
         {/* ================= ACTIVE USERS TAB ================= */}
         {activeTab === "users" && (
           <>
             {/* Info notice banner */}
-            <div className="bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 p-4 rounded-2xl flex items-start gap-3 shadow-2xs">
+            <div className="bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 p-3.5 sm:p-4 rounded-2xl flex items-start gap-2.5 sm:gap-3 shadow-2xs">
               <CheckCircle2 className="text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" size={18} />
               <div className="text-xs text-emerald-900 dark:text-emerald-200 leading-relaxed">
                 <p className="font-semibold">Diretório Geral de Usuários do eloEscola:</p>
@@ -2877,7 +2885,7 @@ export default function AdminPanel({
       {/* MODAL INSTITUCIONAL: Redefinir Senha da Escola */}
       <AnimatePresence>
         {accountToResetPassword && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0, scale: 0.96 }}
               animate={{ opacity: 1, scale: 1 }}

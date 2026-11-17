@@ -1342,6 +1342,7 @@ export default function App() {
     gender?: string;
     role?: string;
     institution?: string;
+    /** Campo removido do cadastro (rodada 18); mantido no tipo por compatibilidade. */
     matricula?: string;
     personalEmail?: string;
   }): Promise<{ success: boolean; error?: string; fieldErrors?: Record<string, string> }> => {

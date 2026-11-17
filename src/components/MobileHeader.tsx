@@ -42,7 +42,7 @@ export default function MobileHeader({
   };
 
   return (
-    <header className="md:hidden sticky top-0 z-40 bg-white/95 dark:bg-brand-card-dark/95 backdrop-blur-md border-b border-slate-200/80 dark:border-white/10 px-3.5 py-2.5 shadow-2xs transition-colors select-none">
+    <header className="md:hidden sticky top-0 z-40 bg-white/95 dark:bg-brand-card-dark/95 backdrop-blur-md border-b border-slate-200/80 dark:border-white/10 px-3 py-2 safe-top shadow-2xs transition-colors select-none">
       <div className="flex items-center justify-between gap-2 max-w-lg mx-auto w-full">
         {/* Left: School brand & current screen */}
         <button
@@ -70,12 +70,12 @@ export default function MobileHeader({
           {isChefe ? (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300/80 dark:border-amber-700/80">
               <Crown size={11} className="text-amber-600 dark:text-amber-400" />
-              <span className="hidden xs:inline">Chefe</span>
+              <span className="hidden min-[380px]:inline">Chefe</span>
             </span>
           ) : isFuncionario ? (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
               <ShieldCheck size={11} className="text-blue-600 dark:text-blue-400" />
-              <span className="hidden xs:inline">Admin</span>
+              <span className="hidden min-[380px]:inline">Admin</span>
             </span>
           ) : null}
 
@@ -125,7 +125,10 @@ export default function MobileHeader({
                   className="fixed inset-0 z-40 bg-black/20 backdrop-blur-2xs"
                   onClick={() => setIsMenuOpen(false)}
                 />
-                <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-brand-card-dark border border-slate-200 dark:border-white/15 rounded-2xl shadow-xl py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150 text-slate-800 dark:text-white">
+                <div
+                  role="menu"
+                  className="absolute right-0 mt-2 w-[min(15rem,calc(100vw-1.75rem))] max-h-[70dvh] overflow-y-auto bg-white dark:bg-brand-card-dark border border-slate-200 dark:border-white/15 rounded-2xl shadow-xl py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150 text-slate-800 dark:text-white"
+                >
                   <div className="px-3.5 py-2 border-b border-slate-100 dark:border-white/10">
                     <p className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">Conta Conectada</p>
                     <p className="text-xs font-bold truncate mt-0.5">{userName}</p>
@@ -144,7 +147,7 @@ export default function MobileHeader({
                         setIsMenuOpen(false);
                         onNavigate("settings");
                       }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs rounded-xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors cursor-pointer text-left"
+                      className="w-full min-h-11 flex items-center gap-2.5 px-3 py-2.5 text-xs rounded-xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors cursor-pointer text-left"
                     >
                       <SettingsIcon size={15} className="text-slate-500 dark:text-slate-400" />
                       <span>Configurações & Perfil</span>
@@ -157,7 +160,7 @@ export default function MobileHeader({
                           setIsMenuOpen(false);
                           onNavigate("admin");
                         }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs rounded-xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors cursor-pointer text-left text-brand-accent dark:text-brand-primary font-semibold"
+                        className="w-full min-h-11 flex items-center gap-2.5 px-3 py-2.5 text-xs rounded-xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors cursor-pointer text-left text-brand-accent dark:text-brand-primary font-semibold"
                       >
                         <ShieldCheck size={15} />
                         <span>Painel Administrativo</span>
@@ -172,7 +175,7 @@ export default function MobileHeader({
                         setIsMenuOpen(false);
                         onLogout();
                       }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-xl transition-colors cursor-pointer text-left font-semibold"
+                      className="w-full min-h-11 flex items-center gap-2.5 px-3 py-2.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-xl transition-colors cursor-pointer text-left font-semibold"
                     >
                       <LogOut size={15} />
                       <span>Sair da Conta</span>

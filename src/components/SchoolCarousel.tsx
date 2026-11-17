@@ -47,13 +47,21 @@ export const SchoolCarousel: React.FC<SchoolCarouselProps> = ({ onSelectSchool }
   };
 
   return (
-    <section 
-      className="w-full my-8 select-none"
+    <section
+      className="w-full my-8"
       aria-label="Conheça nossas escolas parceiras"
+      /*
+        Só a área do carrossel pausa o autoplay no toque. E o `onTouchEnd` não
+        deve ser o único ponto de retomada: no mobile o `touchend` chega antes
+        do fim da inércia e o trilho "brigava" com o dedo. Deixamos o autoplay
+        pausado por um instante depois do gesto.
+      */
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
       onTouchStart={() => setIsPaused(true)}
-      onTouchEnd={() => setIsPaused(false)}
+      onTouchEnd={() => {
+        window.setTimeout(() => setIsPaused(false), 1200);
+      }}
     >
       <div className="flex items-end justify-between mb-4 px-2">
         <div>
@@ -91,7 +99,7 @@ export const SchoolCarousel: React.FC<SchoolCarouselProps> = ({ onSelectSchool }
       {/* Horizontal Carousel Container */}
       <div
         ref={scrollContainerRef}
-        className="flex gap-4 overflow-x-auto pb-4 pt-1 px-2 no-scrollbar snap-x snap-mandatory scroll-smooth"
+        className="flex gap-4 overflow-x-auto pb-4 pt-1 px-2 no-scrollbar snap-x snap-mandatory scroll-x-snap"
         style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
       >
         {ARAUCARIA_SCHOOLS.map((school, index) => {

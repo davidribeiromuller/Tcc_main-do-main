@@ -579,7 +579,7 @@ export const SchoolDetail: React.FC<SchoolDetailProps> = ({
 
       {/* Modal: Publicar Notícia da Escola */}
       {showNewsModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-emerald-200">
             <h3 className="text-lg font-serif font-bold text-gray-900 mb-1">
               Publicar Comunicado Oficial
@@ -652,7 +652,7 @@ export const SchoolDetail: React.FC<SchoolDetailProps> = ({
 
       {/* Modal: Publicar Evento da Escola */}
       {showEventModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-emerald-200">
             <h3 className="text-lg font-serif font-bold text-gray-900 mb-1">
               Cadastrar Evento Institucional

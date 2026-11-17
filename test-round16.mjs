@@ -25,8 +25,10 @@ console.log("\n=== 1. Cards voltaram ao design anterior ===");
     /event\.image \|\| "https:\/\/images\.unsplash\.com/.test(fonte));
   ok("não importa mais o módulo de visuais por área",
     !/eventVisuals/.test(fonte));
+  // O título continua sobreposto ao banner; na rodada 18 o respiro passou a
+  // ser responsivo (menor no mobile), então validamos a posição, não o literal.
   ok("título volta a ficar sobre o banner",
-    /absolute bottom-3 left-3\.5 right-3\.5 text-white/.test(fonte));
+    /absolute bottom-[\d.]+ left-[\d.]+ right-[\d.]+[^"]*text-white/.test(fonte));
   ok("volta o cartão arredondado grande (rounded-3xl)",
     /relative rounded-3xl overflow-hidden bg-white/.test(fonte));
   ok("data volta ao formato dd/m/aaaa",
@@ -59,7 +61,8 @@ console.log("\n=== 3. Filtros ===");
 console.log("\n=== 4. Grade e estados ===");
 {
   ok("grade responsiva 1/2/3/4", /grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4/.test(fonte));
-  ok("espaçamento menor no mobile", /gap-3\.5 sm:gap-5/.test(fonte));
+  // Rodada 18 aumentou o respiro no mobile (gap-4) mantendo o do desktop.
+  ok("espaçamento menor no mobile", /gap-4 sm:gap-5/.test(fonte));
   ok("estado vazio explica quando não há eventos", /Nenhum evento na agenda ainda/.test(fonte));
   ok("estado vazio oferece limpar filtros", /Nada com esses filtros/.test(fonte));
   ok("estado vazio oferece criar compromisso", /Criar compromisso/.test(fonte));

@@ -898,7 +898,14 @@ export default function MapView({
       </div>
 
       {/* Map DOM Canvas */}
-      <div ref={mapContainerRef} className="w-full h-full z-0" />
+      {/*
+        O Leaflet aplica `touch-action: none` no contêiner (precisa disso para
+        arrastar o mapa). O problema é que ele ocupa a tela inteira e engolia o
+        gesto de rolagem do app quando o dedo caía sobre o mapa. Aqui o
+        contêiner do mapa fica restrito à área do mapa e o painel de conteúdo
+        em volta continua rolando normalmente.
+      */}
+      <div ref={mapContainerRef} className="w-full h-full z-0 touch-map" />
 
       {/* Selected Event Google Maps Bottom Sheet */}
       <AnimatePresence>
@@ -1086,7 +1093,7 @@ export default function MapView({
       {/* Geolocation Authorization Request Modal (Explicit User Permission Flow) */}
       <AnimatePresence>
         {showLocationModal && (
-          <div className="fixed inset-0 z-[2000] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[2000] bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0, scale: 0.92, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}

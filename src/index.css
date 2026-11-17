@@ -84,7 +84,17 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-y pinch-zoom;
+  /*
+    NÃO declare `touch-action` no body.
+    `touch-action: pan-y` no documento inteiro faz o navegador reservar o
+    gesto vertical para o documento — e os contêineres que rolam de verdade
+    (`.welcome-scroll`, telas `absolute inset-0 overflow-y-auto`) perdem o
+    arrasto quando o dedo começa em cima de um card, botão ou imagem. Era
+    exatamente o relato: "não consigo dar scroll com o dedo se o dedo estiver
+    em cima de algo". `manipulation` mantém o pinch-zoom e devolve o gesto ao
+    elemento que realmente rola; `auto` é o padrão do navegador.
+  */
+  touch-action: manipulation;
 }
 
 html.dark body {
@@ -103,7 +113,12 @@ html.dark body {
 /* Smooth touch and scroll containers */
 .overflow-y-auto, .overflow-x-auto, .scrollable-content {
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;
+  /*
+    `pan-y` bloqueava a rolagem horizontal nativa (carrossel de eventos,
+    faixa de filtros) e, em contêineres aninhados, cortava o gesto vertical.
+    `manipulation` permite pan em qualquer direção + pinch-zoom.
+  */
+  touch-action: manipulation;
   overscroll-behavior-y: contain;
 }
 
@@ -338,7 +353,7 @@ body {
 */
 .welcome-scroll {
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;
+  touch-action: manipulation;
   overscroll-behavior-y: contain;
   /* Importante no iOS: acelera o "momentum" do arrasto com o dedo. */
   will-change: scroll-position;
@@ -359,4 +374,81 @@ body {
   .welcome-scroll::-webkit-scrollbar {
     display: none;
   }
+}
+
+/* ============================================================
+   Rodada 18 — rolagem por toque confiável em QUALQUER lugar
+   ============================================================
+   Relato: "não consigo dar scroll com o dedo se o dedo estiver em cima de
+   algo". Três causas somadas:
+
+   1. `touch-action` declarado no `body`/em todas as `.overflow-*` reservava o
+      gesto para o documento em vez do contêiner que rola de fato.
+   2. `user-select: none` (via Tailwind `select-none`) em trechos grandes faz o
+      navegador mobile tratar o toque como "início de arrasto de elemento" em
+      alguns WebViews, travando o gesto.
+   3. Elementos com `transform`/`transition` no `:active` (os
+      `active:scale-95` dos cards) mudam o alvo no meio do gesto e interrompem
+      a rolagem.
+*/
+
+/* Rolagem vertical por toque sempre disponível, sem tirar o pinch-zoom. */
+.touch-scroll {
+  -webkit-overflow-scrolling: touch;
+  touch-action: manipulation;
+}
+
+/*
+  Texto grande com `select-none` atrapalha o gesto: só o suficiente para
+  rótulos/botões continua sem seleção; conteúdo de verdade volta a permitir.
+*/
+@media (pointer: coarse) {
+  /*
+    Evita que imagens sejam "arrastáveis" e capturem o gesto de rolagem.
+    Era o caso clássico do banner do card de evento.
+  */
+  img {
+    -webkit-user-drag: none;
+    user-select: none;
+  }
+
+  /* Fim do "salto" ao tentar rolar em cima de links/botões grandes. */
+  a,
+  button {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Rolagem horizontal por gesto (faixas de filtro, agenda pessoal, carrossel). */
+.scroll-x-snap {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+  touch-action: pan-x pan-y;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+/* Área segura superior (notch) para barras fixas no celular. */
+@supports (padding: env(safe-area-inset-top)) {
+  .safe-top {
+    padding-top: max(0px, env(safe-area-inset-top));
+  }
+}
+
+/* Respiro inferior para o conteúdo não ficar sob a barra de navegação. */
+.pb-bottom-nav {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 5.5rem);
+}
+
+@media (min-width: 768px) {
+  .pb-bottom-nav {
+    padding-bottom: 2rem;
+  }
+}
+
+/* Contêiner do Leaflet: o gesto é do mapa, e isso é intencional. */
+.touch-map,
+.touch-map .leaflet-container {
+  touch-action: none;
 }

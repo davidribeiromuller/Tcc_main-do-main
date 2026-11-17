@@ -324,25 +324,25 @@ export default function CalendarView({
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="flex flex-col h-full overflow-y-auto pb-24 text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark"
+      className="flex flex-col h-full overflow-y-auto pb-bottom-nav touch-scroll text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark"
     >
       {/* Top Header */}
       <div className="border-b border-brand-primary/10 bg-white/70 dark:bg-brand-card-dark/60 backdrop-blur-md sticky top-0 z-30 shadow-xs">
-        <div className="max-w-6xl mx-auto w-full flex justify-between items-center px-4 sm:px-6 py-3 sm:py-4 gap-3">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-brand-primary/15 text-brand-primary dark:text-emerald-400 flex items-center justify-center">
-              <CalendarIcon size={22} />
+        <div className="max-w-6xl mx-auto w-full flex flex-col sm:flex-row sm:justify-between sm:items-center px-4 sm:px-6 py-3 sm:py-4 gap-2.5 sm:gap-3">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="p-2 sm:p-2.5 rounded-2xl bg-brand-primary/15 text-brand-primary dark:text-emerald-400 flex items-center justify-center shrink-0">
+              <CalendarIcon size={20} />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl sm:text-2xl font-display font-bold tracking-tight text-slate-800 dark:text-slate-100">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-base sm:text-2xl font-display font-bold tracking-tight text-slate-800 dark:text-slate-100 leading-tight">
                   Calendário de Eventos
                 </h1>
-                <span className="text-[11px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2.5 py-0.5 rounded-full font-mono font-bold border border-emerald-500/20">
+                <span className="text-[10px] sm:text-[11px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full font-mono font-bold border border-emerald-500/20 whitespace-nowrap">
                   {monthEvents.length} no mês
                 </span>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
                 {selectedDay !== null
                   ? `${selectedWeekdayName}, ${selectedDay} de ${MONTHS_NAMES[currentMonth]} de ${currentYear}`
                   : `Mês de ${MONTHS_NAMES[currentMonth]} de ${currentYear}`}
@@ -350,7 +350,7 @@ export default function CalendarView({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             <button
               onClick={handleJumpToToday}
               className="hidden sm:flex items-center gap-1.5 px-3 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/15 text-xs font-semibold text-slate-700 dark:text-white transition-all cursor-pointer shadow-xs active:scale-95"
@@ -362,7 +362,7 @@ export default function CalendarView({
 
             <button
               onClick={openAddEventForSelectedDay}
-              className="h-9 px-3.5 rounded-xl bg-brand-primary text-white flex items-center gap-1.5 font-semibold text-xs hover:bg-opacity-90 active:scale-95 shadow-md transition-all cursor-pointer"
+              className="h-10 sm:h-9 px-3.5 flex-1 sm:flex-none rounded-xl bg-brand-primary text-white flex items-center justify-center gap-1.5 font-semibold text-xs hover:bg-opacity-90 active:scale-95 shadow-md transition-all cursor-pointer"
             >
               <Plus size={16} />
               <span>Novo Evento</span>
@@ -372,7 +372,7 @@ export default function CalendarView({
       </div>
 
       {/* Main Container */}
-      <div className="max-w-6xl mx-auto w-full p-4 sm:p-6 flex flex-col gap-6">
+      <div className="max-w-6xl mx-auto w-full p-3.5 sm:p-6 flex flex-col gap-4 sm:gap-6">
         
         {/* HIGHLIGHTED MONTH EVENTS STRIP */}
         {otherMonthEvents.length > 0 && (
@@ -421,7 +421,7 @@ export default function CalendarView({
             </div>
 
             {/* Horizontal Scrollable Event Badges */}
-            <div className="flex gap-3 overflow-x-auto pb-1 pt-0.5 scrollbar-thin">
+            <div className="flex gap-3 overflow-x-auto no-scrollbar scroll-x-snap pb-1.5 pt-1 -mx-1 px-1">
               {monthEvents.map((event) => {
                 const isSelectedEvent = selectedDay === event.day;
                 return (
@@ -589,7 +589,7 @@ export default function CalendarView({
             </div>
 
             {/* Weekdays Labels */}
-            <div className="grid grid-cols-7 gap-2 text-center mb-3">
+            <div className="grid grid-cols-7 gap-1 sm:gap-2 text-center mb-2 sm:mb-3">
               {["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].map((dayName) => (
                 <span
                   key={dayName}
@@ -600,8 +600,9 @@ export default function CalendarView({
               ))}
             </div>
 
-            {/* Days Matrix Cells */}
-            <div className="grid grid-cols-7 gap-2 sm:gap-2.5">
+            {/* Days Matrix Cells — `gap-1` no mobile: com 2px de cada lado o
+                dia ficava com 36px e os números encostavam nas bordas. */}
+            <div className="grid grid-cols-7 gap-1 sm:gap-2.5">
               {cells.map((cell, idx) => {
                 const isSelected =
                   selectedDay === cell.day &&
@@ -626,7 +627,7 @@ export default function CalendarView({
                       setCurrentYear(cell.year);
                     }}
                     className={`
-                      aspect-square rounded-2xl text-xs flex flex-col justify-between items-center relative transition-all cursor-pointer p-1.5 sm:p-2 group
+                      aspect-square rounded-xl sm:rounded-2xl text-xs flex flex-col justify-between items-center relative transition-colors cursor-pointer p-1 sm:p-2 group touch-manipulation
                       ${
                         cell.isCurrentMonth
                           ? "text-slate-800 dark:text-slate-100"
@@ -634,7 +635,7 @@ export default function CalendarView({
                       }
                       ${
                         isSelected
-                          ? "bg-brand-primary text-white shadow-lg ring-2 ring-brand-primary/50 font-bold scale-105 z-10"
+                          ? "bg-brand-primary text-white shadow-lg ring-2 ring-brand-primary/50 font-bold z-10"
                           : hasEvents
                           ? "bg-emerald-50 dark:bg-emerald-950/40 border-2 border-emerald-500/40 hover:border-emerald-500 hover:bg-emerald-100/70 dark:hover:bg-emerald-900/50 shadow-xs font-bold"
                           : isTodayCell
@@ -674,7 +675,7 @@ export default function CalendarView({
                     </div>
 
                     {/* Day Number */}
-                    <span className={`text-sm sm:text-base font-display font-extrabold leading-none ${
+                    <span className={`text-[13px] sm:text-base font-display font-extrabold leading-none ${
                       hasEvents && !isSelected ? "text-emerald-700 dark:text-emerald-300" : ""
                     }`}>
                       {cell.day}
@@ -860,7 +861,7 @@ export default function CalendarView({
       {/* Modal Add Event (Sem URL da imagem) */}
       <AnimatePresence>
         {formOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs overflow-y-auto">
             <motion.div
               initial={{ scale: 0.9, opacity: 0, y: 30 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
