@@ -1135,3 +1135,68 @@ O pedido era o **design da aba**, não dos cards.
 | Regressão rodadas 11–14 | 181/181 |
 | `tsc --noEmit` | 0 erros |
 | `npm run build` | ok (6.39 s) |
+
+---
+
+## 21. Contas escolares: lista separada, criação funcionando e fim dos erros 405 (rodada 17)
+
+**Relato:** *"não consigo adicionar, crie uma lista separada para contas escolares, e tudo mais"* — com o console cheio de `Failed to load resource: 405` em `/api/admin/institutuion_counts/991/verify`, `/api/events` e `/api/users/heartbeat`.
+
+### 21.1 Por que não dava para adicionar
+
+| Causa | Efeito |
+|---|---|
+| A conta institucional era gravada em `users` com `uid` fixo (`inst-<escola>`) | a segunda conta da **mesma escola** colidia em `users_uid_key`: `duplicate key value violates unique constraint` e o formulário não salvava |
+| A aba lia `users` (fallback do Express) com `role="Escola"` | a gestão escolar aparecia misturada ao diretório de alunos e entrava nos contadores ("24 contas totais / 22 ativas") |
+| Botões Verificar / Redefinir senha / Bloquear chamavam `/api/admin/institutional-accounts/...` | no GitHub Pages a rota não existe → **405**, nenhuma ação acontecia e o card continuava "Pendente" |
+| O `select` de escola usava `email: f.email || ...` | ao trocar de escola o e-mail da escola anterior permanecia, criando credencial errada |
+| A linha "Responsável" exibia `acc.cargo` de um campo que nunca era gravado | aparecia `Responsável: Elder ( )` — cargo vazio |
+
+### 21.2 O que mudou
+
+**Tabela própria — `public.school_accounts` (migration `0009_school_accounts_table.sql`)**
+- Chave primária própria (`id SERIAL`), sem colidir com `users`.
+- Guarda `school_id`, `school_slug`, `school_name`, `login_identifier`,
+  `institutional_email`, `password`, `responsible_name`, `responsible_role`,
+  `account_status` (`active`/`suspended`/`revoked`) e
+  `verification_status` (`pending_verification`/`verified`/`revoked`).
+- Unicidade **entre contas escolares** (`LOWER(login_identifier)` e
+  `LOWER(institutional_email)`), então a mesma escola pode ter direção e
+  coordenação com contas distintas.
+- RLS ligada com as quatro políticas (SELECT/INSERT/UPDATE/DELETE), igual ao
+  padrão do projeto (o app autentica na tabela, não no Supabase Auth).
+- Migração idempotente das contas antigas de `users` com `role = 'Escola'`.
+
+**`src/lib/schoolAccountsService.ts` (novo)** — lista, cria, autentica,
+bloqueia/desbloqueia, verifica/revoga, redefine senha (com
+`must_change_password = true`) e remove. Mensagem acionável quando a migration
+ainda não foi aplicada. `src/lib/institutionalAdminService.ts` foi **removido**.
+
+**Painel (`AdminPanel.tsx`)**
+- Aba renomeada para **"Contas escolares das 6 escolas de Araucária"**, com
+  resumo: contas, ativas, verificadas e **escolas sem conta**.
+- Card mostra identificador, e-mail, **responsável com cargo** e **a senha**
+  (o Chefe vê e altera, requisito do projeto), além de último acesso.
+- Ações: Verificar/Revogar, **Alterar senha**, Bloquear/Desbloquear e Remover
+  (com confirmação) — todas via Supabase, **nenhuma em `/api/`**.
+- Erro de leitura aparece como aviso explicativo + "Tentar novamente", em vez
+  de fingir lista vazia.
+
+**Separação do diretório**
+- `fetchUsersDirectFromSupabase` filtra `role = "Escola"` na origem: alunos e
+  servidores na aba "Contas", gestão escolar na aba "Contas das Escolas".
+- O login institucional (`App.tsx`) passou a autenticar em `school_accounts`,
+  por identificador **ou** e-mail, e respeita o bloqueio da conta.
+
+### 21.3 Validação
+
+| Suíte | Resultado |
+|---|---|
+| `test-round17.mjs` — tabela, serviço, painel, separação e render real da aba | **49/49** |
+| `test-round16.mjs` (jsdom) | 39/39 |
+| Regressão 11–14 | 202/202 |
+| `tsc --noEmit` | 0 erros |
+| `npm run build` | ok (5.40 s) |
+
+**Banco:** tabela criada e conta `helena.wysocki@escola.pr.gov.br` migrada
+para a lista separada; nenhuma linha com `role = 'Escola'` restou em `users`.

@@ -74,7 +74,16 @@ export async function fetchUsersDirectFromSupabase(): Promise<{ users: User[]; e
     }
 
     if (data && Array.isArray(data)) {
-      const mappedUsers = data.map(mapSupabaseUserToUser);
+      /*
+        Contas escolares (role "Escola") NÃO pertencem ao diretório de
+        usuários: elas têm lista própria na tabela `school_accounts` e aba
+        própria no painel. Antes elas apareciam misturadas aqui, inflavam os
+        contadores ("contas totais / ativas") e podiam ser editadas como se
+        fossem alunos. Filtramos na origem.
+      */
+      const mappedUsers = data
+        .filter((row: any) => String(row.role || "").toLowerCase() !== "escola")
+        .map(mapSupabaseUserToUser);
       return { users: mappedUsers, error: null };
     }
 
