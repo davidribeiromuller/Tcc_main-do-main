@@ -964,7 +964,20 @@ export default function AdminPanel({
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="flex flex-col flex-1 h-full min-h-0 admin-scrollable admin-scroll-x overflow-y-auto overflow-x-hidden pb-bottom-nav text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark transition-colors overscroll-contain touch-scroll"
+      /*
+        Rolagem do painel: SÓ a vertical acontece aqui.
+        ---------------------------------------------------------------
+        Antes este contêiner tinha `admin-scroll-x` + `overflow-x-hidden`
+        junto de `overflow-y-auto`. Como `overflow-x: hidden` não tinha
+        `!important` e o par hidden/auto é promovido para auto/auto pelo
+        navegador, a PÁGINA INTEIRA virava um scroller horizontal de 736px
+        (a largura mínima das tabelas). Efeito no celular: o dedo só
+        "pegava" quando acertava exatamente em cima da tabela, porque o
+        cabeçalho, a busca e os filtros ficavam num canvas mais largo que a
+        tela. `overflow-x-clip` corta o excesso horizontal SEM criar
+        scroller — a rolagem horizontal fica restrita aos blocos de tabela.
+      */
+      className="flex flex-col flex-1 h-full min-h-0 admin-page admin-scrollable overflow-y-auto overflow-x-clip pb-bottom-nav text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark transition-colors"
     >
       {/* Top Bar / Header */}
       <div className="border-b border-brand-primary/10 dark:border-white/10 bg-brand-bg-light/90 dark:bg-brand-bg-dark/90 backdrop-blur-md sticky top-0 z-30 transition-colors">
@@ -1311,7 +1324,7 @@ export default function AdminPanel({
                 <button
                   type="button"
                   onClick={handleOpenAddEventModal}
-                  className="h-10 px-4 bg-brand-accent hover:bg-brand-accent/90 dark:bg-brand-primary dark:text-slate-900 text-white rounded-xl text-xs font-semibold flex items-center gap-2 active:scale-98 transition-all shadow-xs cursor-pointer shrink-0"
+                  className="h-10 px-4 bg-brand-accent hover:bg-brand-accent/90 dark:bg-brand-primary dark:text-slate-900 text-white rounded-xl text-xs font-semibold flex items-center gap-2 hover-only-scale transition-all shadow-xs cursor-pointer shrink-0"
                 >
                   <Plus size={16} />
                   <span>Cadastrar Novo Evento</span>
@@ -1324,8 +1337,9 @@ export default function AdminPanel({
 
       {/* Main Content Area — largura ampla para o painel respirar.
           Em telas grandes os cards e tabelas ocupam o espaço disponível em vez
-          de ficarem espremidos em 1152px. Em telas pequenas o container raiz
-          permite rolagem horizontal (admin-scroll-x). */}
+          de ficarem espremidos em 1152px. Em telas pequenas o excesso
+          horizontal é cortado com `overflow-x-clip` na raiz e a rolagem
+          lateral fica só nos blocos `.admin-table-scroll`. */}
       <div className="w-full max-w-[110rem] mx-auto p-3 sm:p-6 flex flex-col gap-3.5 sm:gap-4">
         {/* ================= ACTIVE USERS TAB ================= */}
         {activeTab === "users" && (
@@ -1371,7 +1385,7 @@ export default function AdminPanel({
             ) : viewMode === "table" ? (
               /* ================= TABLE VIEW ================= */
               <div className="bg-white dark:bg-brand-card-dark rounded-2xl border border-brand-primary/20 dark:border-white/10 shadow-sm overflow-hidden transition-colors">
-                <div className="overflow-x-auto">
+                <div className="admin-table-scroll">
                   <table className="admin-table text-left text-xs">
                     <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-900 shadow-2xs">
                       <tr className="border-b border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 font-semibold select-none">
@@ -1693,7 +1707,7 @@ export default function AdminPanel({
                           <button
                             type="button"
                             onClick={() => { setUserToViewDetails(u); setShowUserPassword(false); setPasswordCopied(false); }}
-                            className="flex-1 h-10 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 border border-slate-200 dark:border-white/10 bg-slate-50 hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200"
+                            className="flex-1 h-10 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer hover-only-scale border border-slate-200 dark:border-white/10 bg-slate-50 hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200"
                             title="Visualizar ficha completa (dados pessoais)"
                           >
                             <Eye size={14} />
@@ -1704,7 +1718,7 @@ export default function AdminPanel({
                           <button
                             type="button"
                             onClick={() => setUserForMobileActions(u)}
-                            className="flex-1 h-10 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 bg-brand-primary/20 hover:bg-brand-primary/30 text-brand-accent dark:text-brand-primary border border-brand-primary/30 shadow-2xs"
+                            className="flex-1 h-10 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer hover-only-scale bg-brand-primary/20 hover:bg-brand-primary/30 text-brand-accent dark:text-brand-primary border border-brand-primary/30 shadow-2xs"
                             title="Opções de edição, permissões e bloqueio"
                           >
                             <MoreVertical size={14} />
@@ -1770,7 +1784,7 @@ export default function AdminPanel({
             ) : viewMode === "table" ? (
               /* Blocked users Table */
               <div className="bg-white dark:bg-brand-card-dark rounded-2xl border border-red-200 dark:border-red-900/40 shadow-sm overflow-hidden transition-colors">
-                <div className="overflow-x-auto">
+                <div className="admin-table-scroll">
                   <table className="admin-table text-left text-xs">
                     <thead className="sticky top-0 z-10 bg-red-100 dark:bg-red-950/90 shadow-2xs">
                       <tr className="border-b border-red-200 dark:border-red-900/40 text-red-900 dark:text-red-200 font-semibold select-none">
@@ -1944,7 +1958,7 @@ export default function AdminPanel({
                             <button
                               type="button"
                               onClick={() => setUserToUnblock(u)}
-                              className="flex-1 h-9 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                              className="flex-1 h-9 bg-emerald-600 hover:bg-emerald-700 hover-only-scale text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
                             >
                               <Unlock size={14} />
                               <span>Desbloquear</span>
@@ -2371,7 +2385,7 @@ export default function AdminPanel({
               </div>
             ) : (
               <div className="bg-white dark:bg-brand-card-dark rounded-2xl border border-slate-200 dark:border-white/10 overflow-hidden">
-                <div className="overflow-x-auto admin-scroll-x">
+                <div className="admin-table-scroll">
                   <table className="w-full text-xs min-w-[52rem]">
                     <thead>
                       <tr className="bg-slate-50 dark:bg-white/5 text-left text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -2488,7 +2502,7 @@ export default function AdminPanel({
                 <button
                   type="button"
                   onClick={() => { setShowAddInstModal(true); setNewInstErrors({}); }}
-                  className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
+                  className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer hover-only-scale shadow-sm"
                 >
                   <Plus size={13} />
                   <span>Nova conta escolar</span>
@@ -2558,7 +2572,7 @@ export default function AdminPanel({
                 <button
                   type="button"
                   onClick={() => { setShowAddInstModal(true); setNewInstErrors({}); }}
-                  className="mt-4 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer active:scale-95 mx-auto"
+                  className="mt-4 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer hover-only-scale mx-auto"
                 >
                   <Plus size={14} />
                   <span>Criar conta escolar</span>
@@ -4248,7 +4262,7 @@ export default function AdminPanel({
                       setUserToViewDetails(null);
                       setUserForMobileActions(target);
                     }}
-                    className="flex-1 h-11 rounded-2xl bg-brand-accent dark:bg-brand-primary text-white dark:text-slate-900 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 shadow-sm"
+                    className="flex-1 h-11 rounded-2xl bg-brand-accent dark:bg-brand-primary text-white dark:text-slate-900 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer hover-only-scale shadow-sm"
                   >
                     <MoreVertical size={15} />
                     <span>Ações Administrativas</span>
@@ -4258,7 +4272,7 @@ export default function AdminPanel({
                 <button
                   type="button"
                   onClick={() => { setUserToViewDetails(null); setShowUserPassword(false); setPasswordCopied(false); }}
-                  className={`h-11 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
+                  className={`h-11 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center justify-center transition-all cursor-pointer hover-only-scale ${
                     isChefe ? "px-5" : "w-full"
                   }`}
                 >
@@ -4313,7 +4327,7 @@ export default function AdminPanel({
                     setUserForMobileActions(null);
                     handleOpenChangeRoleModal(u);
                   }}
-                  className="w-full p-3.5 rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-900 dark:text-amber-200 border border-amber-200 dark:border-amber-800/50 flex items-center gap-3 text-left transition-all cursor-pointer active:scale-98"
+                  className="w-full p-3.5 rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-900 dark:text-amber-200 border border-amber-200 dark:border-amber-800/50 flex items-center gap-3 text-left transition-all cursor-pointer hover-only-scale"
                 >
                   <div className="p-2 rounded-xl bg-amber-200/60 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 shrink-0">
                     <Crown size={18} />
@@ -4334,7 +4348,7 @@ export default function AdminPanel({
                     setUserForMobileActions(null);
                     handleOpenEditModal(u);
                   }}
-                  className="w-full p-3.5 rounded-2xl bg-slate-50 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-white/10 flex items-center gap-3 text-left transition-all cursor-pointer active:scale-98"
+                  className="w-full p-3.5 rounded-2xl bg-slate-50 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-white/10 flex items-center gap-3 text-left transition-all cursor-pointer hover-only-scale"
                 >
                   <div className="p-2 rounded-xl bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400 shrink-0">
                     <Edit3 size={18} />
@@ -4365,7 +4379,7 @@ export default function AdminPanel({
                       userForMobileActions.email &&
                       currentUser.email.toLowerCase() === userForMobileActions.email.toLowerCase())
                   }
-                  className="w-full p-3.5 rounded-2xl bg-orange-50/80 dark:bg-orange-950/30 hover:bg-orange-100 dark:hover:bg-orange-900/40 text-orange-900 dark:text-orange-200 border border-orange-200 dark:border-orange-800/50 flex items-center gap-3 text-left transition-all cursor-pointer active:scale-98 disabled:opacity-40"
+                  className="w-full p-3.5 rounded-2xl bg-orange-50/80 dark:bg-orange-950/30 hover:bg-orange-100 dark:hover:bg-orange-900/40 text-orange-900 dark:text-orange-200 border border-orange-200 dark:border-orange-800/50 flex items-center gap-3 text-left transition-all cursor-pointer hover-only-scale disabled:opacity-40"
                 >
                   <div className="p-2 rounded-xl bg-orange-200/60 dark:bg-orange-900/60 text-orange-700 dark:text-orange-300 shrink-0">
                     {userForMobileActions.ativo === false ? <Unlock size={18} /> : <Lock size={18} />}
@@ -4396,7 +4410,7 @@ export default function AdminPanel({
                       userForMobileActions.email &&
                       currentUser.email.toLowerCase() === userForMobileActions.email.toLowerCase())
                   }
-                  className="w-full p-3.5 rounded-2xl bg-red-50/80 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-900 dark:text-red-200 border border-red-200 dark:border-red-800/50 flex items-center gap-3 text-left transition-all cursor-pointer active:scale-98 disabled:opacity-40"
+                  className="w-full p-3.5 rounded-2xl bg-red-50/80 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-900 dark:text-red-200 border border-red-200 dark:border-red-800/50 flex items-center gap-3 text-left transition-all cursor-pointer hover-only-scale disabled:opacity-40"
                 >
                   <div className="p-2 rounded-xl bg-red-200/60 dark:bg-red-900/60 text-red-700 dark:text-red-300 shrink-0">
                     <Trash2 size={18} />
@@ -4420,7 +4434,7 @@ export default function AdminPanel({
                         setUserForMobileActions(null);
                         onImpersonateUser(u);
                       }}
-                      className="w-full p-3.5 rounded-2xl bg-brand-primary/15 hover:bg-brand-primary/25 text-brand-accent dark:text-brand-primary border border-brand-primary/30 flex items-center gap-3 text-left transition-all cursor-pointer active:scale-98"
+                      className="w-full p-3.5 rounded-2xl bg-brand-primary/15 hover:bg-brand-primary/25 text-brand-accent dark:text-brand-primary border border-brand-primary/30 flex items-center gap-3 text-left transition-all cursor-pointer hover-only-scale"
                     >
                       <div className="p-2 rounded-xl bg-brand-primary/30 text-brand-accent dark:text-brand-primary shrink-0">
                         <LogIn size={18} />

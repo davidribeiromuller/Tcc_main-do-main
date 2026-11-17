@@ -1252,3 +1252,60 @@ para a lista separada; nenhuma linha com `role = 'Escola'` restou em `users`.
 | Regressão 11–14 | 202/202 |
 | `tsc --noEmit` | 0 erros |
 | `npm run build` | ok (5.58 s) |
+
+---
+
+## 23. Rolagem do painel de administração: a página rola, não só a tabela (rodada 19)
+
+**Relato:** *"no painel de adm o scroll ainda tá bugado, faça o que eu te pedi, reajuste para que a tela role, não apenas a tabela"*.
+
+### 23.1 A causa (confirmada no código)
+
+O contêiner raiz do painel declarava **duas classes contraditórias**:
+
+```jsx
+className="... admin-scrollable admin-scroll-x overflow-y-auto overflow-x-hidden ..."
+```
+
+```css
+.admin-scrollable { overflow-y: auto !important; }  /* ?important */
+.admin-scroll-x   { overflow-x: hidden; }            /* sem !important */
+```
+
+`overflow-x: hidden` sobrescrito por `overflow-x-hidden` do Tailwind (mesma
+especificidade, ordem do arquivo) → o par ficava **`hidden` + `auto`**. O
+navegador **promove** `hidden` para `auto` quando o outro eixo é `auto`, então
+o painel inteiro virou um **scroller horizontal de 736px** (o `min-width: 46rem`
+das tabelas). Resultado exato do relato: *"precisa clicar exatamente em cima
+da tabela para dar scroll"* — o cabeçalho, a busca, os filtros e os cards
+estavam num canvas mais largo que a tela, e o gesto vertical disputava com o
+scroller horizontal.
+
+### 23.2 O que mudou
+
+- Raiz do painel: **sem `admin-scroll-x`** e **sem `overflow-x-hidden`**;
+  agora `admin-page` + `overflow-y-auto` + **`overflow-x-clip`** (clip não cria
+  scroller e portanto não é promovido para `auto`).
+- `.admin-page { overflow-x: clip; overflow-y: auto; overscroll-behavior-y: contain }`
+  — a página rola na vertical em qualquer ponto do conteúdo.
+- `.admin-scroll-x` (a regra conflitante) **removida** do CSS.
+- Nova `.admin-table-scroll` para os 3 blocos de tabela: `overflow-x: auto`,
+  `overflow-y: hidden`, `touch-action: pan-x pan-y` e
+  `overscroll-behavior: contain` — o gesto horizontal morre na tabela e não
+  vaza para a página.
+- `active:scale-95/98` do painel trocados por `.hover-only-scale`, que só
+  escala com mouse (`@media (hover: hover) and (pointer: fine)`). No toque a
+  escala cancelava o gesto.
+- Botão flutuante do Assistente Elo: `bottom-24`, 44px e
+  `touch-manipulation` no mobile — antes cobria o canto da lista e capturava
+  o toque.
+
+### 23.3 Validação
+
+| Suíte | Resultado |
+|---|---|
+| `test-round19.mjs` — rolagem do painel (fonte + render jsdom) | **32/32** |
+| `test-round18.mjs` / `test-round18-mobile.mjs` | 50/50 · 21/21 |
+| `test-round17.mjs` / `test-round16.mjs` | 49/49 · 39/39 |
+| Regressão 11–14 | 202/202 |
+| `tsc --noEmit` / `npm run build` | 0 erros / ok (6.15 s) |

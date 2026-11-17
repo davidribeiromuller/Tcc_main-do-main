@@ -360,7 +360,12 @@ export default function AIChatAssistant({
       <button
         onClick={() => setIsOpen(true)}
         aria-label="Abrir Assistente Elo"
-        className="fixed bottom-20 right-4 sm:bottom-6 sm:right-6 z-40 w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-emerald-800 hover:bg-emerald-900 text-white shadow-lg flex items-center justify-center transition-all cursor-pointer"
+        /*
+          No celular o botão ficava sobre o canto inferior direito da lista e
+          capturava o toque de rolagem. Menor, mais alto e sem `transition`
+          de escala: continua acessível sem roubar o gesto.
+        */
+        className="fixed bottom-24 right-3 sm:bottom-6 sm:right-6 z-40 w-11 h-11 sm:w-14 sm:h-14 rounded-full bg-emerald-800 hover:bg-emerald-900 text-white shadow-lg flex items-center justify-center transition-colors cursor-pointer touch-manipulation"
       >
         <MessageSquare size={20} />
       </button>

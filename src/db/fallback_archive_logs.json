@@ -1,1 +1,9 @@
-[]
+[
+  {
+    "id": 1794916876601,
+    "processedAt": "2026-11-17T12:01:16.601Z",
+    "archivedCount": 1,
+    "details": "Rotina de retenção: 1 evento(s) ultrapassando 3 dias de encerramento arquivados com sucesso.",
+    "status": "success"
+  }
+]
