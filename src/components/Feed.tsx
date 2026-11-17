@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { Event } from "../types";
 import { resolveEventCity, classifyEventAsSchool } from "../lib/eventClassification";
+import { visualDoEvento, imagemEhPlaceholder } from "../lib/eventVisuals.ts";
 import AIChatAssistant from "./AIChatAssistant";
 import EventLocationModal from "./EventLocationModal";
 import PersonalEventModal from "./PersonalEventModal";
@@ -234,9 +235,17 @@ export default function Feed({
       <div className="border-b border-brand-primary/10 bg-brand-bg-light/90 dark:bg-brand-bg-dark/90 backdrop-blur-md sticky top-0 z-30">
         <div className="max-w-6xl mx-auto w-full flex items-center justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4">
           <div className="min-w-0">
-            <h1 className="text-lg sm:text-2xl font-display font-semibold tracking-tight text-slate-900 dark:text-white truncate">
-              Eventos
-            </h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg sm:text-2xl font-display font-semibold tracking-tight text-slate-900 dark:text-white truncate">
+                Eventos
+              </h1>
+              {/* Contador: dá noção de quanto conteúdo existe antes de rolar */}
+              {!isLoading && filteredEvents.length > 0 && (
+                <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300">
+                  {filteredEvents.length}
+                </span>
+              )}
+            </div>
             <p className="text-[10px] text-slate-400 font-mono uppercase tracking-wider truncate">
               {currentUser?.nome ? `Olá, ${currentUser.nome.split(" ")[0]}` : "Araucária · Curitiba"}
             </p>
@@ -315,7 +324,7 @@ export default function Feed({
       <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 pt-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 sm:flex-wrap">
           <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Filtrar por localidade">
-            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mr-0.5">Cidade</span>
+            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mr-0.5 w-full sm:w-auto">Cidade</span>
             {([
               { id: "todas" as const, label: "Todas" },
               { id: "Araucária" as const, label: "Araucária" },
@@ -340,7 +349,7 @@ export default function Feed({
           <div className="hidden sm:block h-5 w-px bg-brand-primary/15 dark:bg-white/10" />
 
           <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Filtrar por tipo de evento">
-            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mr-0.5">Tipo</span>
+            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mr-0.5 w-full sm:w-auto">Tipo</span>
             {([
               { id: "todos" as const, label: "Todos", icon: null },
               { id: "escolar" as const, label: "Escolar", icon: GraduationCap },
@@ -502,84 +511,143 @@ export default function Feed({
             )}
           </div>
         ) : (
-          filteredEvents.map((event) => (
+          filteredEvents.map((event) => {
+            /*
+              Design do card.
+              ---------------------------------------------------------------
+              Antes: foto de plateia genérica em TODOS os eventos sem arte,
+              título branco sobre preto e metadados em cinza minúsculo. O
+              resultado era uma fileira de cards iguais, escuros e sem
+              hierarquia.
+
+              Agora:
+              - só usa foto quando o evento realmente tem uma (o placeholder do
+                banco é ignorado — ver `imagemEhPlaceholder`);
+              - sem foto, um cabeçalho com o ícone e as cores da ÁREA do evento
+                (matemática, robótica, biologia, cultura...), o que dá
+                identidade imediata;
+              - a data ganha um bloco destacado, porque é a informação que o
+                aluno procura primeiro;
+              - título sai do banner e vai para o corpo, em cor de texto —
+                muito mais legível que branco sobre imagem.
+            */
+            const visual = visualDoEvento(event);
+            const Icone = visual.Icone;
+            const temFoto = !imagemEhPlaceholder(event.image);
+            const dataFormatada = new Date(event.year, event.month, event.day).toLocaleDateString(
+              "pt-BR",
+              { day: "2-digit", month: "short" }
+            );
+
+            return (
             <motion.div
               key={event.id}
               layoutId={`card-container-${event.id}`}
               onClick={() => handleCardClick(event)}
-              className="relative rounded-3xl overflow-hidden bg-white dark:bg-brand-card-dark shadow-sm hover:shadow-md hover:scale-[1.01] active:scale-[0.99] transition-all duration-200 cursor-pointer group border border-brand-primary/15"
+              className="group relative flex flex-col rounded-2xl overflow-hidden bg-white dark:bg-brand-card-dark border border-slate-200/80 dark:border-white/10 shadow-xs hover:shadow-lg hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-200 cursor-pointer"
             >
-              {/* Image banner with Gradient Overlay */}
-              <div className="relative w-full h-40 sm:h-44 overflow-hidden">
-                <img
-                  src={event.image || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600"}
-                  alt={event.title}
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-black/10" />
-                
-                {/* Title Overlay in Banner */}
-                <h3 className="absolute bottom-3 left-3.5 right-3.5 text-white font-display font-semibold text-base sm:text-lg leading-tight drop-shadow-md line-clamp-2">
-                  {event.title}
-                </h3>
+              {/* Mídia: foto do evento ou cabeçalho com a identidade da área */}
+              <div className="relative w-full h-32 sm:h-36 overflow-hidden bg-slate-100 dark:bg-slate-800">
+                {temFoto ? (
+                  <>
+                    <img
+                      src={event.image as string}
+                      alt={event.title}
+                      referrerPolicy="no-referrer"
+                      loading="lazy"
+                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/10 to-transparent" />
+                  </>
+                ) : (
+                  <>
+                    {/* Cabeçalho por área: gradiente + ícone grande e discreto */}
+                    <div className={`absolute inset-0 bg-gradient-to-br ${visual.gradiente}`} />
+                    <div className="absolute inset-0 opacity-[0.18] bg-[radial-gradient(circle_at_75%_20%,white,transparent_55%)]" />
+                    <Icone
+                      className="absolute right-3 bottom-2 text-white/25"
+                      size={74}
+                      strokeWidth={1.25}
+                      aria-hidden="true"
+                    />
+                    <span className="absolute left-3 bottom-2.5 text-white/95 text-[11px] font-bold uppercase tracking-wider">
+                      {visual.rotulo}
+                    </span>
+                  </>
+                )}
 
-                {/* Badges: localidade + tipo escolar */}
-                <div className="absolute top-3 left-3 flex items-center gap-1.5 flex-wrap">
+                {/* Etiquetas no topo: cidade e tipo */}
+                <div className="absolute top-2 left-2 flex items-center gap-1 flex-wrap max-w-[calc(100%-1rem)]">
                   {getEventCity(event) && (
-                    <span className="bg-white/95 dark:bg-black/70 backdrop-blur-sm text-slate-800 dark:text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
-                      <MapPin size={10} className="text-red-500" />
+                    <span className="bg-white/95 dark:bg-black/60 backdrop-blur-sm text-slate-800 dark:text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-xs">
+                      <MapPin size={9} className="text-red-500" />
                       {getEventCity(event)}
                     </span>
                   )}
                   <span
-                    className={`backdrop-blur-sm text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm ${
+                    className={`backdrop-blur-sm text-[10px] font-semibold px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-xs ${
                       getEventIsSchool(event)
-                        ? "bg-brand-accent/95 text-white"
-                        : "bg-white/95 dark:bg-black/70 text-slate-800 dark:text-white"
+                        ? "bg-emerald-700/95 text-white"
+                        : "bg-white/95 dark:bg-black/60 text-slate-700 dark:text-white"
                     }`}
                   >
-                    {getEventIsSchool(event) ? <GraduationCap size={10} /> : <Globe2 size={10} />}
+                    {getEventIsSchool(event) ? <GraduationCap size={9} /> : <Globe2 size={9} />}
                     {getEventIsSchool(event) ? "Escolar" : "Público"}
                   </span>
                 </div>
 
-                {/* Price indicator badge */}
+                {/* Preço, quando houver */}
                 {event.isPaid && (
-                  <span className="absolute top-3 right-3 bg-yellow-400 text-slate-900 text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 shadow">
-                    <CircleDollarSign size={12} />
+                  <span className="absolute top-2 right-2 bg-amber-300 text-amber-950 text-[10px] font-bold px-1.5 py-0.5 rounded-md flex items-center gap-0.5 shadow-xs">
+                    <CircleDollarSign size={10} />
                     {event.price || "Pago"}
                   </span>
                 )}
+
+                {/* Bloco de data: destacado, é o que o aluno procura primeiro */}
+                <div className="absolute bottom-2 right-2 bg-white/95 dark:bg-black/70 backdrop-blur-sm rounded-lg px-2 py-1 text-center shadow-sm leading-none">
+                  <span className="block text-sm font-black text-slate-900 dark:text-white">
+                    {String(event.day).padStart(2, "0")}
+                  </span>
+                  <span className="block text-[9px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-300 mt-0.5">
+                    {dataFormatada.split(" ").slice(-1)[0].replace(".", "")}
+                  </span>
+                </div>
               </div>
 
-              {/* Feed Meta Info */}
-              <div className="p-3.5 sm:p-4 flex flex-col gap-2 bg-white dark:bg-brand-card-dark">
-                <div 
+              {/* Corpo: título e local */}
+              <div className="flex flex-col flex-1 p-3 gap-1.5">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white leading-snug line-clamp-2 group-hover:text-emerald-800 dark:group-hover:text-emerald-300 transition-colors">
+                  {event.title}
+                </h3>
+
+                <button
+                  type="button"
                   onClick={(e) => {
                     if (onOpenMap) {
                       e.stopPropagation();
                       onOpenMap(event.id);
                     }
                   }}
-                  className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300 hover:text-brand-accent transition-colors"
+                  className="flex items-start gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors text-left cursor-pointer"
                   title="Ver localização no mapa"
                 >
-                  <MapPin size={14} className="text-red-500 shrink-0 mt-0.5" />
-                  <span className="line-clamp-1 underline-offset-2 hover:underline">{event.location}</span>
-                </div>
-                
-                <div className="flex justify-between items-center text-[10px] font-mono uppercase tracking-widest text-slate-400 mt-1 border-t border-slate-100 dark:border-slate-800 pt-2">
-                  <span className="flex items-center gap-1">
-                    <Calendar size={12} />
-                    {event.day}/{event.month + 1}/{event.year}
+                  <MapPin size={11} className="shrink-0 mt-0.5 text-red-500" />
+                  <span className="line-clamp-1">{event.location || "Local a confirmar"}</span>
+                </button>
+
+                {/* Rodapé do card: horário e ano, discretos */}
+                <div className="mt-auto pt-2 flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 border-t border-slate-100 dark:border-white/5">
+                  <span className="flex items-center gap-1 font-medium">
+                    <Clock size={10} />
+                    {event.time || "A confirmar"}
                   </span>
-                  <span>{event.time}</span>
+                  <span className="font-mono">{event.year}</span>
                 </div>
               </div>
             </motion.div>
-          ))
-        )}
+            );
+          })        )}
       </div>
 
       {/* Location Permission Modal when entering an event from the Feed (Tela Inicial) */}
