@@ -1464,3 +1464,49 @@ Numa faixa horizontal, `contain` nos dois eixos **impede a cadeia de rolagem de 
 | `test-round20.mjs` / `test-round19.mjs` / `18-mobile` | 35/35 · 32/32 · 21/21 |
 | `18` / `17` / `16` / `14` / `13` / `12`s / `11` | 50 · 49 · 39 · 36 · 31 · 32+18+21 · 64 |
 | `tsc --noEmit` / `npm run build` | 0 erros / ok (5,21 s) |
+
+---
+
+## 27. Rodada 23 — padrão aplicado a TODAS as telas
+
+**Pedido:** *"FUNCIONOU, APLIQUE EM TODAS AS TELAS AGORA"*.
+
+O padrão aprovado no painel (rodadas 21/22) virou regra global. Regra de ouro, por tela:
+
+1. **A página rola.** Nenhuma tela monta scroller vertical próprio (`overflow-y-auto` / `h-full` na raiz).
+2. **Raiz do documento sem `overflow`** (`html`/`body`) — no Safari iOS `overflow` na raiz propaga para a viewport e mata a rolagem.
+3. **Scroller interno só em duas situações:** modal (`fixed inset-0` + `max-h-*`) e faixa horizontal.
+4. **`touch-action: none` só no mapa.** `overscroll-behavior` só no eixo X.
+5. **`.pb-bottom-nav`** em toda tela sob a barra inferior; `pb-8` nas telas sem barra.
+
+### 27.1 O que foi ajustado nesta rodada
+
+| Arquivo | Ajuste |
+|---|---|
+| `SchoolsCatalog.tsx` | raiz `max-w-6xl … py-6` (sem respiro inferior) → wrapper `w-full pb-bottom-nav` + container interno |
+| `SchoolDetail.tsx` | idem: wrapper `w-full pb-bottom-nav` para o conteúdo não terminar sob a barra |
+| `WelcomeScreen.tsx` | `overflow-x-hidden` → `overflow-x-clip` (o par `hidden` promove o Y para `auto` e cria scroller) |
+| `Login.tsx` / `PasswordRecovery.tsx` | `pb-8` garantindo respiro inferior no mobile |
+| `MapView.tsx` | altura `calc(100dvh - 4.5rem)` casando com a MobileHeader (2,75rem + borda) |
+| `AdminPanel.tsx` / `App.tsx` | comentários obsoletos sobre `absolute inset-0` / scroller interno removidos (não descreviam mais o código) |
+
+### 27.2 Auditoria automática (nova suíte)
+
+`test-round23.mjs` varre **13 telas** e falha se qualquer uma:
+
+- montar scroller vertical na raiz;
+- usar `h-full`/`h-screen`/`h-[100dvh]` fixo na raiz;
+- tiver `overflow-y-auto` fora de modal ou faixa horizontal;
+- declarar `touch-action: none` fora do mapa;
+- usar `overflow-x-hidden` no lugar de `clip`;
+- não reservar espaço para a barra inferior.
+
+### 27.3 Validação
+
+| Suíte | Resultado |
+|---|---|
+| `test-round23.mjs` (novo, 13 telas auditadas) | **142/142** |
+| `22` / `21` / `20` / `19` / `18-mobile` | 27 · 41 · 35 · 32 · 21 |
+| `18` / `17` / `16` / `14` / `13` / `12`s / `11` / `11b` | 50 · 49 · 39 · 36 · 31 · 32+18+21 · 64 · 5 |
+| `tsc --noEmit` / `npm run build` | 0 erros / ok (6,41 s) |
+| Dev server: todos os 18 componentes | compilam (HTTP 200) |

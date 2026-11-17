@@ -2011,11 +2011,9 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             /*
-              A tela de introdução é mais alta que a viewport no celular.
-              Com `absolute inset-0` sozinho, o conteúdo era CORTADO e não
-              havia como rolar com o dedo — o excedente simplesmente não
-              aparecia. Aqui o wrapper passa a ser o contêiner de rolagem,
-              com `overscroll-contain` para não arrastar a página atrás.
+              Introdução (rodada 23): bloco de conteúdo comum. A rolagem é a
+              do documento — nenhum scroller próprio, nenhum `absolute`, sem
+              `overscroll-behavior` que segure o gesto.
             */
             className="app-screen welcome-scroll"
           >

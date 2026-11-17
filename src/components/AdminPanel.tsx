@@ -965,17 +965,12 @@ export default function AdminPanel({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       /*
-        Rolagem do painel: SÓ a vertical acontece aqui.
+        Rolagem do painel (padrão aprovado nas rodadas 21/22).
         ---------------------------------------------------------------
-        Antes este contêiner tinha `admin-scroll-x` + `overflow-x-hidden`
-        junto de `overflow-y-auto`. Como `overflow-x: hidden` não tinha
-        `!important` e o par hidden/auto é promovido para auto/auto pelo
-        navegador, a PÁGINA INTEIRA virava um scroller horizontal de 736px
-        (a largura mínima das tabelas). Efeito no celular: o dedo só
-        "pegava" quando acertava exatamente em cima da tabela, porque o
-        cabeçalho, a busca e os filtros ficavam num canvas mais largo que a
-        tela. `overflow-x-clip` corta o excesso horizontal SEM criar
-        scroller — a rolagem horizontal fica restrita aos blocos de tabela.
+        Este contêiner NÃO é scroller: quem rola é o documento. Ele apenas
+        corta o excesso horizontal (`overflow-x: clip`), reserva espaço para
+        a barra inferior e deixa o gesto vertical subir para a página. A
+        rolagem horizontal fica restrita aos blocos `.admin-table-scroll`.
       */
       className="admin-page w-full flex flex-col overflow-x-clip pb-bottom-nav text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark transition-colors"
     >

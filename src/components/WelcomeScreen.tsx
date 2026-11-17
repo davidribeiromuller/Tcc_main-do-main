@@ -161,7 +161,7 @@ export default function WelcomeScreen({
     altura da tela ao conteúdo e criaria um trecho em branco após o rodapé.
   */
   return (
-    <div className="relative min-h-[100dvh] w-full bg-[#f2f8f3] dark:bg-[#121c14] text-[#1b3d24] dark:text-[#e4f2e6] flex flex-col justify-between overflow-x-hidden selection:bg-[#9cc4a3] selection:text-[#14361e] transition-colors">
+    <div className="relative min-h-[100dvh] w-full bg-[#f2f8f3] dark:bg-[#121c14] text-[#1b3d24] dark:text-[#e4f2e6] flex flex-col justify-between overflow-x-clip selection:bg-[#9cc4a3] selection:text-[#14361e] transition-colors">
       {/* Background Soft Organic Green Atmosphere Glows */}
       <div
         aria-hidden="true"

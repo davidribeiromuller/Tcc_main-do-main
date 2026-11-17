@@ -194,7 +194,8 @@ export const SchoolDetail: React.FC<SchoolDetailProps> = ({
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6">
+    <div className="w-full pb-bottom-nav">
+      <div className="max-w-5xl mx-auto px-4 py-6">
       {/* Top Navigation Bar with Back Button */}
       <div className="flex items-center justify-between mb-4">
         <button
@@ -771,5 +772,6 @@ export const SchoolDetail: React.FC<SchoolDetailProps> = ({
         </div>
       )}
     </div>
+      </div>
   );
 };
