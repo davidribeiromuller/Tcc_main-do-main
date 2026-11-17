@@ -26,7 +26,8 @@ export const SchoolsCatalog: React.FC<SchoolsCatalogProps> = ({ onSelectSchool }
   });
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6">
+    <div className="w-full pb-bottom-nav">
+      <div className="max-w-6xl mx-auto px-4 py-6">
       {/* Header */}
       <div className="mb-6 text-left">
         <h1 className="text-2xl sm:text-3xl font-serif font-bold text-gray-900 flex items-center gap-2">
@@ -148,5 +149,6 @@ export const SchoolsCatalog: React.FC<SchoolsCatalogProps> = ({ onSelectSchool }
         ))}
       </div>
     </div>
+      </div>
   );
 };
