@@ -94,7 +94,15 @@ console.log("=== 5. Botão flutuante não rouba o toque ===\n");
 console.log("=== 6. Regras de rolagem globais continuam corretas ===\n");
 {
   ok("body usa `manipulation`", /body\s*\{[^}]*touch-action:\s*manipulation/.test(cssLimpo));
-  ok("nada de `touch-action: pan-y` global", (cssLimpo.match(/touch-action:\s*pan-y\s*;/g) || []).length === 0);
+  /*
+    `pan-y` é legítimo em contêineres que rolam SÓ na vertical (`.admin-page`,
+    `.welcome-scroll`). O que não pode é `pan-y` no `body`/em classes
+    genéricas, que reservava o gesto para o documento inteiro.
+  */
+  const panY = cssLimpo.match(/[^{}]*\{[^}]*touch-action:\s*pan-y;?/g) || [];
+  const panYIndevido = panY.filter((b) => !/admin-page|welcome-scroll/.test(b));
+  ok("`touch-action: pan-y` só em contêiner vertical específico", panYIndevido.length === 0,
+    panYIndevido.join(" | ").slice(0, 120));
   ok("`touch-action: none` só no mapa", !/touch-action:\s*none/.test(cssLimpo.replace(/\.touch-map[\s\S]{0,200}/, "")));
 }
 

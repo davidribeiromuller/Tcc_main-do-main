@@ -199,11 +199,17 @@ html.dark .admin-scrollable::-webkit-scrollbar-thumb {
    quando o dedo caía exatamente sobre a tabela.
    ------------------------------------------------------------------ */
 
-/* O conteúdo principal do painel respira e nunca ganha scroller lateral. */
+/* O conteúdo principal do painel respira e nunca ganha scroller lateral.
+   `overflow-x: clip` NÃO cria scroller (por isso não é promovido para
+   `auto`) e `overflow-y: auto` é quem rola de verdade. */
 .admin-page {
   overflow-x: clip;
   overflow-y: auto;
   overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  /* Importante no flex: sem isso o item não encolhe e nunca rola. */
+  min-height: 0;
 }
 
 /* Blocos de tabela: rolagem horizontal ISOLADA (o gesto morre aqui, não
@@ -427,7 +433,7 @@ body {
 
 /* Respiro inferior para o conteúdo não ficar sob a barra de navegação. */
 .pb-bottom-nav {
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 5.5rem);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 6.5rem);
 }
 
 @media (min-width: 768px) {
@@ -456,5 +462,42 @@ body {
 @media (hover: hover) and (pointer: fine) {
   .hover-only-scale:active {
     transform: scale(0.97);
+  }
+}
+
+/* ============================================================
+   Rodada 20 — altura de viewport que realmente resolve
+   ============================================================
+   `height: 100%` só funciona se TODOS os ancestrais tiverem altura
+   definida. No mobile isso quebrava: o painel ficava sem altura, o
+   `overflow-y: auto` não tinha o que rolar e o conteúdo era CORTADO atrás
+   da barra de navegação (relato: "só a tabela rola").
+   `dvh` acompanha a barra do navegador e resolve na raiz.
+*/
+.app-viewport {
+  height: 100dvh;
+  min-height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+@supports not (height: 100dvh) {
+  .app-viewport {
+    height: 100vh;
+    min-height: 100vh;
+    max-height: 100vh;
+  }
+}
+
+/* Barra inferior fixa: reserva a área dela no fluxo do conteúdo. */
+.bottom-nav {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+}
+
+/* No mobile, a barra de navegação nunca pode cobrir o último item da lista. */
+@media (max-width: 767px) {
+  .admin-page,
+  .pb-bottom-nav {
+    scroll-padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 6.5rem);
   }
 }

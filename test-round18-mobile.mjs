@@ -148,8 +148,12 @@ console.log(`\n=== Renderização em ${LARGURA}px de largura ===`);
   const css = readFileSync("./src/index.css", "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "");
 
-  const ocorrenciasPanY = (css.match(/touch-action:\s*pan-y\s*;/g) || []).length;
-  ok("nenhuma regra global com `touch-action: pan-y`", ocorrenciasPanY === 0, `${ocorrenciasPanY} ocorrência(s)`);
+  // `pan-y` vale em contêiner que rola só na vertical (.admin-page), mas não
+  // no body nem em classes genéricas.
+  const blocosPanY = css.match(/[^{}]*\{[^}]*touch-action:\s*pan-y;?/g) || [];
+  const indevidos = blocosPanY.filter((b) => !/admin-page|welcome-scroll/.test(b));
+  ok("`pan-y` só em contêiner vertical específico", indevidos.length === 0,
+    `${indevidos.length} regra(s) indevida(s)`);
 
   const noneGlobais = css.match(/(^|\})\s*([^{}]*)\{[^}]*touch-action:\s*none/g) || [];
   const foraDoMapa = noneGlobais.filter((b) => !/touch-map|leaflet/.test(b));
