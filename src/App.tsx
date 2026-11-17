@@ -51,6 +51,7 @@ import {
   syncOAuthUserDirectInSupabase,
   heartbeatUserDirectInSupabase,
 } from "./lib/usersService.ts";
+import { autenticarContaEscolar } from "./lib/schoolAccountsService.ts";
 import { canAccessAdminPanel, isChefeAdmin } from "./lib/permissions.ts";
 import { saveUsersCache, readUsersCache } from "./lib/userCache.ts";
 import { isEventRetentionExpired } from "./lib/eventLifecycle.ts";
@@ -404,12 +405,14 @@ export default function App() {
         return;
       }
 
-      // Hospedagem estática: valida diretamente no Supabase pelo identificador
-      // institucional (e-mail ou CGM), sem depender do Express.
+      // Hospedagem estática: valida na tabela própria de contas escolares
+      // (`school_accounts`), por identificador OU e-mail. Antes consultava
+      // `users` com role "Escola", o que misturava a gestão escolar ao
+      // diretório de alunos e permitia entrar com conta bloqueada pela ficha.
       if (!isSupabaseConfigured()) {
         throw new Error("Acesso institucional indisponível: Supabase não configurado.");
       }
-      const { user: instUser, error: instErr } = await authenticateUserDirectInSupabase(
+      const { user: instUser, error: instErr } = await autenticarContaEscolar(
         identificador,
         password
       );

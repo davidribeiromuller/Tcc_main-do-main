@@ -66,7 +66,15 @@ import {
   type DeletedEvent,
 } from "../lib/deletedEventsService";
 import EventSuggestionsTab from "./EventSuggestionsTab";
-import { criarContaInstitucional, listarContasInstitucionais } from "../lib/institutionalAdminService.ts";
+import {
+  listarContasEscolares,
+  criarContaEscolar,
+  alternarStatusContaEscolar,
+  definirVerificacaoContaEscolar,
+  redefinirSenhaContaEscolar,
+  removerContaEscolar,
+  type SchoolAccount,
+} from "../lib/schoolAccountsService.ts";
 import { ARAUCARIA_SCHOOLS } from "../lib/schoolsData.ts";
 import { formatLastActive, formatDateTimeBR } from "../lib/dateUtils";
 import { calculateRealUserStats } from "../lib/userStats";
@@ -181,8 +189,10 @@ export default function AdminPanel({
   const [viewingAuthEvent, setViewingAuthEvent] = useState<Event | null>(null);
 
   // Institutional Accounts State (Exclusive ADM Chefe)
-  const [institutionalAccounts, setInstitutionalAccounts] = useState<any[]>([]);
+  const [institutionalAccounts, setInstitutionalAccounts] = useState<SchoolAccount[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
+  /** Erro de leitura das contas escolares (ex.: tabela ainda não criada). */
+  const [erroContasEscolares, setErroContasEscolares] = useState<string | null>(null);
   const [showAddInstModal, setShowAddInstModal] = useState(false);
   const [accountToResetPassword, setAccountToResetPassword] = useState<any | null>(null);
   const [newPasswordValue, setNewPasswordValue] = useState("");
@@ -793,7 +803,7 @@ export default function AdminPanel({
     }
   };
 
-  // Fetch institutional accounts when tab is active
+  // Carrega a lista SEPARADA de contas escolares quando a aba abre.
   React.useEffect(() => {
     if (activeTab === "schools" && isChefe) {
       loadInstitutionalAccounts();
@@ -801,17 +811,37 @@ export default function AdminPanel({
   }, [activeTab, isChefe]);
 
   /**
-   * Cria a conta institucional da escola.
+   * Lê as contas escolares da tabela própria (`school_accounts`).
    *
-   * Antes o estado do modal existia mas o modal nunca foi renderizado — não
-   * havia como criar conta pela interface, nem no ambiente local. Agora grava
-   * direto no Supabase (funciona no GitHub Pages) com fallback pelo Express.
+   * Antes esta função chamava `/api/admin/institutional-accounts` e, no
+   * GitHub Pages, caía num fallback que lia `users` com role "Escola" — o que
+   * misturava a gestão escolar com o diretório de alunos e fazia a lista
+   * aparecer dentro dos contadores de usuários. Agora há uma lista dedicada.
    */
+  const loadInstitutionalAccounts = async () => {
+    setLoadingAccounts(true);
+    setErroContasEscolares(null);
+    try {
+      const { contas, error } = await listarContasEscolares();
+      if (error) {
+        setErroContasEscolares(error);
+        setInstitutionalAccounts([]);
+      } else {
+        setInstitutionalAccounts(contas);
+      }
+    } catch (err: any) {
+      setErroContasEscolares(err?.message || "Erro ao carregar as contas escolares.");
+    } finally {
+      setLoadingAccounts(false);
+    }
+  };
+
+  /** Cria a conta escolar (lista separada; não grava mais em `users`). */
   const handleCreateInstitutionalAccount = async () => {
     setIsCreatingInst(true);
     setNewInstErrors({});
     try {
-      const resultado = await criarContaInstitucional({
+      const resultado = await criarContaEscolar({
         escolaSlug: newInstForm.escolaSlug,
         identificador: newInstForm.identificador,
         email: newInstForm.email,
@@ -823,14 +853,12 @@ export default function AdminPanel({
 
       if (!resultado.success) {
         if (resultado.fieldErrors) setNewInstErrors(resultado.fieldErrors);
-        notifyAdmin(resultado.error || "Não foi possível criar a conta institucional.", "error");
+        notifyAdmin(resultado.error || "Não foi possível criar a conta escolar.", "error");
         return;
       }
 
       notifyAdmin(
-        resultado.viaBackend
-          ? "Conta institucional criada no servidor local."
-          : "Conta institucional criada! A escola já pode acessar com este e-mail e senha.",
+        "Conta escolar criada! A escola já pode acessar com este identificador ou e-mail e a senha definida.",
         "success"
       );
 
@@ -846,125 +874,85 @@ export default function AdminPanel({
       });
       await loadInstitutionalAccounts();
     } catch (err: any) {
-      notifyAdmin(err?.message || "Erro ao criar a conta institucional.", "error");
+      notifyAdmin(err?.message || "Erro ao criar a conta escolar.", "error");
     } finally {
       setIsCreatingInst(false);
     }
   };
 
-  const loadInstitutionalAccounts = async () => {
-    setLoadingAccounts(true);
-    try {
-      const token = localStorage.getItem("token") || "";
-      // Em hospedagem estática a rota não existe: `fetchJsonApi` devolve null
-      // em vez do HTML-200 do fallback de SPA.
-      const res = await fetchJsonApi("/api/admin/institutional-accounts", {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
-      if (res && res.ok) {
-        const data = await res.json().catch(() => ({}));
-        if (Array.isArray(data?.accounts)) {
-          setInstitutionalAccounts(data.accounts);
-          return;
-        }
-      }
-    } catch (err) {
-      console.warn("[AdminPanel] Contas institucionais (Express) indisponíveis:", err);
+  /** Bloqueia / desbloqueia a conta escolar. */
+  const handleToggleInstAccount = async (acc: SchoolAccount) => {
+    const bloquear = acc.ativo;
+    const { success, error } = await alternarStatusContaEscolar(acc.id, !bloquear);
+    if (!success) {
+      notifyAdmin(error || "Erro ao alterar o status da conta escolar.", "error");
+      return;
     }
-
-    // Hospedagem estática: o Express não existe. Lê as contas direto do banco
-    // em vez de deixar a aba vazia como se nenhuma escola tivesse conta.
-    try {
-      const { contas, error } = await listarContasInstitucionais();
-      if (error) {
-        console.warn("[AdminPanel] Contas institucionais (Supabase):", error);
-      }
-      setInstitutionalAccounts(
-        contas.map((c) => ({
-          id: c.id,
-          escolaId: undefined,
-          escolaNome: c.institution || "Escola",
-          identificador: c.email,
-          email: c.email,
-          status: c.ativo === false ? "bloqueado" : "ativo",
-          accountStatus: c.ativo === false ? "suspended" : "active",
-          responsavel: c.nome,
-          createdAt: c.createdAt,
-          lastLoginAt: c.lastLogin,
-        }))
-      );
-    } catch (err) {
-      console.warn("[AdminPanel] Falha ao listar contas do banco:", err);
-    } finally {
-      setLoadingAccounts(false);
-    }
+    notifyAdmin(
+      bloquear
+        ? "Conta escolar bloqueada. A escola não consegue mais entrar."
+        : "Conta escolar desbloqueada.",
+      "success"
+    );
+    await loadInstitutionalAccounts();
   };
 
-  const handleToggleInstAccount = async (accId: number) => {
-    try {
-      const token = localStorage.getItem("token") || "";
-      const res = await fetch(`/api/admin/institutional-accounts/${accId}/toggle`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Falha ao alterar status.");
-      notifyAdmin("Status da conta institucional alterado com sucesso!", "success");
-      loadInstitutionalAccounts();
-    } catch (err: any) {
-      notifyAdmin(err.message || "Erro ao alterar status da instituição.", "error");
+  /** Marca como verificada (auditoria documental) ou revoga a verificação. */
+  const handleVerifySchoolAccount = async (
+    conta: SchoolAccount,
+    novoStatus: "verified" | "revoked"
+  ) => {
+    const { success, error } = await definirVerificacaoContaEscolar(conta.id, novoStatus);
+    if (!success) {
+      notifyAdmin(error || "Erro ao alterar a verificação da conta escolar.", "error");
+      return;
     }
+    notifyAdmin(
+      novoStatus === "verified" ? "Conta escolar verificada." : "Verificação revogada.",
+      "success"
+    );
+    await loadInstitutionalAccounts();
   };
 
-  const handleVerifySchoolAccount = async (accId: number, newStatus: "verified" | "pending_verification" | "rejected") => {
-    try {
-      const token = localStorage.getItem("token") || "";
-      const res = await fetch(`/api/admin/institutional-accounts/${accId}/verify`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          verificationStatus: newStatus,
-          verificationMethod: "Auditoria documental realizada pelo Administrador Chefe"
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Falha ao verificar identidade da escola.");
-      notifyAdmin(`Status de verificação alterado para "${newStatus === 'verified' ? 'Verificada' : newStatus === 'rejected' ? 'Rejeitada' : 'Pendente'}"!`, "success");
-      loadInstitutionalAccounts();
-    } catch (err: any) {
-      notifyAdmin(err.message, "error");
-    }
-  };
-
+  /** Redefine a senha da conta escolar. */
   const handleResetPasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!accountToResetPassword || !newPasswordValue.trim()) return;
     setIsResettingPassword(true);
     try {
-      const token = localStorage.getItem("token") || "";
-      const res = await fetch(`/api/admin/institutional-accounts/${accountToResetPassword.id}/reset-password`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ newPassword: newPasswordValue.trim() })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Falha ao redefinir senha.");
-      notifyAdmin(data.message || "Senha institucional redefinida com sucesso!", "success");
+      const { success, error } = await redefinirSenhaContaEscolar(
+        accountToResetPassword.id,
+        newPasswordValue.trim()
+      );
+      if (!success) {
+        notifyAdmin(error || "Falha ao redefinir a senha.", "error");
+        return;
+      }
+      notifyAdmin("Senha da conta escolar redefinida com sucesso!", "success");
       setAccountToResetPassword(null);
       setNewPasswordValue("");
-      loadInstitutionalAccounts();
-    } catch (err: any) {
-      notifyAdmin(err.message || "Erro ao redefinir senha.", "error");
+      await loadInstitutionalAccounts();
     } finally {
       setIsResettingPassword(false);
     }
+  };
+
+  /** Remove a conta escolar (ação explícita e confirmada). */
+  const handleRemoverContaEscolar = async (conta: SchoolAccount) => {
+    if (
+      !window.confirm(
+        `Remover definitivamente a conta escolar de ${conta.responsavel} (${conta.escolaNome})?\n\nA escola perde o acesso até que uma nova conta seja criada.`
+      )
+    ) {
+      return;
+    }
+    const { success, error } = await removerContaEscolar(conta.id);
+    if (!success) {
+      notifyAdmin(error || "Erro ao remover a conta escolar.", "error");
+      return;
+    }
+    notifyAdmin("Conta escolar removida.", "success");
+    await loadInstitutionalAccounts();
   };
 
   const monthNames = [
@@ -2470,17 +2458,21 @@ export default function AdminPanel({
           </div>
         )}
 
-        {/* TAB 4: Gestão de Contas Institucionais das Escolas (Exclusivo ADM Chefe) */}
+        {/* TAB 4: CONTAS ESCOLARES — lista SEPARADA dos usuários (exclusivo Chefe).
+            Alunos e servidores ficam na aba "Contas"; a gestão das escolas fica
+            aqui, com escola, cargo, senha visível e verificação próprios. */}
         {activeTab === "schools" && isChefe && (
           <div className="mt-4 space-y-4">
             <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-serif font-bold text-emerald-950 dark:text-emerald-200 flex items-center gap-2">
                   <Building2 size={16} className="text-emerald-700" />
-                  Contas Institucionais das 6 Escolas de Araucária
+                  Contas escolares das 6 escolas de Araucária
                 </h3>
                 <p className="text-xs text-emerald-800 dark:text-emerald-400 mt-0.5 leading-relaxed">
-                  Gerenciamento restrito ao Administrador Chefe: controle de acesso, ativação/bloqueio e redefinição de credenciais das equipes gestoras escolares.
+                  Lista separada do diretório de usuários. Aqui o Administrador Chefe cria,
+                  verifica, bloqueia, redefine a senha e remove as credenciais da equipe
+                  gestora de cada escola.
                 </p>
               </div>
 
@@ -2491,7 +2483,7 @@ export default function AdminPanel({
                   className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
                 >
                   <Plus size={13} />
-                  <span>Nova conta</span>
+                  <span>Nova conta escolar</span>
                 </button>
 
                 <button
@@ -2505,23 +2497,55 @@ export default function AdminPanel({
               </div>
             </div>
 
+            {/* Resumo: quantas das 6 escolas já têm acesso */}
+            <div className="flex flex-wrap items-center gap-2">
+              {[
+                { label: "Contas escolares", valor: institutionalAccounts.length, tone: "bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-white/10" },
+                { label: "Ativas", valor: institutionalAccounts.filter((a) => a.ativo).length, tone: "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/50" },
+                { label: "Verificadas", valor: institutionalAccounts.filter((a) => a.verificationStatus === "verified").length, tone: "bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-900/50" },
+                { label: "Escolas sem conta", valor: Math.max(0, ARAUCARIA_SCHOOLS.length - new Set(institutionalAccounts.map((a) => a.escolaId)).size), tone: "bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-900/50" },
+              ].map((c) => (
+                <div key={c.label} className={`rounded-xl border pl-2.5 pr-3 py-1.5 flex items-center gap-2 ${c.tone}`}>
+                  <span className="text-sm font-display font-bold leading-none tabular-nums">{c.valor}</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-wide opacity-70 whitespace-nowrap">{c.label}</span>
+                </div>
+              ))}
+            </div>
+
+            {erroContasEscolares && (
+              <div className="flex items-start gap-2.5 rounded-2xl border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-950/20 p-3.5 text-xs text-red-800 dark:text-red-300">
+                <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <p className="font-semibold">Não foi possível carregar as contas escolares.</p>
+                  <p className="opacity-90 mt-0.5">{erroContasEscolares}</p>
+                  <button
+                    type="button"
+                    onClick={loadInstitutionalAccounts}
+                    className="mt-2 font-bold underline cursor-pointer"
+                  >
+                    Tentar novamente
+                  </button>
+                </div>
+              </div>
+            )}
+
             {loadingAccounts ? (
               <div className="text-center py-12 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
                 <RefreshCw className="w-6 h-6 text-emerald-700 animate-spin mx-auto mb-2" />
-                <p className="text-xs text-slate-500">Carregando contas institucionais das escolas...</p>
+                <p className="text-xs text-slate-500">Carregando contas escolares...</p>
               </div>
-            ) : institutionalAccounts.length === 0 ? (
+            ) : institutionalAccounts.length === 0 && !erroContasEscolares ? (
               <div className="bg-white dark:bg-slate-900 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-8 sm:p-10 text-center">
                 <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 flex items-center justify-center mx-auto mb-3">
                   <Building2 size={22} />
                 </div>
                 <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
-                  Nenhuma conta institucional ativa
+                  Nenhuma conta escolar criada ainda
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 max-w-md mx-auto leading-relaxed">
-                  Nenhuma escola tem conta de acesso ainda. Clique em{" "}
-                  <strong className="text-slate-700 dark:text-slate-200">Nova conta</strong> para
-                  criar as credenciais de uma das 6 escolas de Araucária.
+                  Nenhuma das 6 escolas de Araucária tem credencial de acesso. Clique em{" "}
+                  <strong className="text-slate-700 dark:text-slate-200">Nova conta escolar</strong>{" "}
+                  para criar o acesso da equipe gestora.
                 </p>
                 <button
                   type="button"
@@ -2529,63 +2553,56 @@ export default function AdminPanel({
                   className="mt-4 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer active:scale-95 mx-auto"
                 >
                   <Plus size={14} />
-                  <span>Criar conta institucional</span>
+                  <span>Criar conta escolar</span>
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
                 {institutionalAccounts.map((acc) => {
-                  const isBlocked = acc.status === "bloqueado";
+                  const bloqueada = !acc.ativo;
+                  const verificada = acc.verificationStatus === "verified";
                   return (
                     <div
                       key={acc.id}
-                      className={`p-4 rounded-2xl border transition-all ${
-                        isBlocked
+                      className={`p-4 rounded-2xl border transition-all flex flex-col ${
+                        bloqueada
                           ? "bg-red-50/50 dark:bg-red-950/20 border-red-200 dark:border-red-900/40"
                           : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-emerald-300 shadow-2xs"
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2 mb-2">
-                        <div>
+                        <div className="min-w-0">
                           <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
-                            Escola ID #{acc.escolaId}
+                            Escola #{acc.escolaId} · {acc.escolaSlug}
                           </span>
                           <h4 className="text-sm font-serif font-bold text-slate-900 dark:text-white leading-snug">
                             {acc.escolaNome}
                           </h4>
                         </div>
-
-                        <div className="flex items-center gap-1.5 flex-wrap">
+                        <div className="flex items-center gap-1.5 flex-wrap justify-end shrink-0">
                           <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
-                              acc.verificationStatus === "verified"
-                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                                : acc.verificationStatus === "rejected"
-                                ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
-                                : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              verificada
+                                ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                                : "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
                             }`}
                           >
-                            {acc.verificationStatus === "verified"
-                              ? "✓ Verificada"
-                              : acc.verificationStatus === "rejected"
-                              ? "✗ Rejeitada"
-                              : "⏳ Pendente"}
+                            {verificada ? "Verificada" : "Pendente"}
                           </span>
-
                           <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
-                              isBlocked
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              bloqueada
                                 ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
                                 : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
                             }`}
                           >
-                            {isBlocked ? "Bloqueada" : "Ativa"}
+                            {bloqueada ? "Bloqueada" : "Ativa"}
                           </span>
                         </div>
                       </div>
 
                       <div className="space-y-1 mb-3 text-xs text-slate-600 dark:text-slate-400">
-                        <p className="flex items-center gap-1.5">
+                        <p className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-semibold text-slate-800 dark:text-slate-200">Identificador:</span>
                           <code className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded font-mono text-emerald-800 dark:text-emerald-400">
                             {acc.identificador}
@@ -2597,7 +2614,16 @@ export default function AdminPanel({
                         </p>
                         <p className="flex items-center gap-1.5">
                           <span className="font-semibold text-slate-800 dark:text-slate-200">Responsável:</span>
-                          <span>{acc.responsavel} ({acc.cargo})</span>
+                          <span className="truncate">
+                            {acc.responsavel}
+                            {acc.cargo ? ` (${acc.cargo})` : ""}
+                          </span>
+                        </p>
+                        <p className="flex items-center gap-1.5">
+                          <span className="font-semibold text-slate-800 dark:text-slate-200">Senha:</span>
+                          <code className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded font-mono text-slate-700 dark:text-slate-200">
+                            {acc.password || "não definida"}
+                          </code>
                         </p>
                         {acc.lastLogin && (
                           <p className="text-[11px] text-slate-400">
@@ -2606,14 +2632,14 @@ export default function AdminPanel({
                         )}
                       </div>
 
-                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex-wrap">
+                      <div className="mt-auto flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex-wrap">
                         <button
                           type="button"
-                          onClick={() => handleVerifySchoolAccount(acc.id, acc.verificationStatus === "verified" ? "pending_verification" : "verified")}
+                          onClick={() => handleVerifySchoolAccount(acc, verificada ? "revoked" : "verified")}
                           className="px-2.5 py-1 text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 rounded-lg transition cursor-pointer flex items-center gap-1"
                         >
                           <ShieldCheck size={12} />
-                          <span>{acc.verificationStatus === "verified" ? "Revogar" : "Verificar"}</span>
+                          <span>{verificada ? "Revogar" : "Verificar"}</span>
                         </button>
 
                         <button
@@ -2625,20 +2651,30 @@ export default function AdminPanel({
                           className="px-2.5 py-1 text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-lg transition cursor-pointer flex items-center gap-1"
                         >
                           <Lock size={12} />
-                          <span>Redefinir Senha</span>
+                          <span>Alterar senha</span>
                         </button>
 
                         <button
                           type="button"
-                          onClick={() => handleToggleInstAccount(acc.id)}
+                          onClick={() => handleToggleInstAccount(acc)}
                           className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1 ${
-                            isBlocked
+                            bloqueada
                               ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
                               : "bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-950/40"
                           }`}
                         >
-                          {isBlocked ? <Unlock size={12} /> : <Lock size={12} />}
-                          <span>{isBlocked ? "Desbloquear" : "Bloquear"}</span>
+                          {bloqueada ? <Unlock size={12} /> : <Lock size={12} />}
+                          <span>{bloqueada ? "Desbloquear" : "Bloquear"}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemoverContaEscolar(acc)}
+                          aria-label={`Remover conta de ${acc.escolaNome}`}
+                          title="Remover conta escolar"
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer"
+                        >
+                          <Trash2 size={13} />
                         </button>
                       </div>
                     </div>
@@ -2667,10 +2703,10 @@ export default function AdminPanel({
                   </div>
                   <div>
                     <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                      Nova conta institucional
+                      Nova conta escolar
                     </h3>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Credenciais de acesso da equipe gestora da escola
+                      Vai para a lista de contas escolares, separada dos usuários
                     </p>
                   </div>
                 </div>
@@ -2696,9 +2732,14 @@ export default function AdminPanel({
                       setNewInstForm((f) => ({
                         ...f,
                         escolaSlug: e.target.value,
-                        // E-mail institucional sugerido a partir do slug.
-                        email: f.email || `${e.target.value.replace(/-/g, ".")}@escola.pr.gov.br`,
-                        identificador: f.identificador || `${escola?.slug || ""}`,
+                        /*
+                          Sugestões preenchidas a partir do slug, mas SEMPRE
+                          reescritas ao trocar de escola: antes o `f.email || ...`
+                          mantinha o e-mail da escola anterior e a conta saía
+                          com a credencial errada.
+                        */
+                        email: `${e.target.value.replace(/-/g, ".")}@escola.pr.gov.br`,
+                        identificador: `${escola?.slug || e.target.value}`,
                       }));
                     }}
                     className="w-full mt-1 h-10 px-3 text-xs rounded-xl bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 text-slate-800 dark:text-slate-100"
@@ -2846,7 +2887,7 @@ export default function AdminPanel({
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-base font-serif font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <Lock size={18} className="text-emerald-700" />
-                  Redefinir Senha Institucional
+                  Alterar senha da conta escolar
                 </h3>
                 <button
                   type="button"
@@ -2858,13 +2899,14 @@ export default function AdminPanel({
               </div>
 
               <p className="text-xs text-slate-600 dark:text-slate-400 mb-4">
-                Redefinindo senha da equipe gestora do <strong>{accountToResetPassword.escolaNome}</strong> (Identificador: <code>{accountToResetPassword.identificador}</code>).
+                Nova senha para o <strong>{accountToResetPassword.escolaNome}</strong> (identificador{" "}
+                <code>{accountToResetPassword.identificador}</code>). A conta volta a exigir troca de senha no próximo acesso.
               </p>
 
               <form onSubmit={handleResetPasswordSubmit} className="space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Nova Senha Institucional (Mínimo 6 caracteres)
+                    Nova senha escolar (mínimo 6 caracteres)
                   </label>
                   <input
                     type="password"
