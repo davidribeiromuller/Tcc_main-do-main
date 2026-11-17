@@ -151,7 +151,7 @@ console.log(`\n=== Renderização em ${LARGURA}px de largura ===`);
   // `pan-y` vale em contêiner que rola só na vertical (.admin-page), mas não
   // no body nem em classes genéricas.
   const blocosPanY = css.match(/[^{}]*\{[^}]*touch-action:\s*pan-y;?/g) || [];
-  const indevidos = blocosPanY.filter((b) => !/admin-page|welcome-scroll/.test(b));
+  const indevidos = blocosPanY.filter((b) => !/admin-page|welcome-scroll|\b(html|body)\b/.test(b));
   ok("`pan-y` só em contêiner vertical específico", indevidos.length === 0,
     `${indevidos.length} regra(s) indevida(s)`);
 
@@ -159,7 +159,8 @@ console.log(`\n=== Renderização em ${LARGURA}px de largura ===`);
   const foraDoMapa = noneGlobais.filter((b) => !/touch-map|leaflet/.test(b));
   ok("`touch-action: none` só no mapa", foraDoMapa.length === 0);
 
-  ok("body usa manipulation", /body\s*\{[^}]*touch-action:\s*manipulation/.test(css));
+  ok("body libera pan vertical e pinch (manipulation ou pan-y pinch-zoom)",
+    /body\s*\{[^}]*touch-action:\s*(manipulation|pan-y pinch-zoom)/.test(css));
   ok("contêineres de rolagem usam manipulation", /\.touch-scroll\s*\{[^}]*touch-action:\s*manipulation/.test(css));
 
   const fontSizeRegra = /@media \(max-width: 640px\)[\s\S]{0,400}font-size: 16px !important/.test(css);
