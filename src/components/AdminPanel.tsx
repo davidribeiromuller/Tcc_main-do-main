@@ -977,7 +977,7 @@ export default function AdminPanel({
         tela. `overflow-x-clip` corta o excesso horizontal SEM criar
         scroller — a rolagem horizontal fica restrita aos blocos de tabela.
       */
-      className="admin-page flex-1 min-h-0 w-full flex flex-col overflow-y-auto overflow-x-clip pb-bottom-nav text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark transition-colors"
+      className="admin-page w-full flex flex-col overflow-x-clip pb-bottom-nav text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark transition-colors"
     >
       {/*
         Cabeçalho NÃO é mais `sticky`.

@@ -277,7 +277,7 @@ export default function Register({
     <motion.div
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="flex flex-col h-full overflow-y-auto touch-scroll px-4 py-5 sm:p-6 text-brand-text-light dark:text-brand-text-dark max-w-md mx-auto w-full md:py-8"
+      className="flex flex-col touch-scroll px-4 py-5 sm:p-6 text-brand-text-light dark:text-brand-text-dark max-w-md mx-auto w-full md:py-8 min-h-[100dvh]"
     >
       <div className="my-auto py-2 sm:py-4">
         <div className="flex items-center gap-3 my-4">

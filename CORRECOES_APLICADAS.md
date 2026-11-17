@@ -1355,3 +1355,62 @@ Com altura zerada/indefinida, `overflow-y: auto` **não tem o que rolar**: o con
 | `test-round17.mjs` / `test-round16.mjs` | 49/49 · 39/39 |
 | Regressão 11–14 | 202/202 |
 | `tsc --noEmit` / `npm run build` | 0 erros / ok (4.17 s) |
+
+---
+
+## 25. Rodada 21 — rolagem normal de aplicativo (o documento é o scroller)
+
+**Pedido:** *"agora nao consigo nem srollar a tela, refaca novamente, coloque um scroll normal de aplicativo onde rola a tela inteira"*.
+
+### 25.1 Por que as rodadas 19 e 20 falharam
+
+As duas tentativas anteriores trataram o sintoma (`overflow`) sem mudar o modelo. O app tinha uma **cadeia de altura travada** com um scroller por tela:
+
+```
+html/body { height: 100% }
+  #root { height: 100% }
+    .app-viewport { height: 100dvh; overflow: hidden }
+      wrapper da tela { absolute inset-0 }
+        tela { overflow-y: auto }   ← scroller interno
+          tabela { overflow-x: auto }  ← scroller dentro do scroller
+```
+
+Cada camada nova adicionava um scroller aninhado. Quando o dedo encostava num elemento que não rolava, o gesto morria ali — e a tela inteira ficava imóvel. Não existe ajuste de classe que conserte isso: era preciso remover os scrollers internos.
+
+### 25.2 Modelo novo (definitivo)
+
+**Um único scroller: o documento (`html`).** As telas são blocos de conteúdo comuns; as barras ficam fixas por cima, como em qualquer app.
+
+| Camada | Antes | Agora |
+|---|---|---|
+| `html` | `height: 100%` | `min-height: 100dvh` + `overflow-y: auto` + `overflow-x: clip` |
+| `body` | `height: 100%` | `min-height: 100dvh`, `overflow-y: visible`, `overflow-x: clip` |
+| `#root` | `height: 100%` | sem altura (cresce com o conteúdo) |
+| `.app-viewport` | `height: 100dvh; overflow: hidden` | `min-height: 100dvh`, sem `overflow` |
+| `#app-root-container` | `h-[100dvh] … overflow-hidden` | `min-h-[100dvh]`, sem `overflow-hidden` |
+| wrapper do shell | `h-full … overflow-hidden` | `min-h-[100dvh] flex flex-col` |
+| telas | `absolute inset-0 overflow-y-auto` | `.app-screen` (bloco normal) |
+| Feed / Agenda / Ajustes / Apoio / Detalhe / Portal | `h-full overflow-y-auto` | `w-full pb-bottom-nav` |
+| Painel de administração | `flex-1 min-h-0 overflow-y-auto` | `w-full overflow-x-clip pb-bottom-nav` |
+| Login / Cadastro / Recuperação | `min-h-full … overflow-y-auto` | `min-h-[100dvh]` |
+| Splash | `absolute inset-0` | `fixed inset-0` (overlay real) |
+
+### 25.3 Detalhes que fazem funcionar no celular
+
+- **`overflow-x: clip` (nunca `hidden`)** no `html`/`body`: `hidden` no X obriga o navegador a promover `overflow-y: visible` para `auto`, criando um scroller extra no `body` — que, sem altura, não rola nada.
+- **Nenhum `overflow-y: auto` dentro de tela**: nenhuma camada intermediária rouba o gesto. A rolagem horizontal continua isolada apenas em `.admin-table-scroll` e nas faixas `.scroll-x-snap`.
+- **Troca de tela volta ao topo** (`useEffect` em `[activeScreen]` → `window.scrollTo(0,0)`), já que a rolagem agora é global.
+- **Barras fixas sem sobreposição**: `MobileHeader` subiu para `z-[60]`; no mobile, `.app-screen .sticky { top: 2.75rem }` impede que o cabeçalho interno (Feed, Agenda, Detalhe) suba por baixo dela, e `scroll-padding-top/bottom` no `html` respeita as duas barras.
+- **`.pb-bottom-nav` (6,5rem)** garante que o último item nunca fica atrás da barra inferior.
+- **Mapa** mantém `h-[calc(100dvh-4rem)]` (tela cheia, gesto do Leaflet é intencional).
+
+### 25.4 Validação
+
+| Suíte | Resultado |
+|---|---|
+| `test-round21.mjs` (novo) — documento scroller, zero scroller interno, barras e render real | **43/43** |
+| `test-round20.mjs` (atualizado: só organização/respiro) | 35/35 |
+| `test-round19.mjs` — tabelas isoladas | 32/32 |
+| `test-round18.mjs` / `18-mobile` | 50/50 · 21/21 |
+| `test-round17.mjs` / `16` / `14` / `13` / `12`s / `11`s | 49 · 39 · 36 · 31 · 32+18+21 · 64 |
+| `tsc --noEmit` / `npm run build` | 0 erros / ok (4,98 s) |

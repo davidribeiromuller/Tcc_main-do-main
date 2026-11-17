@@ -269,7 +269,7 @@ export default function Settings({
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="flex flex-col h-full overflow-y-auto pb-bottom-nav touch-scroll text-brand-text-light dark:text-brand-text-dark"
+      className="flex flex-col w-full pb-bottom-nav touch-scroll text-brand-text-light dark:text-brand-text-dark"
     >
       {/* Header */}
       <div className="border-b border-brand-primary/10">

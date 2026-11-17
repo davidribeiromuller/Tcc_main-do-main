@@ -498,7 +498,7 @@ export default function EventDetail({
     <motion.div
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="flex flex-col h-full overflow-y-auto pb-bottom-nav touch-scroll text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark"
+      className="flex flex-col w-full pb-bottom-nav touch-scroll text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark"
     >
       {/* Sticky Top Header with Prominent Back Button */}
       <div className="sticky top-0 z-40 bg-brand-bg-light/95 dark:bg-brand-bg-dark/95 backdrop-blur-md px-4 py-3 border-b border-brand-primary/15 flex items-center justify-between shadow-xs">

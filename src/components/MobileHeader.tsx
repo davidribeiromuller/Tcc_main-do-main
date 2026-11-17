@@ -42,7 +42,7 @@ export default function MobileHeader({
   };
 
   return (
-    <header className="md:hidden sticky top-0 z-40 bg-white/95 dark:bg-brand-card-dark/95 backdrop-blur-md border-b border-slate-200/80 dark:border-white/10 px-3 py-2 safe-top shadow-2xs transition-colors select-none">
+    <header className="md:hidden sticky top-0 z-[60] bg-white/95 dark:bg-brand-card-dark/95 backdrop-blur-md border-b border-slate-200/80 dark:border-white/10 px-3 py-2 safe-top shadow-2xs transition-colors select-none">
       <div className="flex items-center justify-between gap-2 max-w-lg mx-auto w-full">
         {/* Left: School brand & current screen */}
         <button

@@ -1971,10 +1971,25 @@ export default function App() {
     showToast("Sessão encerrada com sucesso.", "info");
   };
 
+  /*
+    Rolagem normal de aplicativo (rodada 21).
+    ---------------------------------------------------------------------------
+    Existe UM scroller: o documento (`html`). Cada troca de tela volta a
+    rolagem para o topo, porque o scroll é global — sem isso, sair de uma
+    tabela longa do painel e abrir o mural cairia no meio do conteúdo.
+  */
+  useEffect(() => {
+    try {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    } catch {
+      /* navegador sem scrollTo com objeto */
+    }
+  }, [activeScreen]);
+
   return (
     <div
       id="app-root-container"
-      className="app-viewport relative flex flex-col justify-between bg-brand-bg-light text-brand-text-light h-[100dvh] min-h-0 overflow-hidden"
+      className="app-viewport relative flex flex-col bg-brand-bg-light text-brand-text-light min-h-[100dvh]"
     >
       <AnimatePresence mode="wait">
         
@@ -1983,7 +1998,7 @@ export default function App() {
             key="splash-screen"
             initial={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0"
+            className="fixed inset-0 z-50"
           >
             <Splash onComplete={() => setActiveScreen(resetTokenParam ? "recovery" : (currentUser ? "feed" : "welcome"))} />
           </motion.div>
@@ -2002,7 +2017,7 @@ export default function App() {
               aparecia. Aqui o wrapper passa a ser o contêiner de rolagem,
               com `overscroll-contain` para não arrastar a página atrás.
             */
-            className="absolute inset-0 overflow-y-auto overflow-x-hidden overscroll-y-contain welcome-scroll"
+            className="app-screen welcome-scroll"
           >
             <WelcomeScreen
               onNavigate={navigateTo}
@@ -2023,7 +2038,7 @@ export default function App() {
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.98 }}
-            className="absolute inset-0 overflow-y-auto"
+            className="app-screen"
           >
             <Login
               onGoogleLogin={handleGoogleLogin}
@@ -2044,7 +2059,7 @@ export default function App() {
             initial={{ opacity: 0, x: 50 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -50 }}
-            className="absolute inset-0 overflow-y-auto"
+            className="app-screen"
           >
             <Register
               onRegister={handleRegister}
@@ -2061,7 +2076,7 @@ export default function App() {
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.98 }}
-            className="absolute inset-0 overflow-y-auto"
+            className="app-screen"
           >
             <PasswordRecovery
               onNavigate={navigateTo}
@@ -2073,7 +2088,7 @@ export default function App() {
 
         {/* LOGGED IN & GUEST NAVIGATION SHELLS */}
         {["feed", "schools", "schoolDetail", "calendar", "admin", "settings", "contact", "eventDetail", "map"].includes(activeScreen) && (
-          <div className="w-full h-full relative overflow-hidden flex flex-col">
+          <div className="w-full min-h-[100dvh] flex flex-col">
             {/* Impersonation Return Banner */}
             {impersonatorAdmin && (
               <div className="bg-amber-500 text-slate-900 px-4 py-2.5 flex items-center justify-between text-xs sm:text-sm font-medium z-50 shadow-md border-b border-amber-600">
@@ -2118,7 +2133,7 @@ export default function App() {
               }}
             />
             
-            <div className="flex-1 w-full overflow-hidden relative">
+            <div className="w-full flex-1 relative">
               <AnimatePresence mode="wait">
                 {activeScreen === "feed" && (
                   <motion.div
@@ -2126,7 +2141,7 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="absolute inset-0 overflow-y-auto"
+                    className="app-screen"
                   >
                     <Feed
                       events={events}
@@ -2167,7 +2182,7 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="absolute inset-0 overflow-y-auto"
+                    className="app-screen"
                   >
                     <SchoolsCatalog
                       onSelectSchool={(slug) => navigateTo("schoolDetail", slug)}
@@ -2181,7 +2196,7 @@ export default function App() {
                     initial={{ opacity: 0, scale: 0.98 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.98 }}
-                    className="absolute inset-0 overflow-y-auto"
+                    className="app-screen"
                   >
                     <SchoolDetail
                       school={getSchoolBySlug(selectedSchoolSlug) || ARAUCARIA_SCHOOLS[0]}
@@ -2203,7 +2218,7 @@ export default function App() {
                     initial={{ opacity: 0, scale: 0.98 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.98 }}
-                    className="absolute inset-0 overflow-hidden"
+                    className="app-screen"
                   >
                     <MapView
                       events={events}
@@ -2226,7 +2241,7 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="absolute inset-0 overflow-y-auto"
+                    className="app-screen"
                   >
                     <CalendarView
                       events={events}
@@ -2248,7 +2263,7 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="flex-1 min-h-0 flex flex-col overflow-hidden"
+                    className="app-screen"
                   >
                     <AdminPanel
                       usersList={usersList}
@@ -2280,7 +2295,7 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="absolute inset-0 flex flex-col overflow-y-auto"
+                    className="app-screen"
                   >
                     <SchoolPortal
                       currentUser={currentUser}
@@ -2299,7 +2314,7 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="absolute inset-0 overflow-y-auto"
+                    className="app-screen"
                   >
                     <Settings
                       user={currentUser}
@@ -2320,7 +2335,7 @@ export default function App() {
                     initial={{ opacity: 0, x: 20 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -20 }}
-                    className="absolute inset-0 overflow-y-auto"
+                    className="app-screen"
                   >
                     <Contact onNavigate={navigateTo} />
                   </motion.div>
@@ -2332,7 +2347,7 @@ export default function App() {
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.95 }}
-                    className="absolute inset-0 overflow-y-auto"
+                    className="app-screen"
                   >
                     <EventDetail
                       event={selectedEvent}

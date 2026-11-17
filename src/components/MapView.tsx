@@ -639,7 +639,7 @@ export default function MapView({
       : null;
 
   return (
-    <div className="relative w-full h-[calc(100vh-64px)] md:h-[calc(100vh-72px)] overflow-hidden bg-[#e5e3df] flex flex-col font-sans">
+    <div className="relative w-full h-[calc(100dvh-4rem)] md:h-[calc(100dvh-4.5rem)] overflow-hidden bg-[#e5e3df] flex flex-col font-sans">
       {/* Top Google Maps Floating Search Bar & Filter Chips */}
       <div className="absolute top-3 left-3 right-3 md:left-6 md:right-auto md:w-96 z-[1000] flex flex-col gap-2 pointer-events-auto">
         {/* Google Maps Search Bar with G-Logo & Search icon */}

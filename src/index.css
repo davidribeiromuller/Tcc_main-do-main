@@ -69,7 +69,6 @@
 html {
   scroll-behavior: smooth;
   -webkit-text-size-adjust: 100%;
-  height: 100%;
   width: 100%;
 }
 
@@ -78,9 +77,18 @@ body {
   padding: 0;
   background-color: var(--color-brand-bg-light);
   color: var(--color-brand-text-light);
-  min-height: 100%;
-  height: 100%;
-  width: 100%;
+  /*
+    Rolagem normal de aplicativo (rodada 21).
+    ---------------------------------------------------------------
+    O `body` deixa de ter altura travada; o documento (`html`) passa a
+    ser o ÚNICO contêiner de rolagem da aplicação. Antes o app montava uma
+    cadeia de `height: 100%` + `overflow: hidden` + `absolute inset-0`
+    com um scroller interno por tela; no celular isso resultava em
+    uma tela que simplesmente não rolava (o dedo não encontrava
+    nenhum elemento rolável) ou que rolava só dentro da tabela.
+    Agora o documento rola e as barras ficam fixas por cima.
+  */
+  min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-overflow-scrolling: touch;
@@ -88,8 +96,8 @@ body {
     NÃO declare `touch-action` no body.
     `touch-action: pan-y` no documento inteiro faz o navegador reservar o
     gesto vertical para o documento — e os contêineres que rolam de verdade
-    (`.welcome-scroll`, telas `absolute inset-0 overflow-y-auto`) perdem o
-    arrasto quando o dedo começa em cima de um card, botão ou imagem. Era
+    (na época, telas `absolute inset-0 overflow-y-auto`) perdiam o arrasto
+    quando o dedo começava em cima de um card, botão ou imagem. Era
     exatamente o relato: "não consigo dar scroll com o dedo se o dedo estiver
     em cima de algo". `manipulation` mantém o pinch-zoom e devolve o gesto ao
     elemento que realmente rola; `auto` é o padrão do navegador.
@@ -104,8 +112,12 @@ html.dark body {
 
 #root {
   width: 100%;
-  height: 100%;
-  min-height: 100%;
+  /*
+    Sem `height`/`min-height` aqui: quem define a altura do conteúdo é o
+    próprio conteúdo. Um `height: 100%` trancava o `#root` no tamanho da
+    tela e impedia a página de crescer — o excesso era cortado em vez de
+    rolar.
+  */
   display: flex;
   flex-direction: column;
 }
@@ -125,8 +137,7 @@ html.dark body {
 /* Fluid responsive layout view container */
 .app-viewport {
   width: 100%;
-  height: 100%;
-  min-height: 100%;
+  min-height: 100dvh;
   position: relative;
   background-color: var(--color-brand-bg-light);
 }
@@ -203,13 +214,17 @@ html.dark .admin-scrollable::-webkit-scrollbar-thumb {
    `overflow-x: clip` NÃO cria scroller (por isso não é promovido para
    `auto`) e `overflow-y: auto` é quem rola de verdade. */
 .admin-page {
+  /*
+    Rodada 21: o painel NÃO tem scroller próprio. Quem rola é a página.
+    Um contêiner aninhado com `overflow-y: auto` dentro de outro scroller
+    é a receita de "não consigo rolar": o gesto fica preso no elemento em
+    que o dedo encostou. Aqui o painel é apenas mais um bloco de conteúdo
+    alto — a rolagem é a do documento, como em qualquer app.
+  */
   overflow-x: clip;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  -webkit-overflow-scrolling: touch;
+  overflow-y: visible;
+  width: 100%;
   touch-action: pan-y;
-  /* Importante no flex: sem isso o item não encolhe e nunca rola. */
-  min-height: 0;
 }
 
 /* Blocos de tabela: rolagem horizontal ISOLADA (o gesto morre aqui, não
@@ -325,10 +340,13 @@ html.dark .admin-scrollable::-webkit-scrollbar-thumb:hover {
   }
 }
 
-/* Nada deve causar rolagem horizontal na página inteira. */
+/* Nada deve causar rolagem horizontal na página inteira.
+   `clip` (e não `hidden`) no body: `overflow-x: hidden` obriga o
+   navegador a promover `overflow-y: visible` para `auto`, o que
+   transformava o `body` num scroller extra — e aí o gesto do dedo
+   ficava preso num contêiner sem altura, sem rolar nada. */
 html,
 body {
-  overflow-x: hidden;
   max-width: 100%;
 }
 
@@ -346,12 +364,12 @@ body {
    wrapper `absolute inset-0`, e a parte de baixo (rodapé, SOS, parceiros)
    ficava inacessível no mobile.
 */
+/* Rodada 21: a introdução NÃO é mais um scroller próprio — quem rola é o
+   documento. A classe permanece apenas como gancho de estilo; declarar
+   `overscroll-behavior`/`will-change` num elemento que não rola só cria
+   camada de composição sem necessidade. */
 .welcome-scroll {
-  -webkit-overflow-scrolling: touch;
   touch-action: manipulation;
-  overscroll-behavior-y: contain;
-  /* Importante no iOS: acelera o "momentum" do arrasto com o dedo. */
-  will-change: scroll-position;
 }
 
 /* Barra visível na introdução só onde há mouse — no celular a rolagem é
@@ -466,38 +484,82 @@ body {
 }
 
 /* ============================================================
-   Rodada 20 — altura de viewport que realmente resolve
+   Rodada 21 — rolagem normal de aplicativo (a página rola)
    ============================================================
-   `height: 100%` só funciona se TODOS os ancestrais tiverem altura
-   definida. No mobile isso quebrava: o painel ficava sem altura, o
-   `overflow-y: auto` não tinha o que rolar e o conteúdo era CORTADO atrás
-   da barra de navegação (relato: "só a tabela rola").
-   `dvh` acompanha a barra do navegador e resolve na raiz.
+   Relato: "agora não consigo nem scrollar a tela".
+
+   As rodadas 19 e 20 tentaram consertar a rolagem mexendo em `overflow`
+   dentro de uma cadeia de altura travada (`height: 100%` → `100dvh` →
+   `overflow: hidden` → `absolute inset-0` → scroller interno). Cada
+   camada nova criava um scroller aninhado, e o gesto do dedo morria na
+   primeira que não rolava.
+
+   Decisão definitiva: existe UM scroller — o documento (`html`/`body`).
+   Todas as telas são blocos de conteúdo normais, sem `h-full`, sem
+   `overflow-y: auto`, sem `absolute inset-0`. O cabeçalho e a barra
+   inferior continuam fixos (`position: sticky` / `fixed`), então a
+   sensação é a de um app: o conteúdo desliza por baixo das barras.
 */
-.app-viewport {
-  height: 100dvh;
+
+html {
+  /* `dvh` acompanha a barra de endereço do navegador mobile.
+     NÃO use `height: 100%` aqui: com altura travada o conteúdo que
+     transborda é cortado em vez de rolar, que era exatamente o bug. */
   min-height: 100dvh;
-  max-height: 100dvh;
-  overflow: hidden;
+  /* `clip` só no eixo X. Nunca use `hidden` no eixo X junto de `auto` no
+     Y: o navegador promove o par para `auto/auto` e cria um scroller
+     lateral indesejado. */
+  overflow-x: clip;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: none;
+}
+
+body {
+  overflow-x: clip;
+  overflow-y: visible;
 }
 
 @supports not (height: 100dvh) {
-  .app-viewport {
-    height: 100vh;
+  body,
+  html {
     min-height: 100vh;
-    max-height: 100vh;
   }
 }
 
-/* Barra inferior fixa: reserva a área dela no fluxo do conteúdo. */
+/* As telas trocam com `AnimatePresence`; durante a troca duas telas
+   coexistem por um instante. Sem `absolute` elas se empilham — o que
+   aqui é inofensivo — mas o `transform` da animação não pode criar
+   contexto de rolagem. */
+.app-screen {
+  width: 100%;
+  position: relative;
+}
+
+/* Barra inferior fixa: reserva a altura dela no fim do conteúdo. */
 .bottom-nav {
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
 }
 
-/* No mobile, a barra de navegação nunca pode cobrir o último item da lista. */
+/* Barras fixas + rolagem do documento.
+   ------------------------------------------------------------------
+   Como o documento rola, um `position: sticky` dentro dele fica preso ao
+   topo da viewport — mas a MobileHeader (também sticky, z-60) passaria por
+   cima. Estes dois ajustes mantêm o comportamento de app sem barras
+   empilhadas:
+   1. telas internas começam 2,75rem abaixo do topo (altura da header);
+   2. nada é escondido atrás da barra inferior no fim da rolagem. */
 @media (max-width: 767px) {
-  .admin-page,
-  .pb-bottom-nav {
-    scroll-padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 6.5rem);
+  .app-screen {
+    scroll-margin-top: 2.75rem;
+  }
+
+  .app-screen .sticky {
+    top: 2.75rem;
+  }
+
+  html {
+    scroll-padding-top: 2.75rem;
+    scroll-padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 5.5rem);
   }
 }
