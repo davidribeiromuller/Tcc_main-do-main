@@ -29,20 +29,26 @@ const semComentarios = (s) =>
   s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 const cssLimpo = semComentarios(css);
 
-console.log("\n=== 1. O documento é o scroller ===\n");
+console.log("\n=== 1. O documento é o scroller (sem `overflow` na raiz) ===\n");
 {
-  ok("html rola na vertical", /html\s*\{[^}]*overflow-y:\s*auto/.test(cssLimpo));
-  ok("html usa `clip` no eixo X (não cria scroller lateral)",
-    /html\s*\{[^}]*overflow-x:\s*clip/.test(cssLimpo));
-  ok("html NÃO usa `overflow-x: hidden` junto de auto",
-    !/html\s*\{[^}]*overflow-x:\s*hidden/.test(cssLimpo));
-  ok("body não vira scroller (overflow-y: visible)",
-    /body\s*\{[^}]*overflow-y:\s*visible/.test(cssLimpo));
-  ok("body tem overflow-x: clip", /body\s*\{[^}]*overflow-x:\s*clip/.test(cssLimpo));
+  // Rodada 22: `overflow` no html/body é PROIBIDO — inclusive `clip`,
+  // que no Safari do iOS propaga para a viewport e mata a rolagem.
+  // Junta TODOS os blocos `html { }` / `body { }` do CSS (há vários,
+  // progressivos) e valida o conjunto.
+  const blocosDe = (sel) =>
+    [...cssLimpo.matchAll(new RegExp(`(^|\\n)\\s*${sel}\\s*\\{([^}]*)\\}`, "g"))]
+      .map((m) => m[2])
+      .join("\n");
+  const htmlBloco = blocosDe("html") + blocosDe("html,\\s*body");
+  const bodyBloco = blocosDe("body") + blocosDe("html,\\s*body");
+  const semOverflowDecl = (t) => !/(^|[;{\s])overflow(-[xy])?\s*:/.test(t);
 
-  const body = cssLimpo.match(/body\s*\{([^}]*)\}/)?.[1] || "";
-  ok("body não tem `height: 100%` (travava o crescimento da página)",
-    !/height:\s*100%/.test(body));
+  ok("nenhum bloco de html declara overflow", semOverflowDecl(htmlBloco), htmlBloco.trim().slice(0, 160));
+  ok("nenhum bloco de body declara overflow", semOverflowDecl(bodyBloco), bodyBloco.trim().slice(0, 160));
+  ok("html/body não travam altura (sem height: 100%)",
+    !/(^|[;{\s])height:\s*100%/.test(htmlBloco) && !/(^|[;{\s])height:\s*100%/.test(bodyBloco));
+  ok("html/body liberam o gesto vertical (touch-action pan-y)",
+    /touch-action:\s*pan-y/.test(htmlBloco) && /touch-action:\s*pan-y/.test(bodyBloco));
 }
 
 console.log("=== 2. A raiz do app cresce com o conteúdo ===\n");

@@ -1414,3 +1414,53 @@ Cada camada nova adicionava um scroller aninhado. Quando o dedo encostava num el
 | `test-round18.mjs` / `18-mobile` | 50/50 · 21/21 |
 | `test-round17.mjs` / `16` / `14` / `13` / `12`s / `11`s | 49 · 39 · 36 · 31 · 32+18+21 · 64 |
 | `tsc --noEmit` / `npm run build` | 0 erros / ok (4,98 s) |
+
+---
+
+## 26. Rodada 22 — o que ainda travava o dedo no painel
+
+**Pedido:** *"ainda nao funciona o scroll da tela do painel de adm mobile"* (3ª tentativa).
+
+A rodada 21 mudou o modelo (documento é o scroller), mas deixou dois **travamentos reais de navegador mobile**:
+
+### 26.1 `overflow` na raiz do documento — o pior deles
+
+```css
+html { overflow-x: clip; overflow-y: auto; }   /* ❌ rodada 21 */
+body { overflow-x: clip; overflow-y: visible; }
+```
+
+No **Safari do iOS** o `overflow` do elemento raiz **propaga para a viewport**. Com `clip` (ou com o par `hidden`/`auto`), o documento perde a rolagem vertical: a tela fica imóvel, exatamente o novo relato. A regra agora é: **`html` e `body` não declaram `overflow` nenhum.**
+
+| Antes | Depois |
+|---|---|
+| `html { overflow-x: clip; overflow-y: auto }` | `html { min-height: 100dvh; touch-action: pan-y pinch-zoom }` |
+| `body { overflow-x: clip; overflow-y: visible }` | `body { min-height: 100dvh; touch-action: pan-y pinch-zoom }` |
+| — | `#root { overflow-x: clip }` (div comum: seguro) |
+
+O `touch-action: pan-y pinch-zoom` na raiz é intencional e **não** é o `pan-y` global proibido da rodada 18: como a página agora é o scroller, é ela que precisa aceitar o arrasto vertical; o horizontal fica livre para as faixas.
+
+### 26.2 `overscroll-behavior` engolindo o gesto vertical
+
+| Regra | Antes | Depois |
+|---|---|---|
+| `.overflow-y-auto, .overflow-x-auto, .scrollable-content` | `overscroll-behavior-y: contain` | *(removido)* |
+| `.admin-table-scroll` | `overscroll-behavior: contain` (2 eixos) | `overscroll-behavior-x: contain` |
+| `.scroll-x-snap` | `overscroll-behavior-x: contain` | mantido |
+| `.admin-page` | — | `overscroll-behavior-x: contain` + `max-width: 100vw` + `touch-action: pan-y pinch-zoom` |
+
+Numa faixa horizontal, `contain` nos dois eixos **impede a cadeia de rolagem de subir para a página**: arrastar o dedo para cima em cima das abas/filtros/KPIs não rolava nada. Agora o confinamento é só no eixo X.
+
+### 26.3 Limpeza
+
+- `.admin-scrollable` (código morto, com `overflow-y: auto !important`) **removida** do CSS — era a origem histórica do scroller duplicado do painel.
+
+### 26.4 Validação
+
+| Suíte | Resultado |
+|---|---|
+| `test-round22.mjs` (novo) — raiz sem `overflow`, overscroll por eixo, painel sem scroller | **27/27** |
+| `test-round21.mjs` (atualizado) | 41/41 |
+| `test-round20.mjs` / `test-round19.mjs` / `18-mobile` | 35/35 · 32/32 · 21/21 |
+| `18` / `17` / `16` / `14` / `13` / `12`s / `11` | 50 · 49 · 39 · 36 · 31 · 32+18+21 · 64 |
+| `tsc --noEmit` / `npm run build` | 0 erros / ok (5,21 s) |

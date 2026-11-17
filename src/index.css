@@ -112,6 +112,10 @@ html.dark body {
 
 #root {
   width: 100%;
+  /* Corta excesso horizontal sem virar scroller. `clip` numa div comum é
+     seguro (diferente de `clip`/`hidden` na raiz do documento). */
+  overflow-x: clip;
+  overflow-y: visible;
   /*
     Sem `height`/`min-height` aqui: quem define a altura do conteúdo é o
     próprio conteúdo. Um `height: 100%` trancava o `#root` no tamanho da
@@ -131,7 +135,13 @@ html.dark body {
     `manipulation` permite pan em qualquer direção + pinch-zoom.
   */
   touch-action: manipulation;
-  overscroll-behavior-y: contain;
+  /*
+    Rodada 22: `overscroll-behavior-y: contain` saiu daqui. Numa faixa
+    horizontal (`.scroll-x-snap`, que também carrega `.overflow-x-auto`), ele
+    impedia a cadeia de rolagem de subir para a página — o gesto vertical
+    feito em cima do carrossel/filtros simplesmente morria. O confine agora
+    é declarado só onde faz sentido (`.scroll-x-snap`, `.admin-table-scroll`).
+  */
 }
 
 /* Fluid responsive layout view container */
@@ -158,46 +168,9 @@ html.dark .app-viewport {
   height: 0;
 }
 
-/* Explicit custom scrollbar for Admin Panel and tables */
-.admin-scrollable {
-  scrollbar-width: thin !important;
-  scrollbar-color: rgba(76, 107, 76, 0.45) transparent !important;
-  overflow-y: auto !important;
-  -webkit-overflow-scrolling: touch !important;
-}
-
-.admin-scrollable::-webkit-scrollbar {
-  display: block !important;
-  width: 7px !important;
-  height: 7px !important;
-}
-
-.admin-scrollable::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.03) !important;
-  border-radius: 9999px !important;
-}
-
-.admin-scrollable::-webkit-scrollbar-thumb {
-  background: rgba(76, 107, 76, 0.45) !important;
-  border-radius: 9999px !important;
-  border: 1px solid transparent !important;
-}
-
-.admin-scrollable::-webkit-scrollbar-thumb:hover {
-  background: rgba(76, 107, 76, 0.75) !important;
-}
-
-html.dark .admin-scrollable {
-  scrollbar-color: rgba(163, 198, 157, 0.45) transparent !important;
-}
-
-html.dark .admin-scrollable::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.03) !important;
-}
-
-html.dark .admin-scrollable::-webkit-scrollbar-thumb {
-  background: rgba(163, 198, 157, 0.4) !important;
-}
+/* `.admin-scrollable` foi REMOVIDA na rodada 22: era código morto e
+   carregava `overflow-y: auto !important`, que já causou scroller duplicado
+   e gesto travado no painel. Nenhum elemento usa mais essa classe. */
 
 /* ------------------------------------------------------------------
    Rolagem do painel de administração (rodada 19)
@@ -215,7 +188,7 @@ html.dark .admin-scrollable::-webkit-scrollbar-thumb {
    `auto`) e `overflow-y: auto` é quem rola de verdade. */
 .admin-page {
   /*
-    Rodada 21: o painel NÃO tem scroller próprio. Quem rola é a página.
+    Rodada 21/22: o painel NÃO tem scroller próprio. Quem rola é a página.
     Um contêiner aninhado com `overflow-y: auto` dentro de outro scroller
     é a receita de "não consigo rolar": o gesto fica preso no elemento em
     que o dedo encostou. Aqui o painel é apenas mais um bloco de conteúdo
@@ -224,7 +197,14 @@ html.dark .admin-scrollable::-webkit-scrollbar-thumb {
   overflow-x: clip;
   overflow-y: visible;
   width: 100%;
-  touch-action: pan-y;
+  /* `100%` do viewport: se qualquer conteúdo interno esticar a página no
+     eixo X, não há como surgir rolagem lateral. */
+  max-width: 100vw;
+  /* O gesto vertical feito no painel sobe para o documento; horizontal
+     fica livre para as faixas/tabelas internas. */
+  touch-action: pan-y pinch-zoom;
+  /* iOS: sem "borracha" que empurra a tela toda ao chegar no fim. */
+  overscroll-behavior-x: contain;
 }
 
 /* Blocos de tabela: rolagem horizontal ISOLADA (o gesto morre aqui, não
@@ -236,7 +216,9 @@ html.dark .admin-scrollable::-webkit-scrollbar-thumb {
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-x pan-y;
-  overscroll-behavior: contain;
+  /* Só o eixo X é confinado: o arrasto vertical continua subindo para a
+     página (rodada 22 — antes `contain` nos dois eixos travava o scroll). */
+  overscroll-behavior-x: contain;
   scrollbar-width: thin;
   scrollbar-color: rgba(76, 107, 76, 0.45) transparent;
 }
@@ -277,10 +259,6 @@ html.dark .admin-table-scroll::-webkit-scrollbar-thumb {
   min-width: 46rem;
   width: 100%;
   border-collapse: collapse;
-}
-
-html.dark .admin-scrollable::-webkit-scrollbar-thumb:hover {
-  background: rgba(163, 198, 157, 0.65) !important;
 }
 
 /* ============================================================
@@ -349,6 +327,8 @@ html,
 body {
   max-width: 100%;
 }
+
+/* Nenhum `overflow` na raiz do documento — ver bloco da rodada 22. */
 
 /* Textos longos (e-mails, URLs, códigos) quebram em vez de estourar a tela. */
 .break-anywhere {
@@ -501,23 +481,25 @@ body {
    sensação é a de um app: o conteúdo desliza por baixo das barras.
 */
 
+/*
+  Rodada 22 — SEM `overflow` no `html` nem no `body` (nem `clip`).
+  ------------------------------------------------------------------
+  `overflow-x: clip` no elemento raiz é veneno no Safari do iOS: o valor
+  propaga para a viewport e o documento INTEIRO deixa de rolar na
+  vertical ("agora não consigo nem scrollar a tela"). O mesmo vale para
+  `overflow: hidden` + `auto` na raiz. Aqui não declaramos `overflow`
+  nenhum nos dois: o documento rola do jeito nativo, como qualquer site.
+  O corte do excesso horizontal é feito no `#root`, que é uma div comum
+  (onde `clip` não cria scroller nem afeta a viewport).
+*/
 html {
-  /* `dvh` acompanha a barra de endereço do navegador mobile.
-     NÃO use `height: 100%` aqui: com altura travada o conteúdo que
-     transborda é cortado em vez de rolar, que era exatamente o bug. */
   min-height: 100dvh;
-  /* `clip` só no eixo X. Nunca use `hidden` no eixo X junto de `auto` no
-     Y: o navegador promove o par para `auto/auto` e cria um scroller
-     lateral indesejado. */
-  overflow-x: clip;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-y: none;
+  touch-action: pan-y pinch-zoom;
 }
 
 body {
-  overflow-x: clip;
-  overflow-y: visible;
+  min-height: 100dvh;
+  touch-action: pan-y pinch-zoom;
 }
 
 @supports not (height: 100dvh) {

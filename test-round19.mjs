@@ -66,7 +66,8 @@ console.log("=== 3. Rolagem horizontal isolada nas tabelas ===\n");
   ok("rola na horizontal", /overflow-x:\s*auto/.test(tabela));
   ok("não rola na vertical (deixa com a página)", /overflow-y:\s*hidden/.test(tabela));
   ok("aceita pan nos dois eixos", /touch-action:\s*pan-x pan-y/.test(tabela));
-  ok("contém o overscroll (gesto não vaza para a página)", /overscroll-behavior:\s*contain/.test(tabela));
+  ok("contém o overscroll no eixo X (gesto vertical sobe para a página)",
+    /overscroll-behavior(-x)?:\s*contain/.test(tabela));
 
   const wrappers = painelLimpo.match(/admin-table-scroll/g) || [];
   ok("as 3 tabelas usam a classe", wrappers.length === 3, `${wrappers.length} uso(s)`);
@@ -95,12 +96,13 @@ console.log("=== 6. Regras de rolagem globais continuam corretas ===\n");
 {
   ok("body usa `manipulation`", /body\s*\{[^}]*touch-action:\s*manipulation/.test(cssLimpo));
   /*
-    `pan-y` é legítimo em contêineres que rolam SÓ na vertical (`.admin-page`,
-    `.welcome-scroll`). O que não pode é `pan-y` no `body`/em classes
-    genéricas, que reservava o gesto para o documento inteiro.
+    Rodada 22: `pan-y` é legítimo em contêineres que rolam SÓ na vertical
+    (`.admin-page`, `.welcome-scroll`) e AGORA também na raiz do documento
+    (`html`/`body`) — lá ele é intencional: garante que o gesto vertical
+    pertença à página e o horizontal fique com as faixas internas.
   */
   const panY = cssLimpo.match(/[^{}]*\{[^}]*touch-action:\s*pan-y;?/g) || [];
-  const panYIndevido = panY.filter((b) => !/admin-page|welcome-scroll/.test(b));
+  const panYIndevido = panY.filter((b) => !/admin-page|welcome-scroll|(^|\})?\s*(html|body)[\s,{[]/.test(b) && !/\b(html|body)\b/.test(b));
   ok("`touch-action: pan-y` só em contêiner vertical específico", panYIndevido.length === 0,
     panYIndevido.join(" | ").slice(0, 120));
   ok("`touch-action: none` só no mapa", !/touch-action:\s*none/.test(cssLimpo.replace(/\.touch-map[\s\S]{0,200}/, "")));
