@@ -243,27 +243,65 @@ export default function Settings({
     }
   }, [editMode]);
 
+  const [salvandoPerfil, setSalvandoPerfil] = useState(false);
+
+  /**
+   * Salvar perfil (rodada 25).
+   * -----------------------------------------------------------------------
+   * Foto e telefone vão direto ao banco; o resto vira solicitação de
+   * aprovação para um ADM. Em caso de falha, o formulário PERMANECE aberto
+   * com o que foi digitado — antes a tela saía do modo de edição mesmo no
+   * erro, dando a impressão de que tudo tinha sido perdido.
+   */
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nome.trim()) {
       notifySettings("Por favor, digite seu nome completo!", "warning");
       return;
     }
+    if (salvandoPerfil) return;
 
-    await onUpdateProfile({
-      nome,
-      email,
-      cpf,
-      phone,
-      birthdate,
-      gender,
-      institution,
-      role,
-      foto_perfil: fotoPerfil
-    });
+    setSalvandoPerfil(true);
+    let alterouFotoOuTelefone = false;
+    try {
+      await onUpdateProfile({
+        nome,
+        email,
+        cpf,
+        phone,
+        birthdate,
+        gender,
+        institution,
+        role,
+        foto_perfil: fotoPerfil
+      });
+      alterouFotoOuTelefone = true;
 
-    setEditMode(false);
+      // O perfil em si só muda com aprovação; recarrega os campos a partir do
+      // que está no banco para o formulário não "mentir" sobre o estado real.
+      setFotoPerfil(user?.foto_perfil || fotoPerfil);
+      setPhone(user?.phone || phone);
+      setEditMode(false);
+    } catch {
+      // A mensagem de erro específica já foi mostrada pelo App. Mantemos a
+      // edição aberta para o usuário tentar de novo sem redigitar tudo.
+    } finally {
+      setSalvandoPerfil(false);
+    }
+    void alterouFotoOuTelefone;
   };
+
+  /* Selos que explicam, campo a campo, o que precisa de aprovação. */
+  const seloAprovacao = (
+    <span className="normal-case tracking-normal font-semibold text-[9px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-300/70 dark:border-amber-800/60">
+      requer ADM
+    </span>
+  );
+  const seloLivre = (
+    <span className="normal-case tracking-normal font-semibold text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-300/70 dark:border-emerald-800/60">
+      imediato
+    </span>
+  );
 
   return (
     <motion.div
@@ -616,9 +654,23 @@ export default function Settings({
             className="max-w-4xl mx-auto w-full px-4 py-4 sm:p-6"
           >
             <form onSubmit={handleSaveProfile} className="flex flex-col gap-4">
+              {/*
+                Aviso de aprovação (rodada 25): só foto e telefone mudam na
+                hora. O resto depende de um Funcionário ADM — sem isso o
+                usuário achava que tinha salvo tudo.
+              */}
+              <div className="flex items-start gap-2 p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 text-[11px] leading-relaxed text-amber-900 dark:text-amber-200">
+                <ShieldCheck size={15} className="shrink-0 mt-0.5" />
+                <span>
+                  <strong>Foto de perfil</strong> e <strong>telefone para contato</strong> são
+                  atualizados na hora. As alterações de <strong>nome, e-mail, CPF, data de
+                  nascimento, gênero, instituição e cargo</strong> passam por aprovação de um ADM
+                  antes de valer.
+                </span>
+              </div>
               {/* Profile Image Section */}
               <div className="flex flex-col items-center gap-3 py-4 bg-brand-secondary/20 dark:bg-brand-card-dark/40 rounded-3xl border border-brand-primary/10 mb-2">
-                <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Foto de Perfil</span>
+                <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 flex items-center gap-1.5 justify-center">Foto de Perfil {seloLivre}</span>
                 
                 <div className="relative group">
                   <div className="w-24 h-24 rounded-full bg-yellow-400 border-4 border-white dark:border-brand-card-dark flex items-center justify-center font-display font-medium text-white text-3xl uppercase overflow-hidden shadow-md">
@@ -680,7 +732,7 @@ export default function Settings({
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] uppercase font-bold text-slate-400">Nome</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5">Nome {seloAprovacao}</span>
                 <input
                   type="text"
                   value={nome}
@@ -690,7 +742,7 @@ export default function Settings({
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] uppercase font-bold text-slate-400">Alterar email</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5">Alterar email {seloAprovacao}</span>
                 <input
                   type="email"
                   value={email}
@@ -700,7 +752,7 @@ export default function Settings({
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] uppercase font-bold text-slate-400">CPF</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5">CPF {seloAprovacao}</span>
                 <input
                   type="text"
                   value={cpf}
@@ -711,7 +763,7 @@ export default function Settings({
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] uppercase font-bold text-slate-400">Número de Celular</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5">Número de Celular {seloLivre}</span>
                 <input
                   type="text"
                   value={phone}
@@ -722,7 +774,7 @@ export default function Settings({
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] uppercase font-bold text-slate-400">Data de Nascimento</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5">Data de Nascimento {seloAprovacao}</span>
                 <input
                   type="date"
                   value={ensureDbDateToInputFormat(birthdate)}
@@ -732,7 +784,7 @@ export default function Settings({
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] uppercase font-bold text-slate-400">Gênero</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5">Gênero {seloAprovacao}</span>
                 <select
                   value={gender}
                   onChange={(e) => setGender(e.target.value)}
@@ -745,7 +797,7 @@ export default function Settings({
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] uppercase font-bold text-slate-400">Instituição</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5">Instituição {seloAprovacao}</span>
                 <select
                   value={institution}
                   onChange={(e) => setInstitution(e.target.value)}
@@ -760,7 +812,7 @@ export default function Settings({
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] uppercase font-bold text-slate-400">Cargo / Função</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5">Cargo / Função {seloAprovacao}</span>
                 <select
                   value={role}
                   onChange={(e) => setRole(e.target.value)}
@@ -778,10 +830,11 @@ export default function Settings({
 
               <button
                 type="submit"
-                className="w-full h-12 mt-4 bg-brand-primary text-white font-semibold rounded-2xl flex items-center justify-center gap-2 hover:opacity-95 active:scale-98 transition-all shadow-md cursor-pointer"
+                disabled={salvandoPerfil}
+                className="w-full h-12 mt-4 bg-brand-primary text-white font-semibold rounded-2xl flex items-center justify-center gap-2 hover:opacity-95 active:scale-98 transition-all shadow-md cursor-pointer disabled:opacity-60 disabled:cursor-wait"
               >
                 <Save size={18} />
-                Salvar Perfil
+                {salvandoPerfil ? "Enviando..." : "Salvar Perfil"}
               </button>
             </form>
           </motion.div>

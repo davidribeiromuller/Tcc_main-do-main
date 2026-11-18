@@ -1550,3 +1550,53 @@ O padrão aprovado no painel (rodadas 21/22) virou regra global. Regra de ouro, 
 | `23` / `22` / `21` / `20` / `19` / `18` / `18-mobile` | 142 · 27 · 41 · 35 · 32 · 50 · 21 |
 | `17` / `16` / `14` / `13` / `12`s / `11` | 49 · 39 · 36 · 31 · 32+18+21 · 64 |
 | `tsc --noEmit` / `npm run build` | 0 erros / ok (5,29 s) |
+
+---
+
+## 29. Rodada 25 — salvar perfil sem erro, com aprovação de ADM
+
+**Relato:** *"ao alterar o perfil, da erro e volta para o perfil antes da alteração, conserte isso para que as informações substituidas precisem de uma confirmação de um funcionario adm, mas coisas como telefone para contato e foto de perfil possam ser alteradas sem confrimação de adm"* (com print do toast *"Falha ao salvar perfil. O estado anterior foi restaurado"*).
+
+### 29.1 Causa raiz do erro
+
+`handleUpdateProfile` (`src/App.tsx`) chamava **`PUT /api/users/profile`** — backend Express que **não é publicado** no GitHub Pages (o deploy envia apenas `dist/` + `404.html`). Como `getAuthToken()` devolve `null` (o app não usa Supabase Auth nem Firebase), `res` ficava `null`, o código caía no `catch`, executava `setCurrentUser(previousUser)` e mostrava o toast de erro. **Nada era enviado ao banco.**
+
+Dois agravantes corrigidos de passagem:
+
+| Problema | Correção |
+|---|---|
+| Fallback do update usava **e-mail** como identificador, coluna sem índice único → podia não achar ninguém ou atualizar várias linhas | Fallback passa a usar **`uid`** (`UNIQUE NOT NULL`); e-mail virou campo alterável, não identificador |
+| `Cargo` e `Instituição` eram `select` livres → usuário podia se promover a Diretor sozinho | Esses campos agora entram na fila de aprovação |
+
+### 29.2 Duas vias (regra pedida)
+
+| Campo | Via | Quando vale |
+|---|---|---|
+| Foto de perfil | livre | na hora |
+| Telefone para contato | livre | na hora |
+| Nome, e-mail, CPF, data de nascimento, gênero, instituição, cargo | **aprovação de ADM** | depois da confirmação |
+
+- `src/lib/profileChangeService.ts` (novo) concentra a regra: `CAMPOS_COM_APROVACAO`, `CAMPOS_LIVRES`, `calcularAlteracoes` (diff real, ignorando o que não mudou), `separarAlteracoes`, `salvarCamposLivres`, `criarSolicitacaoDePerfil`, `aprovarSolicitacaoDePerfil`, `rejeitarSolicitacaoDePerfil`.
+- `handleUpdateProfile` agora usa Supabase direto, aplica só o que mudou e dá feedback honesto: uma mensagem por via, nunca "tudo salvo" pela metade. Em erro, o formulário **continua aberto** com o que foi digitado.
+- `Settings`: aviso no topo do formulário + selo **"imediato"** em foto/telefone e **"requer ADM"** nos demais campos; botão vira "Enviando..." e fica desabilitado durante o envio.
+
+### 29.3 Painel ADM: nova aba "Alterações de perfil"
+
+`src/components/ProfileChangesTab.tsx` lista as solicitações com filtro **Pendentes / Aprovadas / Rejeitadas**, mostra o **diff campo a campo (antes → depois)**, autor e data, e oferece **Aprovar** (aplica no perfil e recarrega o diretório) ou **Rejeitar** (pede motivo, arquiva, sem tocar no perfil). Botões visíveis apenas para Chefe ADM e Funcionário ADM.
+
+Aprovação é **atômica**: a solicitação é reivindicada com `status = pending` no `WHERE` (evita aprovação dupla em duas abas); se a escrita no perfil falhar, a solicitação volta para `pending` — o pedido nunca se perde.
+
+### 29.4 Banco
+
+Nova tabela **`public.profile_change_requests`** (id, user_id, user_uid, user_nome, requested_changes jsonb, previous_values jsonb, status, created_at, reviewed_at, reviewed_by, rejection_reason), 2 índices, RLS ligado e 3 policies. Migração versionada em `supabase/migrations/20261118_profile_change_requests.sql` (idempotente).
+
+### 29.5 Validação
+
+| Suíte | Resultado |
+|---|---|
+| `test-round25.mjs` (novo, regras e contrato) | **44/44** |
+| `test-round25-render.mjs` (novo, render real) | **10/10** |
+| `test-round25-integration.mjs` (novo, banco real) | auto-ignorado no sandbox (sem rede a `*.supabase.co`); rodar localmente |
+| `24` / `23` / `22` / `21` / `20` / `19` / `18` / `18-mobile` | 40 · 142 · 27 · 41 · 35 · 32 · 50 · 21 |
+| `17` / `16` / `14` / `13` / `12`s / `11` | 49 · 39 · 36 · 31 · 32+18+21 · 64 |
+| `tsc --noEmit` / `npm run build` | 0 erros / ok (6,12 s) |
