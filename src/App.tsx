@@ -25,7 +25,8 @@ import AIChatAssistant from "./components/AIChatAssistant.tsx";
 import BackToDashboardButton from "./components/BackToDashboardButton.tsx";
 import { resolverTelaInicial, resolverTelaDoPopState, destinoDoBotaoVoltar } from "./lib/navigation.ts";
 import type { ContextoAcoes, CamposEvento } from "./lib/voiceActions.ts";
-import { getSchoolBySlug, ARAUCARIA_SCHOOLS, SchoolProfile } from "./lib/schoolsData.ts";
+import { ARAUCARIA_SCHOOLS, SchoolProfile } from "./lib/schoolsData.ts";
+import { carregarEscolas } from "./lib/schoolProfilesService.ts";
 import { motion, AnimatePresence } from "motion/react";
 import { CheckCircle, AlertCircle, CheckCircle2, Info, X } from "lucide-react";
 import logoImg from "./assets/images/logo.jpg";
@@ -200,6 +201,25 @@ export default function App() {
       return "light";
     }
   });
+
+  /*
+    Informações das escolas (rodada 26).
+    A base é o catálogo estático; se o Chefe Administrador editou algo no
+    painel, o override salvo em `school_profiles` entra por cima. Falha de
+    leitura é silenciosa: o app continua com os dados do TCC.
+  */
+  useEffect(() => {
+    let cancelado = false;
+    void (async () => {
+      const { escolas } = await carregarEscolas();
+      if (!cancelado && Array.isArray(escolas) && escolas.length > 0) {
+        setSchoolsList(escolas);
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, []);
 
   useEffect(() => {
     document.title = "eloEscola — Portal de Informações e Oportunidades Escolares • Araucária & Curitiba";
@@ -2233,6 +2253,7 @@ export default function App() {
                     className="app-screen"
                   >
                     <SchoolsCatalog
+                      schools={schoolsList}
                       onSelectSchool={(slug) => navigateTo("schoolDetail", slug)}
                     />
                   </motion.div>
@@ -2247,7 +2268,11 @@ export default function App() {
                     className="app-screen"
                   >
                     <SchoolDetail
-                      school={getSchoolBySlug(selectedSchoolSlug) || ARAUCARIA_SCHOOLS[0]}
+                      school={
+                        schoolsList.find((e) => e.slug === selectedSchoolSlug) ||
+                        schoolsList[0] ||
+                        ARAUCARIA_SCHOOLS[0]
+                      }
                       currentUser={currentUser}
                       onBack={() => navigateTo("schools")}
                       onRecordParticipation={handleRecordParticipation}

@@ -1600,3 +1600,87 @@ Nova tabela **`public.profile_change_requests`** (id, user_id, user_uid, user_no
 | `24` / `23` / `22` / `21` / `20` / `19` / `18` / `18-mobile` | 40 · 142 · 27 · 41 · 35 · 32 · 50 · 21 |
 | `17` / `16` / `14` / `13` / `12`s / `11` | 49 · 39 · 36 · 31 · 32+18+21 · 64 |
 | `tsc --noEmit` / `npm run build` | 0 erros / ok (6,12 s) |
+
+---
+
+## 30. Rodada 26 — mural de eventos, links da IA e ficha da escola
+
+Três pedidos: (1) o mural de eventos do painel com o desenho de referência;
+(2) verificar a busca de links das sugestões da IA; (3) ver e editar o perfil
+da escola na área de contas escolares.
+
+### 30.1 Mural de eventos (aba Eventos do painel)
+
+- **Grade elástica**: `repeat(auto-fill, minmax(min(100%, 17.5rem), 1fr))` no lugar
+  de `grid-cols-1 md:2 lg:3 2xl:4`. Os cards passam a ocupar a largura
+  disponível (sem vazio à direita quando a lista é curta) e `min(100%, …)`
+  impede rolagem horizontal no celular.
+- Card no padrão de referência: imagem `h-32` com gradiente `from-black/70`,
+  **Gratuito** verde no canto superior esquerdo, **data sobre a imagem** com
+  ícone de calendário, **título em até 2 linhas com altura estável**,
+  **cidade** com `MapPin` (antes repetia o endereço completo), e a faixa
+  `Comunidade Escolar • Org: <escola>`.
+- Rodapé: **Ver** (cinza) + **Autorizações** (verde, `ShieldCheck`) à esquerda,
+  **Editar** (azul) + lixeira à direita; quem não pode editar vê o cadeado
+  "Criado por outro admin".
+- `city` vazio cai para a última parte do endereço (`cidadeDoEvento`);
+  organizador vem de `schoolName` → `schoolRole` → escola de `schoolId`
+  (`organizadorDoEvento`).
+
+### 30.2 Busca de links das sugestões da IA — o bug real
+
+A camada 1 (catálogo curado) comparava `entrada.padrao.test(titulo)` — **regex
+sem acento contra o título com acento**. "Olimpíada Brasileira de **Física**",
+"de **Astronomia**", "de **Informática**", "**História**" nunca casavam; sobrava
+a camada 2, a Instant Answer API do DuckDuckGo, que responde para quase nenhum
+termo. Resultado: quase todo evento caía em "nenhum link encontrado".
+
+Medição antes/depois com 11 títulos reais: **3 acertos → 11 acertos**.
+
+- `normalizar()` agora remove acento, pontuação e colapsa espaços.
+- `casarPadrao()` testa o padrão contra o título original **e** normalizado
+  (siglas entre parênteses como `(OBF)` também entram).
+- Camada 2 passou a **pontuar** os candidatos (`pontuarCandidato`) pela
+  semelhança entre as palavras do título e os pedaços do domínio, com bônus para
+  siglas curtas e para `.org/.edu/.gov.br`. Só aceita candidato com relevância
+  mínima — resultado irrelevante é pior que nenhum.
+- Quando não há link, o resultado traz **`termoBusca`** e a interface mostra
+  **"Procurar na web"** (uma busca no Google, nunca uma URL de evento
+  inventada). A regra herdada **"nunca inventar URL" continua valendo**.
+
+### 30.3 Contas escola: ver perfil e editar informações
+
+- Novo `src/lib/schoolProfilesService.ts`: `carregarEscolas`, `salvarPerfilEscola`
+  (upsert por `slug`), `mesclarPerfil` (campo vazio no banco **não** apaga o dado
+  estático), `paraEditavel` e as listas de campos do formulário.
+- Novo `src/components/SchoolProfileModal.tsx`: ficha completa (brasão, nome,
+  tipo, rede, NRE, endereço, CEP, bairro, cidade/UF, telefone, e-mail,
+  coordenadas, modalidades, destaques, infraestrutura, histórico, fonte) com
+  **modo edição** somente para o Chefe Administrador; listas editadas item a
+  item; rolagem no corpo com teto `max-h-[92dvh]` (sem scroll duplo).
+- Na ficha da conta escolar entraram os botões **Ver perfil** e **Editar**
+  (o segundo já abre no formulário).
+- A edição **chega ao aluno**: `App.tsx` carrega `carregarEscolas()` e passa a
+  lista mesclada para `SchoolsCatalog` e para o detalhe da escola.
+- Banco: tabela **`public.school_profiles`** (migração
+  `supabase/migrations/20261119_school_profiles.sql`, idempotente), 1 índice,
+  RLS ligado e 3 policies (leitura pública; escrita pela interface do painel).
+
+### 30.4 Validação
+
+| Suíte | Resultado |
+|---|---|
+| `test-round26.mjs` (novo) | **84/84** |
+| `test-round26-render.mjs` (novo, jsdom: leitura, edição, permissão) | **21/21** |
+| `25-render` / `25` / `24` / `23` / `22` | 10 · 44 · 40 · 142 · 27 |
+| `21` / `20` / `19` / `18`+`18-mobile` / `17` | 41 · 35 · 32 · 50+21 · 49 |
+| `16` / `14` / `13` / `12`+`12b`+`12c` / `11` | 39 · 36 · 31 · 32+18+21 · 64 |
+| `tsc --noEmit` / `npm run build` | 0 erros / ok |
+
+**Como verificar à mão:** painel → aba **Eventos** (cards com imagem, selo
+Gratuito, data sobre a imagem, cidade, faixa da escola e os quatro botões) →
+aba **Contas escolares** → **Ver perfil** (ficha só leitura) → **Editar** →
+trocar telefone → **Salvar informações** → abrir a aba **Escolas** do app do
+aluno e conferir o telefone novo. Na aba **Sugestões**, "Buscar links de
+inscrição" agora resolve as olimpíadas pelo catálogo e mostra **Procurar na
+web** quando não houver site oficial.

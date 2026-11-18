@@ -15,6 +15,7 @@ import {
   Cpu,
   AlertTriangle,
   Link as LinkIcon,
+  Search as SearchIcon,
 } from "lucide-react";
 import {
   fetchEventSuggestions,
@@ -122,7 +123,9 @@ export default function EventSuggestionsTab({
     try {
       const resultados: Record<number, ResultadoBuscaInscricao | null> = {};
       // Sequencial de propósito: respeitar os serviços de busca e não abrir 20
-      // conexões simultâneas em uma rede escolar.
+      // conexões simultâneas em uma rede escolar. O catálogo curado (rodada 26
+      // com comparação sem acento) resolve a maioria sem tocar na rede, então
+      // a espera real é curta.
       for (const sugestao of suggestions) {
         const existente = sugestao.website || sugestao.sourceUrl;
         if (existente) {
@@ -514,11 +517,32 @@ export default function EventSuggestionsTab({
 
                     const urlFinal = info?.url ?? urlDoCard;
                     if (!urlFinal) {
+                      /*
+                       * Rodada 26: quando a busca não acha o site oficial, NÃO
+                       * inventamos URL. Oferecemos uma BUSCA pronta (Google)
+                       * com o termo do evento — o Chefe confere e cola o link
+                       * correto no campo do evento.
+                       */
+                      const termo =
+                        info?.termoBusca ||
+                        [s.title, s.sourceName, s.city].filter(Boolean).join(" ");
                       return (
-                        <p className="mt-2 text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1">
-                          <LinkIcon size={10} className="shrink-0" />
-                          Sem link oficial encontrado — confirme na escola.
-                        </p>
+                        <div className="mt-2 space-y-1">
+                          <p className="text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1">
+                            <LinkIcon size={10} className="shrink-0" />
+                            Sem link oficial encontrado — confirme na escola.
+                          </p>
+                          <a
+                            href={`https://www.google.com/search?q=${encodeURIComponent(termo)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-700 dark:text-blue-300 hover:underline"
+                            title="Abrir uma busca na web em nova aba"
+                          >
+                            <SearchIcon size={10} className="shrink-0" />
+                            Procurar na web
+                          </a>
+                        </div>
                       );
                     }
 

@@ -4,15 +4,23 @@ import { Search, MapPin, Phone, Mail, GraduationCap, Building2, ArrowRight } fro
 
 interface SchoolsCatalogProps {
   onSelectSchool: (slug: string) => void;
+  /**
+   * Lista de escolas a exibir. Padrão: catálogo estático. O `App` passa a
+   * versão com as edições do painel (rodada 26).
+   */
+  schools?: SchoolProfile[];
 }
 
-export const SchoolsCatalog: React.FC<SchoolsCatalogProps> = ({ onSelectSchool }) => {
+export const SchoolsCatalog: React.FC<SchoolsCatalogProps> = ({
+  onSelectSchool,
+  schools = ARAUCARIA_SCHOOLS,
+}) => {
   const [search, setSearch] = useState("");
   const [selectedNeighborhood, setSelectedNeighborhood] = useState<string>("all");
 
   const neighborhoods = ["all", "Centro", "Costeira", "Fazenda Velha", "Guajuvira (Zona Rural)", "Cachoeira"];
 
-  const filteredSchools = ARAUCARIA_SCHOOLS.filter((school) => {
+  const filteredSchools = schools.filter((school) => {
     const matchesSearch =
       school.name.toLowerCase().includes(search.toLowerCase()) ||
       school.shortName.toLowerCase().includes(search.toLowerCase()) ||
