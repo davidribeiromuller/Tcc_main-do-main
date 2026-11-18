@@ -134,28 +134,55 @@ export async function updateUserDirectInSupabase(
   }
 
   try {
-    let query = supabase.from("users").update(payload).eq("id", userId).select();
-    const { data, error } = await query;
+    /*
+      Identificação do registro (rodada 25).
+      -------------------------------------------------------------------
+      Antes, quando o update por `id` falhava, o fallback usava o **e-mail
+      novo** como filtro. Como `email` não tem índice único na tabela
+      `users`, isso podia:
+        - não achar ninguém (o e-mail novo ainda não existe), e o
+          "Salvar Perfil" estourava; ou
+        - atualizar MAIS DE UMA linha, se o e-mail já existisse.
+      Agora o fallback usa `uid`, que é `UNIQUE NOT NULL` — sempre um registro.
+      O e-mail continua sendo um campo alterável, nunca um identificador.
+    */
+    const { data, error } = await supabase.from("users").update(payload).eq("id", userId).select();
 
     if (error) {
       console.warn("[usersService] Erro ao atualizar por ID:", error);
-      // Tentativa por email caso o id seja divergente
-      if (updateData.email) {
+
+      if (updateData.uid) {
         const { data: retryData, error: retryErr } = await supabase
           .from("users")
           .update(payload)
-          .ilike("email", updateData.email.trim().toLowerCase())
+          .eq("uid", updateData.uid)
           .select();
 
-        if (!retryErr && retryData && retryData.length > 0) {
+        if (!retryErr && retryData && retryData.length === 1) {
           return { user: mapSupabaseUserToUser(retryData[0]), error: null };
         }
+        if (retryErr) return { user: null, error: retryErr };
       }
+
       return { user: null, error };
     }
 
     if (data && data.length > 0) {
       return { user: mapSupabaseUserToUser(data[0]), error: null };
+    }
+
+    // Nenhuma linha pelo `id`: tenta pelo `uid` (único) antes de desistir.
+    if (updateData.uid) {
+      const { data: porUid, error: erroUid } = await supabase
+        .from("users")
+        .update(payload)
+        .eq("uid", updateData.uid)
+        .select();
+
+      if (!erroUid && porUid && porUid.length === 1) {
+        return { user: mapSupabaseUserToUser(porUid[0]), error: null };
+      }
+      if (erroUid) return { user: null, error: erroUid };
     }
 
     return { user: null, error: new Error("Usuário não encontrado no banco") };

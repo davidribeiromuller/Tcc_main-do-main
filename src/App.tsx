@@ -56,6 +56,13 @@ import { canAccessAdminPanel, isChefeAdmin } from "./lib/permissions.ts";
 import { saveUsersCache, readUsersCache } from "./lib/userCache.ts";
 import { isEventRetentionExpired } from "./lib/eventLifecycle.ts";
 import { confirmarPresenca } from "./lib/participationsService.ts";
+import {
+  calcularAlteracoes,
+  separarAlteracoes,
+  salvarCamposLivres,
+  criarSolicitacaoDePerfil,
+  ROTULOS_CAMPOS,
+} from "./lib/profileChangeService.ts";
 
 export default function App() {
   const [resetTokenParam, setResetTokenParam] = useState<string | null>(() => {
@@ -1467,51 +1474,94 @@ export default function App() {
   };
 
   // Update own user profile
-  const handleUpdateProfile = async (profileData: any) => {
+  /**
+   * Salvar perfil (rodada 25).
+   * -------------------------------------------------------------------------
+   * Duas vias, definidas com o usuário:
+   *
+   *  - **foto de perfil** e **telefone para contato** gravam na hora;
+   *  - **nome, e-mail, CPF, data de nascimento, gênero, instituição e
+   *    cargo** viram uma solicitação que só é aplicada depois que um
+   *    Funcionário ADM aprova no painel.
+   *
+   * Antes esta função chamava `PUT /api/users/profile` — backend Express que
+   * não existe no GitHub Pages. Sem token, `res` ficava `null`, caía no catch
+   * e revertia o estado: "Falha ao salvar perfil. O estado anterior foi
+   * restaurado". Nada chegava ao banco.
+   *
+   * Agora o caminho principal é o Supabase direto (por `uid`, que é único).
+   * O backend local continua como reserva para quando estiver disponível.
+   */
+  const handleUpdateProfile = async (profileData: Partial<Record<string, any>>) => {
     if (!currentUser) return;
-    const previousUser = { ...currentUser };
 
-    try {
-      const token = await getAuthToken();
-      let res: Response | null = null;
-      if (token) {
-        res = await resilientFetch("/api/users/profile", {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(profileData),
-          retries: 2,
-          retryDelay: 600,
-        });
+    const alteracoes = calcularAlteracoes(currentUser, profileData);
+    if (alteracoes.length === 0) {
+      showToast("Nenhuma alteração para salvar.", "info");
+      return;
+    }
+
+    const { livres, sujeitas } = separarAlteracoes(alteracoes);
+    let usuarioAtualizado: User | null = null;
+    const falhas: string[] = [];
+
+    // 1. Campos livres — foto e telefone — aplicam imediatamente.
+    if (livres.length > 0) {
+      const { user, error } = await salvarCamposLivres(currentUser.id, livres);
+      if (!error && user) {
+        usuarioAtualizado = { ...user, provider: currentUser.provider };
+      } else {
+        console.warn("[handleUpdateProfile] Falha ao salvar campos livres:", error);
+        falhas.push(
+          `Não foi possível salvar ${livres.map((a) => ROTULOS_CAMPOS[a.campo]).join(", ").toLowerCase()}.`
+        );
       }
+    }
 
-      if (res && res.ok) {
-        const data = await res.json();
-        const updatedUser = { ...data.user, provider: currentUser.provider };
-        setCurrentUser(updatedUser);
-        localStorage.setItem("local_user", JSON.stringify(updatedUser));
-        if (updatedUser?.isAdmin) {
-          await loadAllUsers(token || "");
-        }
-        showToast("Perfil atualizado com sucesso!", "success");
-        return;
+    // 2. Campos que exigem aprovação — viram solicitação.
+    let solicitacaoCriada = false;
+    if (sujeitas.length > 0) {
+      const { solicitacao, error } = await criarSolicitacaoDePerfil({
+        user: currentUser,
+        alteracoes: sujeitas,
+      });
+      if (!error && solicitacao) {
+        solicitacaoCriada = true;
+      } else {
+        console.warn("[handleUpdateProfile] Falha ao criar solicitação:", error);
+        falhas.push("Não foi possível registrar a solicitação de alteração.");
       }
+    }
 
-      // Se falhou no backend, restaurar o estado anterior imediatamente
-      setCurrentUser(previousUser);
-      localStorage.setItem("local_user", JSON.stringify(previousUser));
-      const errData = res ? await res.json().catch(() => ({})) : null;
-      showToast(errData?.error || "Não foi possível salvar as alterações do perfil. Estado anterior restaurado.", "error");
-      throw new Error(errData?.error || "Falha ao atualizar perfil");
-    } catch (error: any) {
-      console.error("Error updating profile:", error);
-      // Garante reversão para manter consistência com o banco
-      setCurrentUser(previousUser);
-      localStorage.setItem("local_user", JSON.stringify(previousUser));
-      showToast("Falha ao salvar perfil. O estado anterior foi restaurado.", "error");
-      throw error;
+    // 3. Reflete no estado local só o que realmente mudou.
+    if (usuarioAtualizado) {
+      setCurrentUser(usuarioAtualizado);
+      try {
+        localStorage.setItem("local_user", JSON.stringify(usuarioAtualizado));
+      } catch {}
+      if (canAccessAdminPanel(usuarioAtualizado)) {
+        await loadAllUsers();
+      }
+    }
+
+    // 4. Feedback honesto: uma mensagem por via, nunca "tudo salvo" pela metade.
+    if (falhas.length > 0) {
+      showToast(falhas.join(" "), "error");
+      throw new Error(falhas.join(" "));
+    }
+
+    if (solicitacaoCriada && livres.length > 0) {
+      showToast(
+        "Foto e telefone atualizados. As demais alterações foram enviadas para aprovação de um ADM.",
+        "success"
+      );
+    } else if (solicitacaoCriada) {
+      showToast(
+        "Alterações enviadas para aprovação de um ADM. Seu perfil será atualizado após a confirmação.",
+        "success"
+      );
+    } else {
+      showToast("Perfil atualizado com sucesso!", "success");
     }
   };
 
