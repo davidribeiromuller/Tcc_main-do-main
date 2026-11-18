@@ -1510,3 +1510,43 @@ O padrão aprovado no painel (rodadas 21/22) virou regra global. Regra de ouro, 
 | `18` / `17` / `16` / `14` / `13` / `12`s / `11` / `11b` | 50 · 49 · 39 · 36 · 31 · 32+18+21 · 64 · 5 |
 | `tsc --noEmit` / `npm run build` | 0 erros / ok (6,41 s) |
 | Dev server: todos os 18 componentes | compilam (HTTP 200) |
+
+---
+
+## 28. Rodada 24 — carrossel de escolas com rolagem contínua
+
+**Pedido:** *"reajuste a rolagem automatica, para um pouco mais rapida, e ela nao vai de escola em escola, e uma barra continua, mas pode ser controlada de escola em escola pela flechinha, apos 2-3 segundos faca voltar a rolar automaticamente"*.
+
+### 28.1 Como era
+
+`setInterval` de **4,5 s** trocando `currentIndex` → o trilho pulava de card em card, com `scroll-behavior: smooth` e `snap-x snap-mandatory` reforçando o salto. Resultado visual: parado, salto, parado, salto.
+
+### 28.2 Como ficou
+
+| Aspecto | Antes | Depois |
+|---|---|---|
+| Movimento | `setInterval` 4,5 s por card | **`requestAnimationFrame` contínuo** |
+| Velocidade | 1 card a cada 4,5 s (com salto) | **88 px/s ≈ 4 s por card, sem salto** |
+| Snap | `snap-x snap-mandatory` | removido (+ `scrollSnapType: none` inline) |
+| Flechas | trocavam `currentIndex` | rolagem suave de **exatamente 1 card** |
+| Retomada após interação | 1,2 s (só no `touchend`) | **2,5 s**, para gesto, roda, teclado e flecha |
+| Fim da lista | voltava ao índice 0 (pulo visível) | lista duplicada + correção de `scrollLeft` (**laço invisível**) |
+| Preferência do sistema | ignorada | respeita `prefers-reduced-motion` |
+
+### 28.3 Detalhes técnicos
+
+- **Delta limitado a 50 ms** por frame: voltar de uma aba em segundo plano não causa salto de centenas de pixels.
+- **`acumuladoRef`**: acumula a fração de pixel (a 60 fps o passo é ~1,47 px) para o movimento não "engasgar".
+- **Laço**: o trilho renderiza a lista **duas vezes**; ao passar da largura de uma volta, `scrollLeft` é subtraído dessa largura — o conteúdo é idêntico, então não há salto perceptível.
+- **Pausa por hover** continua (desktop); ao sair do ponteiro, o movimento volta.
+- **`scrollProgramaticoRef`** impede que o "empurrão" das flechas conte como gesto do usuário e pause o loop por engano.
+- **Indicadores** acompanham o trilho via listener de `scroll` com `requestAnimationFrame` (sem re-render a cada frame).
+
+### 28.4 Validação
+
+| Suíte | Resultado |
+|---|---|
+| `test-round24.mjs` (novo) | **40/40** |
+| `23` / `22` / `21` / `20` / `19` / `18` / `18-mobile` | 142 · 27 · 41 · 35 · 32 · 50 · 21 |
+| `17` / `16` / `14` / `13` / `12`s / `11` | 49 · 39 · 36 · 31 · 32+18+21 · 64 |
+| `tsc --noEmit` / `npm run build` | 0 erros / ok (5,29 s) |

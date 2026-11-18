@@ -66,9 +66,16 @@ console.log("\n=== 2. Rolagem nas telas ===");
 console.log("\n=== 3. Carrossel e faixas horizontais ===");
 {
   const carrossel = readFileSync("./src/components/SchoolCarousel.tsx", "utf8");
+  /*
+    Rodada 24: o carrossel passou a ter rolagem CONTÍNUA (rAF) e retomada
+    automática em 2,5 s. O que importa aqui (rodada 18) continua valendo:
+    o gesto não pode "soltar" o autoplay no meio do arrasto e o trilho
+    precisa aceitar pan horizontal.
+  */
   ok("carrossel não solta o autoplay no meio do gesto",
-    /setTimeout\(\(\) => setIsPaused\(false\), 1200\)/.test(carrossel));
-  ok("trilho do carrossel usa .scroll-x-snap", /scroll-x-snap/.test(carrossel));
+    /RETOMADA_MS\s*=\s*\d+/.test(carrossel) && /pausarTemporariamente/.test(carrossel));
+  ok("trilho do carrossel rola na horizontal",
+    /overflow-x-auto/.test(carrossel) && /touch-scroll|scroll-x-snap/.test(carrossel));
   ok("filtros do Feed com snap horizontal", /scroll-x-snap/.test(feed));
   ok("agenda pessoal com snap horizontal", /scroll-x-snap/.test(feed));
   ok("filtros do painel com snap horizontal", /scroll-x-snap/.test(admin));
