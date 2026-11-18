@@ -14,10 +14,22 @@
  *    (OBMEP → obmep.org.br, OBI → obi.olimpiada.ciencia... etc). É o caminho
  *    mais confiável: nenhuma chamada de rede, nenhum palpite.
  * 2. **Busca na internet** — quando o catálogo não cobre o caso, consulta a
- *    API pública do DuckDuckGo (sem chave) e escolhe o primeiro resultado cujo
- *    domínio parece oficial.
- * 3. **Fallback** — se nada for encontrado, devolve `null` e a interface mostra
- *    "inscrições: consulte a escola", em vez de um link quebrado.
+ *    API pública do DuckDuckGo (sem chave) e **pontua** os resultados pela
+ *    semelhança com o título; só aceita candidato com relevância mínima.
+ * 3. **Fallback honesto** — se nada for encontrado, devolve `url: null` e um
+ *    `termoBusca` com a consulta pronta. A interface oferece "Procurar na web"
+ *    (uma BUSCA, nunca uma URL de evento inventada) em vez de um link falso.
+ *
+ * ## Correção da rodada 26 (por que quase nada era encontrado)
+ *
+ * A comparação do catálogo era `entrada.padrao.test(titulo)` — regex sem acento
+ * contra o título COM acento. Resultado: "Olimpíada Brasileira de **Física**"
+ * nunca casava com `/olimpiada brasileira de fisica/`, e o mesmo acontecia com
+ * Astronomia, Informática, História... Sobravam pouquíssimos acertos e o resto
+ * caía na API do DuckDuckGo, que responde para quase nenhum termo. Agora o
+ * título é **normalizado** (sem acento, minúsculo, espaços colapsados) antes de
+ * qualquer teste, e as abreviações (OBA, OBF, OBI, ONHB, FEBRACE...) são
+ * reconhecidas mesmo dentro de parênteses.
  *
  * ## Regra de segurança
  *
@@ -159,12 +171,53 @@ export interface ResultadoBuscaInscricao {
   organizador: string | null;
   /** De onde veio: catálogo curado, busca na web, ou nada. */
   fonte: "catalogo" | "web" | "nenhuma";
+  /**
+   * Consulta pronta para o botão "Procurar na web". Preenchido sempre que não
+   * houve link — é uma BUSCA, nunca uma URL de evento inventada.
+   */
+  termoBusca?: string;
   /** Explicação para o painel administrativo. */
   observacao: string;
 }
 
 function normalizar(texto: string): string {
-  return (texto || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return (texto || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Testa um padrão do catálogo contra o título.
+ *
+ * Roda contra o título original E contra o título normalizado — assim padrões
+ * escritos com ou sem acento funcionam, e a abreviação entre parênteses
+ * ("... (OBF)") também é encontrada.
+ */
+function casarPadrao(padrao: RegExp, titulo: string): boolean {
+  const original = (titulo || "").trim();
+  if (!original) return false;
+  const normalizado = normalizar(original);
+  // `padrao` é sempre sem acento; normalizamos também a fonte da regex.
+  const fonte = padrao.source.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const flags = padrao.flags.includes("i") ? padrao.flags : `${padrao.flags}i`;
+  const alvo = new RegExp(fonte, flags);
+  return alvo.test(original) || alvo.test(normalizado) || alvo.test(` ${normalizado} `);
+}
+
+/** Monta a consulta de busca mostrada como "Procurar na web". */
+export function termoDeBusca(
+  titulo: string,
+  opcoes: { cidade?: string; organizador?: string } = {}
+): string {
+  return [titulo, opcoes.organizador, opcoes.cidade, "inscrição site oficial"]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
@@ -218,9 +271,9 @@ export async function buscarLinkInscricao(
   const doCache = cache.get(chave);
   if (doCache) return doCache;
 
-  // ---- 1. Catálogo curado ----
+  // ---- 1. Catálogo curado (comparação tolerante a acento e caixa) ----
   for (const entrada of URLS_OFICIAIS) {
-    if (entrada.padrao.test(titulo)) {
+    if (casarPadrao(entrada.padrao, titulo)) {
       const resultado: ResultadoBuscaInscricao = {
         url: entrada.url,
         organizador: entrada.organizador,
@@ -238,6 +291,53 @@ export async function buscarLinkInscricao(
   return daWeb;
 }
 
+/** Siglas e palavras que não ajudam a identificar o site oficial. */
+const PALAVRAS_VAZIAS = new Set([
+  "de", "da", "do", "das", "dos", "e", "a", "o", "as", "os", "para", "em",
+  "com", "na", "no", "nas", "nos", "brasileira", "brasileiro", "nacional",
+  "olimpiada", "olimpiadas", "feira", "festival", "mostra", "semana",
+  "inscricao", "inscricoes", "site", "oficial", "escolar", "escolas",
+]);
+
+/**
+ * Pontua um resultado de busca pela semelhança com o título/organizador.
+ *
+ * Sem isso, a camada 2 pegava o primeiro item "confiável" de `RelatedTopics` —
+ * que muitas vezes é um assunto vizinho, não o site do evento. A pontuação
+ * olha as palavras significativas do título (siglas como OBA/OBF valem muito)
+ * e os pedaços do domínio candidato.
+ */
+function pontuarCandidato(url: string, titulo: string, organizador?: string): number {
+  let host = "";
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return -1;
+  }
+
+  const tokens = normalizar(`${titulo} ${organizador || ""}`)
+    .split(" ")
+    .filter((t) => t.length >= 3 && !PALAVRAS_VAZIAS.has(t));
+
+  if (tokens.length === 0) return 0;
+
+  const pedacosDoHost = host.split(/[.-]/).filter(Boolean);
+  let pontos = 0;
+
+  for (const token of tokens) {
+    if (pedacosDoHost.some((p) => p === token)) {
+      // Sigla curta batendo com o domínio é o sinal mais forte (oba -> oba.org.br).
+      pontos += token.length <= 5 ? 4 : 3;
+    } else if (pedacosDoHost.some((p) => p.includes(token) || token.includes(p))) {
+      pontos += 1;
+    }
+  }
+
+  // Domínios institucionais ganham um empurrão leve.
+  if (/\.(org|edu|gov)\.br$|\b(org|edu|gov)\.br$/.test(host)) pontos += 1;
+  return pontos;
+}
+
 /**
  * Consulta a API pública do DuckDuckGo (Instant Answer) — sem chave.
  *
@@ -250,16 +350,14 @@ async function buscarNaWeb(
   titulo: string,
   opcoes: { cidade?: string; organizador?: string; timeoutMs?: number }
 ): Promise<ResultadoBuscaInscricao> {
-  const termo = [titulo, opcoes.organizador, opcoes.cidade, "inscrição"]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
+  const termo = termoDeBusca(titulo, opcoes);
 
   const semResultado: ResultadoBuscaInscricao = {
     url: null,
     organizador: null,
     fonte: "nenhuma",
     observacao: "Nenhum site oficial encontrado automaticamente — confirme na escola.",
+    termoBusca: termo,
   };
 
   try {
@@ -293,8 +391,17 @@ async function buscarNaWeb(
       }
     }
 
-    const escolhida = candidatos.find(urlConfiavel);
-    if (!escolhida) return semResultado;
+    // Filtra o que é confiável e ordena pela semelhança com o título.
+    const pontuados = candidatos
+      .filter(urlConfiavel)
+      .map((url) => ({ url, pontos: pontuarCandidato(url, titulo, opcoes.organizador) }))
+      .sort((a, b) => b.pontos - a.pontos);
+
+    // Exige um mínimo de relevância: resultado irrelevante é pior que nenhum,
+    // porque manda o aluno para o site errado.
+    const melhor = pontuados[0];
+    if (!melhor || melhor.pontos < 2) return semResultado;
+    const escolhida = melhor.url;
 
     return {
       url: escolhida,

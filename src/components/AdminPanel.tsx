@@ -67,6 +67,9 @@ import {
 } from "../lib/deletedEventsService";
 import EventSuggestionsTab from "./EventSuggestionsTab";
 import ProfileChangesTab from "./ProfileChangesTab";
+import SchoolProfileModal from "./SchoolProfileModal.tsx";
+import { carregarEscolas } from "../lib/schoolProfilesService.ts";
+import type { SchoolProfile } from "../lib/schoolsData.ts";
 import {
   listarContasEscolares,
   criarContaEscolar,
@@ -157,6 +160,35 @@ export default function AdminPanel({
 }: AdminPanelProps) {
   const isChefe = isChefeAdmin(currentUser);
   const isFuncionario = isFuncionarioAdmin(currentUser);
+
+  /**
+   * Cidade mostrada no card do mural (rodada 26).
+   *
+   * O card antigo repetia `ev.location` (o endereço completo), o que quebrava
+   * o layout com duas linhas. Aqui preferimos `city`; quando ela não existe,
+   * tentamos o fim do endereço ("Rua X, 100 - Centro, Araucária/PR") e, em
+   * último caso, a própria localização.
+   */
+  const cidadeDoEvento = (ev: Event): string => {
+    if (ev.city) return ev.city;
+    const partes = String(ev.location || "")
+      .split(/[-,/]/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    const ultima = partes[partes.length - 1];
+    return ultima || ev.location || "Local não informado";
+  };
+
+  /** Quem organiza: escola do evento, papel do criador ou a escola do próprio ADM. */
+  const organizadorDoEvento = (ev: Event): string => {
+    if (ev.schoolName) return ev.schoolName;
+    if (ev.creatorRole) return `${ev.creatorRole}`;
+    if (ev.schoolId) {
+      const escola = ARAUCARIA_SCHOOLS.find((e) => e.id === ev.schoolId);
+      if (escola) return escola.shortName;
+    }
+    return "Diretoria Regional";
+  };
   const currentAdminRole = getAdminRoleType(currentUser);
 
   const notifyAdmin = (message: string, type: "error" | "warning" | "success" = "warning") => {
@@ -185,6 +217,16 @@ export default function AdminPanel({
   /** Salvando a nova senha. */
   const [salvandoSenha, setSalvandoSenha] = useState(false);
   const [userForMobileActions, setUserForMobileActions] = useState<User | null>(null);
+
+  /**
+   * Ficha institucional aberta (rodada 26).
+   * Guarda o SLUG porque as informações da escola vêm da lista `escolasPerfil`
+   * (estático + edições do banco), e não da conta de acesso.
+   */
+  const [escolaPerfilSlug, setEscolaPerfilSlug] = useState<string | null>(null);
+  /** Abre a ficha direto no formulário (botão "Editar"). */
+  const [escolaPerfilEdicao, setEscolaPerfilEdicao] = useState(false);
+  const [escolasPerfil, setEscolasPerfil] = useState<SchoolProfile[]>(ARAUCARIA_SCHOOLS);
   const [searchTerm, setSearchTerm] = useState("");
   const [eventSearchTerm, setEventSearchTerm] = useState("");
   const [viewingAuthEvent, setViewingAuthEvent] = useState<Event | null>(null);
@@ -810,6 +852,40 @@ export default function AdminPanel({
       loadInstitutionalAccounts();
     }
   }, [activeTab, isChefe]);
+
+  /**
+   * Carrega as informações das escolas (rodada 26): base estática do TCC +
+   * edições salvas em `school_profiles`. Se a leitura falhar, a lista estática
+   * continua valendo — a ficha nunca fica vazia.
+   */
+  const recarregarPerfisEscolas = async () => {
+    const { escolas } = await carregarEscolas();
+    setEscolasPerfil(escolas);
+  };
+
+  React.useEffect(() => {
+    if (activeTab === "schools") void recarregarPerfisEscolas();
+  }, [activeTab]);
+
+  /** Slug da escola de uma conta (o banco guarda slug; a UI mostra o nome). */
+  const slugDaConta = (acc: SchoolAccount): string => {
+    if (acc.escolaSlug) return acc.escolaSlug;
+    const porId = ARAUCARIA_SCHOOLS.find((e) => e.id === acc.escolaId);
+    return porId?.slug || "";
+  };
+
+  /** Abre a ficha da escola (Ver perfil). */
+  const handleAbrirPerfilEscola = (acc: SchoolAccount, editar = false) => {
+    const slug = slugDaConta(acc);
+    if (!slug) {
+      onShowToast?.("Esta conta não está vinculada a uma escola do catálogo.", "warning");
+      return;
+    }
+    setEscolaPerfilEdicao(editar && isChefe);
+    setEscolaPerfilSlug(slug);
+  };
+
+  const escolaPerfilAberta = escolasPerfil.find((e) => e.slug === escolaPerfilSlug) || null;
 
   /**
    * Lê as contas escolares da tabela própria (`school_accounts`).
@@ -2175,7 +2251,22 @@ export default function AdminPanel({
                 )}
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
+              <>
+              {/*
+                Mural de eventos do painel (rodada 26).
+                ------------------------------------------------------------
+                Antes: `grid-cols-1 md:2 lg:3 2xl:4` espremia os cards em
+                telas largas e deixava um vazio enorme à direita quando a
+                lista era curta. Agora as colunas são ELÁSTICAS
+                (`auto-fill` + `minmax`): aproveitam toda a largura, mantêm
+                um card confortável e nunca criam espaços mortos.
+              */}
+              {/* `min(100%, 17.5rem)` limita a coluna à largura disponível:
+                  nada de rolagem horizontal no celular. */}
+              <div
+                className="grid gap-3.5 sm:gap-4"
+                style={{ gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 17.5rem), 1fr))" }}
+              >
               {filteredEvents.length === 0 ? (
                 <div className="col-span-full flex flex-col items-center justify-center py-16 text-center text-slate-400 bg-white dark:bg-brand-card-dark rounded-3xl border border-dashed border-slate-300 dark:border-white/10 p-8">
                   <Calendar size={48} className="text-slate-300 dark:text-slate-600 mb-3" />
@@ -2204,10 +2295,10 @@ export default function AdminPanel({
                   return (
                     <div
                       key={ev.id}
-                      className="bg-white dark:bg-brand-card-dark rounded-2xl border border-brand-primary/15 dark:border-white/10 shadow-sm hover:shadow-md transition-all flex flex-col justify-between overflow-hidden group"
+                      className="bg-white dark:bg-brand-card-dark rounded-2xl border border-brand-primary/15 dark:border-white/10 shadow-sm hover:shadow-md hover:border-brand-primary/40 transition-all flex flex-col overflow-hidden group h-full"
                     >
                       {/* Event Image */}
-                      <div className="relative h-36 w-full bg-slate-100 dark:bg-black/30 overflow-hidden">
+                      <div className="relative h-32 w-full bg-slate-100 dark:bg-black/30 overflow-hidden shrink-0">
                         <img
                           src={
                             ev.image ||
@@ -2253,13 +2344,18 @@ export default function AdminPanel({
                       {/* Event Body */}
                       <div className="p-4 flex-1 flex flex-col justify-between gap-3">
                         <div>
-                          <h4 className="font-bold text-sm text-slate-900 dark:text-white line-clamp-1">
+                          <h4
+                            className="font-bold text-sm text-slate-900 dark:text-white line-clamp-2 leading-snug min-h-[2.5em]"
+                            title={ev.title}
+                          >
                             {ev.title}
                           </h4>
 
+                          {/* Cidade (não o endereço completo): a faixa de baixo
+                              já diz a escola e o organizador. */}
                           <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 mt-1">
                             <MapPin size={13} className="text-brand-accent dark:text-brand-primary shrink-0" />
-                            <span className="truncate">{ev.location}</span>
+                            <span className="truncate">{cidadeDoEvento(ev)}</span>
                           </div>
 
                           {ev.requirements && (
@@ -2267,6 +2363,19 @@ export default function AdminPanel({
                               {ev.requirements}
                             </p>
                           )}
+
+                          {/* Faixa de metadados (design de referência): origem do
+                              evento + organizador. */}
+                          <div className="mt-2 flex items-center gap-1.5 text-[10px] font-semibold text-slate-600 dark:text-slate-300 bg-slate-100/80 dark:bg-black/25 rounded-lg px-2 py-1.5">
+                            <Building2 size={11} className="shrink-0 text-slate-500 dark:text-slate-400" />
+                            <span className="shrink-0">
+                              {ev.isSchool ? "Comunidade Escolar" : "Aberto ao público"}
+                            </span>
+                            <span className="text-slate-400 dark:text-slate-500">•</span>
+                            <span className="truncate" title={`Org: ${organizadorDoEvento(ev)}`}>
+                              Org: {organizadorDoEvento(ev)}
+                            </span>
+                          </div>
                         </div>
 
                         {/* Action Buttons */}
@@ -2327,6 +2436,7 @@ export default function AdminPanel({
                 })
               )}
             </div>
+              </>
           )}
           </>
         )}
@@ -2692,6 +2802,27 @@ export default function AdminPanel({
                       </div>
 
                       <div className="mt-auto flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex-wrap">
+                        {/* Rodada 26: ver e corrigir as informações da escola. */}
+                        <button
+                          type="button"
+                          onClick={() => handleAbrirPerfilEscola(acc)}
+                          title="Ver perfil da escola"
+                          className="px-2.5 py-1 text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg transition cursor-pointer flex items-center gap-1"
+                        >
+                          <Eye size={12} />
+                          <span>Ver perfil</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleAbrirPerfilEscola(acc, true)}
+                          title="Editar informações da escola"
+                          className="px-2.5 py-1 text-xs font-semibold bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 rounded-lg transition cursor-pointer flex items-center gap-1"
+                        >
+                          <Edit3 size={12} />
+                          <span>Editar</span>
+                        </button>
+
                         <button
                           type="button"
                           onClick={() => handleVerifySchoolAccount(acc, verificada ? "revoked" : "verified")}
@@ -2744,6 +2875,27 @@ export default function AdminPanel({
           </div>
         )}
       </div>
+
+      {/* MODAL INSTITUCIONAL: ficha da escola — ver perfil e editar (rodada 26) */}
+      <AnimatePresence>
+        {escolaPerfilAberta && (
+          <SchoolProfileModal
+            escola={escolaPerfilAberta}
+            podeEditar={isChefe}
+            autor={currentUser?.nome || "ADM Chefe"}
+            iniciarEmEdicao={escolaPerfilEdicao}
+            onClose={() => {
+              setEscolaPerfilSlug(null);
+              setEscolaPerfilEdicao(false);
+            }}
+            onSalvo={async () => {
+              await recarregarPerfisEscolas();
+              onShowToast?.("Informações da escola salvas.", "success");
+            }}
+            onShowToast={onShowToast}
+          />
+        )}
+      </AnimatePresence>
 
       {/* MODAL INSTITUCIONAL: Criar conta de acesso de uma escola (exclusivo Chefe) */}
       <AnimatePresence>
