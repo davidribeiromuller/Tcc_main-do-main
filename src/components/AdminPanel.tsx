@@ -204,6 +204,15 @@ export default function AdminPanel({
     }
     return "table";
   });
+  /**
+   * Visão do MURAL de eventos.
+   *
+   * Estado próprio (rodada 26): antes o mural reaproveitava o `viewMode` da
+   * lista de usuários, então quem estava em "Tabela" no diretório via a agenda
+   * em tabela e NUNCA chegava ao card escuro. Agora o mural abre sempre em
+   * cartões — que é o design pedido — e o Chefe pode alternar para tabela.
+   */
+  const [eventViewMode, setEventViewMode] = useState<"table" | "cards">("cards");
   const [filterRole, setFilterRole] = useState<"all" | "aluno" | "funcionario" | "chefe" | "ativos" | "bloqueados">("all");
   const [userToViewDetails, setUserToViewDetails] = useState<User | null>(null);
   /** Senha visível na ficha do usuário (admin decide revelar). */
@@ -2111,7 +2120,37 @@ export default function AdminPanel({
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                {/* Alternador próprio do mural: cartões (padrão) ou tabela. */}
+                <div className="flex items-center gap-1 bg-white dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setEventViewMode("cards")}
+                    title="Mural em cartões (padrão)"
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition ${
+                      eventViewMode === "cards"
+                        ? "bg-blue-600 text-white shadow-xs"
+                        : "text-slate-600 dark:text-slate-300"
+                    }`}
+                  >
+                    <LayoutGrid size={13} />
+                    <span>Cartões</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEventViewMode("table")}
+                    title="Lista em tabela"
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition ${
+                      eventViewMode === "table"
+                        ? "bg-blue-600 text-white shadow-xs"
+                        : "text-slate-600 dark:text-slate-300"
+                    }`}
+                  >
+                    <TableIcon size={13} />
+                    <span>Tabela</span>
+                  </button>
+                </div>
+
                 <button
                   type="button"
                   onClick={() => setEventViewFilter("active")}
@@ -2188,22 +2227,22 @@ export default function AdminPanel({
                       return (
                         <div
                           key={dEv.id}
-                          className="bg-white dark:bg-brand-card-dark rounded-2xl border border-slate-200 dark:border-slate-800 p-4 flex flex-col justify-between shadow-xs opacity-90 hover:opacity-100 transition"
+                          className="bg-slate-900 dark:bg-[#12161d] rounded-2xl border border-slate-700/60 dark:border-white/10 p-4 flex flex-col justify-between shadow-md text-white opacity-95 hover:opacity-100 hover:border-slate-500/70 transition"
                         >
                           <div>
                             <div className="flex items-center justify-between mb-2">
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-white/5">
                                 {dEv.deletionReason === "auto_retention_3d"
                                   ? "Excluído (retenção 3 dias)"
                                   : "Excluído manualmente"}
                               </span>
                               <span className="text-[11px] font-mono text-slate-400">{dataTexto}</span>
                             </div>
-                            <h4 className="text-sm font-serif font-bold text-slate-900 dark:text-white leading-snug">
+                            <h4 className="text-sm font-bold text-white leading-snug line-clamp-1">
                               {dEv.title}
                             </h4>
-                            <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
-                              <MapPin size={12} className="text-slate-400 shrink-0" />
+                            <p className="text-xs text-slate-300 mt-1 flex items-center gap-1">
+                              <MapPin size={12} className="text-emerald-400 shrink-0" />
                               <span className="truncate">{localTexto}</span>
                             </p>
                             <p className="text-[10px] text-slate-400 mt-2">
@@ -2214,8 +2253,8 @@ export default function AdminPanel({
                             </p>
                           </div>
 
-                          <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
-                            <span className="text-[10px] text-slate-500 font-semibold">
+                          <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between gap-2">
+                            <span className="text-[10px] text-slate-400 font-semibold">
                               Snapshot preservado
                             </span>
                             {isChefe && (
@@ -2285,6 +2324,86 @@ export default function AdminPanel({
                     <span>Cadastrar Novo Evento Agora</span>
                   </button>
                 </div>
+              ) : eventViewMode === "table" ? (
+                /* Visão de tabela do mural (opcional; o padrão é cartões). */
+                <div className="col-span-full bg-white dark:bg-brand-card-dark rounded-2xl border border-slate-200 dark:border-white/10 overflow-hidden">
+                  <div className="admin-table-scroll">
+                    <table className="admin-table text-left text-xs">
+                      <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-900">
+                        <tr className="border-b border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 font-semibold">
+                          <th className="py-3.5 px-4 bg-slate-100 dark:bg-slate-900">Evento</th>
+                          <th className="py-3.5 px-4 bg-slate-100 dark:bg-slate-900">Data</th>
+                          <th className="py-3.5 px-4 bg-slate-100 dark:bg-slate-900">Cidade</th>
+                          <th className="py-3.5 px-4 bg-slate-100 dark:bg-slate-900">Valor</th>
+                          <th className="py-3.5 px-4 bg-slate-100 dark:bg-slate-900 text-right">Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                        {filteredEvents.map((ev) => {
+                          const isMyEvent =
+                            ev.creatorId && currentUser?.id ? ev.creatorId === currentUser.id : false;
+                          const canModifyThisEvent = isChefe || (isFuncionario && isMyEvent);
+                          return (
+                            <tr key={ev.id} className="hover:bg-slate-50 dark:hover:bg-white/5">
+                              <td className="py-3 px-4 font-semibold text-slate-800 dark:text-slate-100">
+                                {ev.title}
+                              </td>
+                              <td className="py-3 px-4 text-slate-600 dark:text-slate-300 whitespace-nowrap">
+                                {ev.day}/{String((ev.month ?? 0) + 1).padStart(2, "0")}/{ev.year} •{" "}
+                                {ev.time || "14:00"}
+                              </td>
+                              <td className="py-3 px-4 text-slate-600 dark:text-slate-300">
+                                {cidadeDoEvento(ev)}
+                              </td>
+                              <td className="py-3 px-4 text-slate-600 dark:text-slate-300 whitespace-nowrap">
+                                {ev.isPaid ? (ev.price ? `R$ ${ev.price}` : "Pago") : "Gratuito"}
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {onSelectEvent && (
+                                    <button
+                                      type="button"
+                                      onClick={() => onSelectEvent(ev)}
+                                      className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/15 text-slate-700 dark:text-slate-200 text-[11px] font-semibold cursor-pointer"
+                                    >
+                                      Ver
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => setViewingAuthEvent(ev)}
+                                    className="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 text-[11px] font-semibold cursor-pointer"
+                                  >
+                                    Autorizações
+                                  </button>
+                                  {canModifyThisEvent && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditEventModal(ev)}
+                                        className="px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 text-[11px] font-semibold cursor-pointer"
+                                      >
+                                        Editar
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEventToDelete(ev)}
+                                        title="Excluir evento"
+                                        className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 cursor-pointer"
+                                      >
+                                        <Trash2 size={13} />
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               ) : (
                 filteredEvents.map((ev) => {
                   // Permission check for modifying this event
@@ -2292,102 +2411,100 @@ export default function AdminPanel({
                     ev.creatorId && currentUser?.id ? ev.creatorId === currentUser.id : false;
                   const canModifyThisEvent = isChefe || (isFuncionario && isMyEvent);
 
+                  /*
+                    CARD ESCURO (design de referência da rodada 26).
+                    --------------------------------------------------------------
+                    O painel é claro, mas o mural de eventos usa card ESCURO
+                    (slate-900) — a mesma linguagem visual do print enviado:
+                    imagem de topo, selo de preço no canto superior esquerdo,
+                    data sobre a imagem, título em 1 linha, cidade com pino,
+                    faixa "Comunidade Escolar • Org: ..." e a barra de ações
+                    com Ver/Autorizações à esquerda e Editar/lixeira à direita.
+                  */
                   return (
                     <div
                       key={ev.id}
-                      className="bg-white dark:bg-brand-card-dark rounded-2xl border border-brand-primary/15 dark:border-white/10 shadow-sm hover:shadow-md hover:border-brand-primary/40 transition-all flex flex-col overflow-hidden group h-full"
+                      className="bg-slate-900 dark:bg-[#12161d] rounded-2xl border border-slate-700/60 dark:border-white/10 shadow-md hover:shadow-xl hover:border-slate-500/70 transition-all flex flex-col overflow-hidden group h-full text-white"
                     >
-                      {/* Event Image */}
-                      <div className="relative h-32 w-full bg-slate-100 dark:bg-black/30 overflow-hidden shrink-0">
+                      {/* Imagem de topo com gradiente para o card escuro */}
+                      <div className="relative h-36 w-full bg-slate-800 overflow-hidden shrink-0">
                         <img
                           src={
                             ev.image ||
                             "https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=600&auto=format&fit=crop"
                           }
                           alt={ev.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 opacity-90"
                         />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/45 to-slate-900/5" />
 
-                        {/* Price Badge */}
-                        <div className="absolute top-2.5 left-2.5">
-                          <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-md shadow-xs ${
-                              ev.isPaid ? "bg-amber-500 text-white" : "bg-emerald-600 text-white"
-                            }`}
-                          >
-                            {ev.isPaid ? (ev.price ? `R$ ${ev.price}` : "Pago") : "Gratuito"}
-                          </span>
-                        </div>
+                        {/* Selo de preço — canto superior esquerdo */}
+                        <span
+                          className={`absolute top-2.5 left-2.5 text-[10px] font-bold px-2 py-0.5 rounded-md shadow-sm ${
+                            ev.isPaid ? "bg-amber-500 text-slate-900" : "bg-emerald-600 text-white"
+                          }`}
+                        >
+                          {ev.isPaid ? (ev.price ? `R$ ${ev.price}` : "Pago") : "Gratuito"}
+                        </span>
 
-                        {/* Creator tag if employee */}
                         {isMyEvent && (
-                          <div className="absolute top-2.5 right-2.5">
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-600/90 text-white shadow-xs">
-                              Seu Evento
-                            </span>
-                          </div>
+                          <span className="absolute top-2.5 right-2.5 text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-600/90 text-white shadow-sm">
+                            Seu Evento
+                          </span>
                         )}
 
-                        {/* Date Badge */}
-                        <div className="absolute bottom-2.5 left-2.5 text-white">
-                          <div className="flex items-center gap-1.5 text-xs font-bold drop-shadow-md">
-                            <Calendar size={13} />
-                            <span>
-                              {ev.day} de {monthNames[ev.month] || "Mês"} de {ev.year} •{" "}
-                              {ev.time || "14:00"}
-                            </span>
-                          </div>
+                        {/* Data sobre a imagem */}
+                        <div className="absolute bottom-2.5 left-2.5 right-2.5 flex items-center gap-1.5 text-[11px] font-semibold text-white/95 drop-shadow">
+                          <Calendar size={12} className="shrink-0 text-emerald-400" />
+                          <span className="truncate">
+                            {ev.day} de {monthNames[ev.month] || "Mês"} de {ev.year} •{" "}
+                            {ev.time || "14:00"}
+                          </span>
                         </div>
                       </div>
 
-                      {/* Event Body */}
-                      <div className="p-4 flex-1 flex flex-col justify-between gap-3">
-                        <div>
-                          <h4
-                            className="font-bold text-sm text-slate-900 dark:text-white line-clamp-2 leading-snug min-h-[2.5em]"
-                            title={ev.title}
-                          >
-                            {ev.title}
-                          </h4>
+                      {/* Corpo escuro */}
+                      <div className="p-4 flex-1 flex flex-col gap-2">
+                        <h4
+                          className="font-bold text-sm text-white line-clamp-1 leading-snug"
+                          title={ev.title}
+                        >
+                          {ev.title}
+                        </h4>
 
-                          {/* Cidade (não o endereço completo): a faixa de baixo
-                              já diz a escola e o organizador. */}
-                          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                            <MapPin size={13} className="text-brand-accent dark:text-brand-primary shrink-0" />
-                            <span className="truncate">{cidadeDoEvento(ev)}</span>
-                          </div>
-
-                          {ev.requirements && (
-                            <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-2 line-clamp-2 bg-slate-50 dark:bg-black/20 p-2 rounded-lg border border-slate-100 dark:border-white/5">
-                              {ev.requirements}
-                            </p>
-                          )}
-
-                          {/* Faixa de metadados (design de referência): origem do
-                              evento + organizador. */}
-                          <div className="mt-2 flex items-center gap-1.5 text-[10px] font-semibold text-slate-600 dark:text-slate-300 bg-slate-100/80 dark:bg-black/25 rounded-lg px-2 py-1.5">
-                            <Building2 size={11} className="shrink-0 text-slate-500 dark:text-slate-400" />
-                            <span className="shrink-0">
-                              {ev.isSchool ? "Comunidade Escolar" : "Aberto ao público"}
-                            </span>
-                            <span className="text-slate-400 dark:text-slate-500">•</span>
-                            <span className="truncate" title={`Org: ${organizadorDoEvento(ev)}`}>
-                              Org: {organizadorDoEvento(ev)}
-                            </span>
-                          </div>
+                        <div className="flex items-center gap-1.5 text-[11px] text-slate-300">
+                          <MapPin size={12} className="text-emerald-400 shrink-0" />
+                          <span className="truncate">{cidadeDoEvento(ev)}</span>
                         </div>
 
-                        {/* Action Buttons */}
-                        <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100 dark:border-white/10">
-                          <div className="flex items-center gap-1.5">
+                        {/* Faixa de metadados: origem + organizador */}
+                        <div className="mt-0.5 flex items-center gap-1.5 text-[10px] font-semibold text-slate-300 bg-slate-800/80 rounded-lg px-2 py-1.5 border border-white/5">
+                          <Building2 size={11} className="shrink-0 text-slate-400" />
+                          <span className="shrink-0">
+                            {ev.isSchool ? "Comunidade Escolar" : "Aberto ao público"}
+                          </span>
+                          <span className="text-slate-500">•</span>
+                          <span className="truncate" title={`Org: ${organizadorDoEvento(ev)}`}>
+                            Org: {organizadorDoEvento(ev)}
+                          </span>
+                        </div>
+
+                        {ev.requirements && (
+                          <p className="text-[10px] text-slate-400 line-clamp-2 bg-slate-800/50 p-2 rounded-lg border border-white/5">
+                            {ev.requirements}
+                          </p>
+                        )}
+
+                        {/* Barra de ações — colada no rodapé do card */}
+                        <div className="mt-auto pt-3 border-t border-white/10 flex items-center justify-between gap-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
                             {onSelectEvent && (
                               <button
                                 type="button"
                                 onClick={() => onSelectEvent(ev)}
-                                className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/15 text-slate-700 dark:text-slate-200 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1"
+                                className="px-2.5 py-1.5 bg-slate-700/70 hover:bg-slate-600 text-white rounded-lg text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1"
                               >
-                                <Info size={13} />
+                                <Info size={12} />
                                 <span>Ver</span>
                               </button>
                             )}
@@ -2395,38 +2512,38 @@ export default function AdminPanel({
                             <button
                               type="button"
                               onClick={() => setViewingAuthEvent(ev)}
-                              className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1 border border-emerald-200 dark:border-emerald-800/60"
+                              className="px-2.5 py-1.5 bg-emerald-600/90 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1"
                               title="Visualizar autorizações dos pais/responsáveis para este evento"
                             >
-                              <ShieldCheck size={13} />
+                              <ShieldCheck size={12} />
                               <span>Autorizações</span>
                             </button>
                           </div>
 
                           {canModifyThisEvent ? (
-                            <div className="flex items-center gap-1.5 ml-auto">
+                            <div className="flex items-center gap-1.5 shrink-0">
                               <button
                                 type="button"
                                 onClick={() => handleOpenEditEventModal(ev)}
-                                className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/50 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1 border border-blue-200 dark:border-blue-800/60"
+                                className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1"
                               >
-                                <Edit3 size={13} />
+                                <Edit3 size={12} />
                                 <span>Editar</span>
                               </button>
 
                               <button
                                 type="button"
                                 onClick={() => setEventToDelete(ev)}
-                                className="p-1.5 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 text-red-600 dark:text-red-400 rounded-lg text-[11px] transition-colors cursor-pointer"
+                                className="p-1.5 bg-slate-800 hover:bg-red-600/80 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer"
                                 title="Excluir evento"
                               >
-                                <Trash2 size={14} />
+                                <Trash2 size={13} />
                               </button>
                             </div>
                           ) : (
-                            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium ml-auto flex items-center gap-1">
-                              <Lock size={11} />
-                              <span>Criado por outro admin</span>
+                            <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1 shrink-0">
+                              <Lock size={10} />
+                              <span>Outro admin</span>
                             </span>
                           )}
                         </div>
