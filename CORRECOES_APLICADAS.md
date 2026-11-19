@@ -1611,6 +1611,27 @@ da escola na área de contas escolares.
 
 ### 30.1 Mural de eventos (aba Eventos do painel)
 
+> **Correção de 2026-11-18 (feedback: "a alteração do design não foi efetuada
+> como pedi").** A primeira tentativa mexeu só na grade e em detalhes — os
+> cards continuaram **claros**. O print pede **card escuro**. Agora:
+>
+> - card em `bg-slate-900` com **texto branco**, imagem `h-36` e gradiente para
+>   o próprio fundo escuro do card;
+> - selo **Gratuito** (`bg-emerald-600`) no canto superior esquerdo, data sobre
+>   a imagem, título em **1 linha**, cidade com pino verde, faixa
+>   `Comunidade Escolar • Org: ...` em `bg-slate-800`;
+> - barra de ações no rodapé: **Ver** (`bg-slate-700`), **Autorizações**
+>   (`bg-emerald-600`), **Editar** (`bg-blue-600`) e lixeira (`bg-slate-800`);
+> - o card de **Eventos excluídos** recebeu o mesmo fundo escuro;
+> - **causa de o mural não aparecer**: ele reaproveitava o `viewMode` da lista
+>   de usuários — quem estava em "Tabela" nunca via os cards. Agora o mural tem
+>   estado próprio (`eventViewMode`) que **abre em cartões**, com alternador
+>   Cartões/Tabela dentro da aba Eventos, e a visão de tabela do mural foi
+>   implementada de verdade.
+> - Novo teste de render `test-round26-mural.mjs` monta o painel, entra em
+>   Eventos e inspeciona o card no DOM (fundo escuro, texto branco, botões).
+
+
 - **Grade elástica**: `repeat(auto-fill, minmax(min(100%, 17.5rem), 1fr))` no lugar
   de `grid-cols-1 md:2 lg:3 2xl:4`. Os cards passam a ocupar a largura
   disponível (sem vazio à direita quando a lista é curta) e `min(100%, …)`
@@ -1670,8 +1691,9 @@ Medição antes/depois com 11 títulos reais: **3 acertos → 11 acertos**.
 
 | Suíte | Resultado |
 |---|---|
-| `test-round26.mjs` (novo) | **84/84** |
-| `test-round26-render.mjs` (novo, jsdom: leitura, edição, permissão) | **21/21** |
+| `test-round26.mjs` | **95/95** |
+| `test-round26-render.mjs` (jsdom: leitura, edição, permissão da ficha) | **21/21** |
+| `test-round26-mural.mjs` (novo, jsdom: card escuro do mural no DOM) | **23/23** |
 | `25-render` / `25` / `24` / `23` / `22` | 10 · 44 · 40 · 142 · 27 |
 | `21` / `20` / `19` / `18`+`18-mobile` / `17` | 41 · 35 · 32 · 50+21 · 49 |
 | `16` / `14` / `13` / `12`+`12b`+`12c` / `11` | 39 · 36 · 31 · 32+18+21 · 64 |

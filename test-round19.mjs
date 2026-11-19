@@ -70,7 +70,8 @@ console.log("=== 3. Rolagem horizontal isolada nas tabelas ===\n");
     /overscroll-behavior(-x)?:\s*contain/.test(tabela));
 
   const wrappers = painelLimpo.match(/admin-table-scroll/g) || [];
-  ok("as 3 tabelas usam a classe", wrappers.length === 3, `${wrappers.length} uso(s)`);
+  // 3 tabelas de usuários + a tabela do mural de eventos (rodada 26).
+  ok("as tabelas usam a classe", wrappers.length === 4, `${wrappers.length} uso(s)`);
   ok("nenhum wrapper de tabela usa overflow-x-auto solto",
     !/<div className="overflow-x-auto">/.test(painelLimpo));
 }
