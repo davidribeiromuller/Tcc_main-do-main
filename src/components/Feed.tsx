@@ -502,15 +502,17 @@ export default function Feed({
       )}
 
       {/*
-        Grade do mural (rodada 28).
+        Grade do mural (rodada 29).
         ----------------------------------------------------------------
-        Antes: `xl:grid-cols-4` dentro de `max-w-6xl` deixava cada card com
-        ~200 px — título truncado com "..." e faixa de metadados espremida.
-        Agora são no máximo 3 colunas (card ~300 px), com `max-w-5xl` para o
-        conjunto não esticar demais em telas grandes. Cada card fica mais baixo
-        e o mural alinha na vertical.
+        O pedido era "aumentar a janela do evento para ficar mais harmônico
+        com a tela inteira" MANTENDO o desenho do card.
+        - O contêiner acompanha a mesma largura do cabeçalho da tela
+          (`max-w-6xl`), então a grade não fica menor que a barra de filtros.
+        - 4 colunas a partir de `xl` (≥1280 px): cada card fica com ~280 px e,
+          com a faixa de metadados em duas linhas, nada é cortado.
+        - `items-stretch` para todos os cards da linha terem a mesma altura.
       */}
-      <div className="max-w-5xl mx-auto w-full px-4 sm:px-6 pt-4 pb-bottom-nav grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 items-stretch">
+      <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 pt-4 pb-bottom-nav grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5 items-stretch">
         {isLoading && filteredEvents.length === 0 ? (
           // Skeleton loading state
           Array.from({ length: 4 }).map((_, i) => (

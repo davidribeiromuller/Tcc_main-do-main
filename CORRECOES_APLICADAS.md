@@ -1781,13 +1781,19 @@ a faixa de metadados cortados por reticências desnecessárias.
 
 ### 32.1 Grade do mural do aluno (`Feed`)
 
-| Antes | Depois |
-|---|---|
-| `max-w-6xl` + `xl:grid-cols-4` | `max-w-5xl` + **no máximo 3 colunas** |
-| card ~200 px de largura | card ~300 px (título cabe em 2 linhas) |
-| — | `items-stretch` (cards da mesma linha com a mesma altura) |
-
-Mantido: 1 coluna no celular, 2 no tablet, `gap-4 sm:gap-5`.
+> **Ajuste de 2026-11-24 (rodada 29).** A troca para `max-w-5xl` + 3 colunas
+> **encolheu** a grade em relação ao cabeçalho da tela — o usuário respondeu
+> "o width não mudou, o formato continua o mesmo". Corrigido mantendo o
+> desenho do card:
+>
+> - grade usa **`max-w-6xl`**, a mesma largura do cabeçalho, dos filtros e da
+>   agenda pessoal (antes o mural era mais estreito que o resto da tela);
+> - **4 colunas a partir de `xl`** (≥1280 px) — card ~280 px, e com a faixa de
+>   metadados em duas linhas nada é cortado;
+> - `items-stretch` mantido.
+>
+> Resultado: 1 coluna (celular) → 2 (≥640 px) → 3 (≥1024 px) → 4 (≥1280 px),
+> sempre ocupando a largura toda do contêiner.
 
 ### 32.2 Proporção do card (`EventCardMural`)
 
@@ -1817,7 +1823,7 @@ Escolar").
 
 | Suíte | Resultado |
 |---|---|
-| `test-round28.mjs` (novo) | **25/25** |
+| `test-round28.mjs` | **26/26** |
 | `27` / `27-render` | 51 · 37 |
 | `26` / `26-mural` / `26-render` | 90 · 23 · 21 |
 | `25` / `25-render` / `24` / `23` / `22` / `21` | 44 · 10 · 40 · 142 · 27 · 41 |

@@ -71,10 +71,10 @@ console.log("\n=== 4. Grade e estados ===");
   // Rodada 28: no máximo 3 colunas (cards largos para o título e a faixa de
   // metadados). O comentário que cita o grid antigo não conta.
   const fonteSemComentarios = fonte.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  // Rodada 29: 1/2/3/4 — a grade acompanha a largura da tela (max-w-6xl).
   ok(
-    "grade responsiva 1/2/3",
-    /grid-cols-1 sm:grid-cols-2 lg:grid-cols-3/.test(fonteSemComentarios) &&
-      !/xl:grid-cols-4/.test(fonteSemComentarios)
+    "grade responsiva 1/2/3/4",
+    /grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4/.test(fonteSemComentarios)
   );
   // Rodada 18 aumentou o respiro no mobile (gap-4) mantendo o do desktop.
   ok("espaçamento menor no mobile", /gap-4 sm:gap-5/.test(fonte));
