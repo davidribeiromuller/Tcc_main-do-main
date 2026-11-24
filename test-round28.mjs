@@ -26,11 +26,12 @@ const admin = semComentarios(readFileSync("src/components/AdminPanel.tsx", "utf8
 // ===========================================================================
 console.log("\n1) Grade do mural do aluno");
 
-// Rodada 29: a grade acompanha a largura do resto da tela (max-w-6xl) e usa
-// 4 colunas no desktop largo — os cards ficam maiores, não menores.
-check("grade com 4 colunas no desktop largo", feed.includes("lg:grid-cols-3 xl:grid-cols-4"));
-check("grade usa a mesma largura do cabeçalho (max-w-6xl)", feed.includes("max-w-6xl mx-auto w-full px-4 sm:px-6 pt-4 pb-bottom-nav grid"));
-check("grade não é mais estreita que o cabeçalho", !feed.includes("max-w-5xl"));
+// Rodada 30: referência é o print do painel em tela cheia — 5 cards por linha
+// e o contêiner ocupando a largura toda do monitor.
+check("grade com 5 colunas em tela grande", feed.includes("xl:grid-cols-4 2xl:grid-cols-5"));
+check("grade com 4 colunas no desktop", feed.includes("lg:grid-cols-3 xl:grid-cols-4"));
+check("contêiner largo (88rem = 1408px)", feed.includes("max-w-[88rem] mx-auto w-full px-4 sm:px-6 pt-4 pb-bottom-nav grid"));
+check("grade não usa mais o contêiner estreito", !feed.includes("max-w-5xl") && !feed.includes("max-w-6xl mx-auto w-full px-4 sm:px-6 pt-4"));
 check("colunas alinhadas no topo (items-stretch)", feed.includes("items-stretch"));
 check("respiro entre cards mantido", feed.includes("gap-4 sm:gap-5"));
 check("mobile continua 1 coluna / 2 no tablet", feed.includes("grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"));

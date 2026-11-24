@@ -282,7 +282,7 @@ export default function Feed({
       */}
       <div className="sticky top-0 z-30 bg-brand-bg-light/95 dark:bg-brand-bg-dark/95 backdrop-blur-md border-b border-brand-primary/10">
         {/* Barra principal: título + ações */}
-        <div className="max-w-6xl mx-auto w-full flex items-start justify-between gap-2 px-4 sm:px-6 pt-3.5 pb-2.5 sm:pt-4 sm:pb-3">
+        <div className="max-w-[88rem] mx-auto w-full flex items-start justify-between gap-2 px-4 sm:px-6 pt-3.5 pb-2.5 sm:pt-4 sm:pb-3">
           <div className="min-w-0 flex-1">
             <h1 className="text-[1.35rem] sm:text-[1.7rem] font-display font-semibold tracking-tight text-slate-900 dark:text-white leading-tight">
               Eventos
@@ -327,7 +327,7 @@ export default function Feed({
 
         {/* Filtros: faixa própria, com rolagem horizontal no celular em vez de
             quebrar em várias linhas e empurrar o conteúdo para baixo. */}
-        <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 pb-2.5">
+        <div className="max-w-[88rem] mx-auto w-full px-4 sm:px-6 pb-2.5">
           <div className="flex items-center gap-2.5 overflow-x-auto no-scrollbar scroll-x-snap -mx-4 px-4 sm:-mx-1 sm:px-1 py-0.5">
             <FiltroGrupo rotulo="Cidade">
               {([
@@ -391,7 +391,7 @@ export default function Feed({
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden bg-white/60 dark:bg-white/[0.03] border-b border-brand-primary/10"
           >
-            <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 py-3">
+            <div className="max-w-[88rem] mx-auto w-full px-4 sm:px-6 py-3">
               <div className="relative flex items-center w-full max-w-xl">
                 <Search className="absolute left-3.5 text-slate-400 dark:text-slate-500" size={16} />
                 <input
@@ -426,7 +426,7 @@ export default function Feed({
         urgente. Só aparece para quem está conectado e tem algum compromisso.
       */}
       {currentUser?.id && eventosPessoais.length > 0 && (
-        <section className="max-w-6xl mx-auto w-full px-4 sm:px-6 pt-4">
+        <section className="max-w-[88rem] mx-auto w-full px-4 sm:px-6 pt-4">
           <div className="flex items-center justify-between gap-2 mb-2">
             <button
               type="button"
@@ -502,17 +502,16 @@ export default function Feed({
       )}
 
       {/*
-        Grade do mural (rodada 29).
+        Grade do mural (rodada 30).
         ----------------------------------------------------------------
-        O pedido era "aumentar a janela do evento para ficar mais harmônico
-        com a tela inteira" MANTENDO o desenho do card.
-        - O contêiner acompanha a mesma largura do cabeçalho da tela
-          (`max-w-6xl`), então a grade não fica menor que a barra de filtros.
-        - 4 colunas a partir de `xl` (≥1280 px): cada card fica com ~280 px e,
-          com a faixa de metadados em duas linhas, nada é cortado.
-        - `items-stretch` para todos os cards da linha terem a mesma altura.
+        Referência: print do painel em tela cheia — 5 cards por linha, cada um
+        com ~280 px, sem espaço morto nas laterais.
+        - Contêiner `max-w-[88rem]` (1408 px) em vez de `max-w-6xl` (1152 px):
+          a grade finalmente ocupa a tela inteira em monitores grandes.
+        - 5 colunas a partir de `2xl` (≥1536 px), 4 a partir de `xl`.
+        - `items-stretch` mantém todos os cards da linha com a mesma altura.
       */}
-      <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 pt-4 pb-bottom-nav grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5 items-stretch">
+      <div className="max-w-[88rem] mx-auto w-full px-4 sm:px-6 pt-4 pb-bottom-nav grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 sm:gap-5 items-stretch">
         {isLoading && filteredEvents.length === 0 ? (
           // Skeleton loading state
           Array.from({ length: 4 }).map((_, i) => (
