@@ -23,12 +23,30 @@ import { SchoolsCatalog } from "./components/SchoolsCatalog.tsx";
 import SchoolPortal from "./components/SchoolPortal.tsx";
 import AIChatAssistant from "./components/AIChatAssistant.tsx";
 import BackToDashboardButton from "./components/BackToDashboardButton.tsx";
-import { resolverTelaInicial, resolverTelaDoPopState, destinoDoBotaoVoltar } from "./lib/navigation.ts";
+import PlansAndPricing from "./components/PlansAndPricing.tsx";
+import SchoolSubscription from "./components/SchoolSubscription.tsx";
+import MasterPanel from "./components/MasterPanel.tsx";
+import PrivacyPolicy from "./components/PrivacyPolicy.tsx";
+import {
+  resolverTelaInicial,
+  resolverTelaDoPopState,
+  destinoDoBotaoVoltar,
+  ROTAS_POR_TELA,
+} from "./lib/navigation.ts";
 import type { ContextoAcoes, CamposEvento } from "./lib/voiceActions.ts";
 import { ARAUCARIA_SCHOOLS, SchoolProfile } from "./lib/schoolsData.ts";
 import { carregarEscolas } from "./lib/schoolProfilesService.ts";
 import { motion, AnimatePresence } from "motion/react";
-import { CheckCircle, AlertCircle, CheckCircle2, Info, X } from "lucide-react";
+import {
+  CheckCircle,
+  AlertCircle,
+  CheckCircle2,
+  Info,
+  X,
+  ShieldAlert,
+  CreditCard,
+  ArrowRight,
+} from "lucide-react";
 import logoImg from "./assets/images/logo.jpg";
 import { resilientFetch, setupNetworkAutoRecovery, safeAppReload, safeParseJsonResponse } from "./lib/apiResilience.ts";
 import { fetchJsonApi } from "./lib/staticHosting.ts";
@@ -53,7 +71,7 @@ import {
   heartbeatUserDirectInSupabase,
 } from "./lib/usersService.ts";
 import { autenticarContaEscolar } from "./lib/schoolAccountsService.ts";
-import { canAccessAdminPanel, isChefeAdmin } from "./lib/permissions.ts";
+import { canAccessAdminPanel, isChefeAdmin, isPlatformOwner } from "./lib/permissions.ts";
 import { saveUsersCache, readUsersCache } from "./lib/userCache.ts";
 import { isEventRetentionExpired } from "./lib/eventLifecycle.ts";
 import { confirmarPresenca } from "./lib/participationsService.ts";
@@ -64,6 +82,12 @@ import {
   criarSolicitacaoDePerfil,
   ROTULOS_CAMPOS,
 } from "./lib/profileChangeService.ts";
+
+/**
+ * Chave da sessão assinada entregue pelo servidor. Fica fora do React para que
+ * qualquer chamada de API possa recuperá-la sem depender do estado do componente.
+ */
+const SESSION_TOKEN_KEY = "elo_session_token";
 
 export default function App() {
   const [resetTokenParam, setResetTokenParam] = useState<string | null>(() => {
@@ -128,13 +152,9 @@ export default function App() {
       const stored = localStorage.getItem("local_user");
       if (stored) {
         const parsed: User = JSON.parse(stored);
-        const cleanEmail = (parsed.email || "").toLowerCase().trim();
-        const isDirectorAccount = cleanEmail === "diretoria@helenawysocki.com" || cleanEmail === "davidribeiromuller2009@gmail.com" || parsed.isAdmin === true || parsed.role === "Diretor";
-        return {
-          ...parsed,
-          isAdmin: isDirectorAccount,
-          role: isDirectorAccount ? "Diretor" : parsed.role
-        };
+        // Parte 2: o papel NÃO é mais inferido de e-mail hardcoded no cliente.
+        // Vale apenas o que veio do banco na última sincronização.
+        return parsed;
       }
       return null;
     } catch {
@@ -262,10 +282,12 @@ export default function App() {
       sessionStorage.setItem("ultima_tela", screen);
     } catch {}
     try {
-      let path = `/${screen}`;
+      // Rota canônica vem de `navigation.ts` — a mesma tabela usada para
+      // traduzir a URL de volta em tela. Antes esta função montava `/${screen}`
+      // e a leitura usava outro mapa: `/planos` (URL) não voltava para a tela
+      // `plans`, e `/plans` (tela) não era reconhecido ao recarregar.
+      let path = ROTAS_POR_TELA[screen] || `/${screen}`;
       if (screen === "welcome") path = "/";
-      if (screen === "feed") path = "/feed";
-      if (screen === "schools") path = "/escolas";
       if (screen === "schoolDetail" && param) {
         setSelectedSchoolSlug(String(param));
         path = `/escolas/${param}`;
@@ -373,7 +395,7 @@ export default function App() {
         if (data.user && data.token) {
           setCurrentUser(data.user);
           localStorage.setItem("local_user", JSON.stringify(data.user));
-          localStorage.setItem("token", data.token);
+          persistSessionToken(data.token);
           navigateTo(destination);
           showToast("Modo visitante iniciado com sucesso!", "success");
           return;
@@ -426,7 +448,7 @@ export default function App() {
         }
         setCurrentUser(data.user);
         localStorage.setItem("local_user", JSON.stringify(data.user));
-        localStorage.setItem("token", data.token);
+        persistSessionToken(data.token);
         entrarNoApp();
         showToast(`Bem-vindo(a), gestão do ${data.user.nome}!`, "success");
         return;
@@ -1043,8 +1065,9 @@ export default function App() {
       }
 
       if (!synchronizedUser) {
-        // Fallback if network issue with backend
-        const isDirector = userEmail === "diretoria@helenawysocki.com" || userEmail.includes("diretor");
+        // Fallback if network issue with backend — sem privilégio inferido:
+        // quem não sincronizou entra como Aluno e o servidor revalida.
+        const isDirector = false;
         synchronizedUser = {
           id: Date.now(),
           uid: uid,
@@ -1178,8 +1201,28 @@ export default function App() {
     }
   };
 
-  // Helper to generate or fetch token
+  /**
+   * Devolve o token que o backend deve validar.
+   *
+   * HISTÓRICO (Parte 2 da auditoria): aqui o app MONTava um token
+   * `local-<uid>|<role>|<nome>|<email>` no navegador. Como o servidor confiava
+   * nesse formato, bastava editar o `localStorage` para virar administrador.
+   *
+   * Agora só existem duas fontes legítimas:
+   *  1. sessão assinada pelo SERVIDOR (`elo1.<payload>.<hmac>`), entregue no
+   *     login e guardada em `localStorage.elo_session_token`;
+   *  2. access token do Supabase Auth (JWT verificado contra o JWKS).
+   * Se nenhuma estiver disponível, devolvemos `null` — a requisição falha
+   * fechada, o que é o comportamento correto.
+   */
   const getAuthToken = async (): Promise<string | null> => {
+    try {
+      const stored = localStorage.getItem(SESSION_TOKEN_KEY);
+      if (stored && stored.startsWith("elo1.")) return stored;
+    } catch (_) {
+      /* localStorage indisponível */
+    }
+
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabaseClient();
@@ -1191,6 +1234,7 @@ export default function App() {
         console.warn("Could not get Supabase access_token:", e);
       }
     }
+
     if (auth?.currentUser) {
       try {
         return await auth.currentUser.getIdToken();
@@ -1198,13 +1242,20 @@ export default function App() {
         console.warn("Could not get Firebase idToken:", e);
       }
     }
-    if (currentUser) {
-      if (currentUser.provider === "google") {
-        return `google-${currentUser.uid}|${currentUser.role || 'Aluno'}|${encodeURIComponent(currentUser.nome || '')}|${encodeURIComponent(currentUser.email || '')}|${encodeURIComponent(currentUser.foto_perfil || '')}`;
-      }
-      return `local-${currentUser.uid}|${currentUser.role || 'Aluno'}|${encodeURIComponent(currentUser.nome || '')}|${encodeURIComponent(currentUser.email || '')}`;
-    }
+
     return null;
+  };
+
+  const persistSessionToken = (token: string | null | undefined) => {
+    try {
+      if (token && token.startsWith("elo1.")) {
+        localStorage.setItem(SESSION_TOKEN_KEY, token);
+      } else {
+        localStorage.removeItem(SESSION_TOKEN_KEY);
+      }
+    } catch (_) {
+      /* ignora */
+    }
   };
 
   // Switch/Impersonate user session (Admin feature)
@@ -1257,6 +1308,8 @@ export default function App() {
           const synchronizedUser = { ...data.user, provider: "local" };
           setCurrentUser(synchronizedUser);
           localStorage.setItem("local_user", JSON.stringify(synchronizedUser));
+          // Sessão assinada pelo servidor (nunca montada no navegador).
+          persistSessionToken(data.token);
 
           if (synchronizedUser.isAdmin) {
             await loadAllUsers(data.token);
@@ -1397,6 +1450,7 @@ export default function App() {
         const synchronizedUser = resData.user;
         setCurrentUser(synchronizedUser);
         localStorage.setItem("local_user", JSON.stringify(synchronizedUser));
+        persistSessionToken(resData.token);
         entrarNoApp();
         setLoginError(null);
         showToast("Conta escolar criada com sucesso!", "success");
@@ -1460,7 +1514,8 @@ export default function App() {
         id: Date.now(),
         uid: `local-${Date.now()}`,
         email: cleanEmail,
-        password: data.password || "senha123",
+        // Sem senha padrão: o cadastro exige senha válida (8+ caracteres).
+        password: data.password || "",
         nome: data.nome,
         cpf: data.cpf || "",
         phone: data.phone || "",
@@ -2097,6 +2152,25 @@ export default function App() {
               theme={theme}
               onToggleTheme={toggleTheme}
             />
+
+            {/*
+              Entrada comercial: a vitrine de planos precisa ser alcançável a
+              partir da página inicial — antes existia a tela, mas nenhum
+              caminho até ela. Fica discreta (uma linha), abaixo do herói, para
+              não competir com o mural.
+            */}
+            <div className="relative z-10 w-full px-5 sm:px-10 pb-1">
+              <div className="max-w-7xl mx-auto flex justify-center">
+                <button
+                  onClick={() => navigateTo("plans")}
+                  className="group inline-flex items-center gap-2 rounded-full border border-[#2f7a3f]/25 bg-white/70 dark:bg-[#19261d]/70 px-4 py-2 text-xs font-semibold text-[#2f7a3f] dark:text-[#9ccfa7] shadow-sm hover:border-[#2f7a3f]/50 hover:bg-white dark:hover:bg-[#1f3126] transition-colors cursor-pointer"
+                >
+                  <CreditCard className="w-4 h-4" aria-hidden="true" />
+                  <span>Sua escola no eloEscola? Veja planos e preços</span>
+                  <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
           </motion.div>
         )}
 
@@ -2155,7 +2229,30 @@ export default function App() {
         )}
 
         {/* LOGGED IN & GUEST NAVIGATION SHELLS */}
-        {["feed", "schools", "schoolDetail", "calendar", "admin", "settings", "contact", "eventDetail", "map"].includes(activeScreen) && (
+        {/*
+          Telas que usam a casca de navegação (header, menu inferior, voltar).
+
+          `plans` e `privacy` entraram aqui: os blocos delas já estavam
+          declarados mais abaixo, mas esta lista não as incluía — resultado, a
+          vitrine de planos e a política de privacidade eram renderizadas
+          DENTRO de um bloco que nunca abria. Tela existia no código e era
+          inalcançável em execução.
+        */}
+        {[
+          "feed",
+          "schools",
+          "schoolDetail",
+          "calendar",
+          "admin",
+          "settings",
+          "contact",
+          "eventDetail",
+          "map",
+          "plans",
+          "subscription",
+          "master",
+          "privacy",
+        ].includes(activeScreen) && (
           <div className="w-full min-h-[100dvh] flex flex-col">
             {/* Impersonation Return Banner */}
             {impersonatorAdmin && (
@@ -2362,6 +2459,111 @@ export default function App() {
                   </motion.div>
                 )}
 
+                {activeScreen === "plans" && (
+                  <motion.div
+                    key="plans-tab"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="app-screen"
+                  >
+                    <PlansAndPricing onNavigate={navigateTo} onShowToast={showToast} />
+                  </motion.div>
+                )}
+
+                {/*
+                  Assinatura da instituição: só faz sentido para quem administra
+                  a escola. Quem não administra vê o motivo em vez de um painel
+                  que responderia 403 em todas as chamadas.
+                */}
+                {activeScreen === "subscription" && (
+                  <motion.div
+                    key="subscription-tab"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="app-screen"
+                  >
+                    {canAccessAdminPanel(currentUser) ? (
+                      <SchoolSubscription onNavigate={navigateTo} onShowToast={showToast} />
+                    ) : (
+                      <div className="min-h-[60vh] flex items-center justify-center p-6">
+                        <div className="max-w-md w-full text-center rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#19261d] p-8">
+                          <CreditCard className="w-12 h-12 mx-auto text-[#2f7a3f] dark:text-[#7ba884]" />
+                          <h2 className="mt-4 text-lg font-bold text-slate-800 dark:text-slate-100">
+                            Área da instituição
+                          </h2>
+                          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                            A assinatura é administrada pela equipe gestora da escola.
+                            Fale com a coordenação ou com o administrador da sua instituição
+                            para alterar o plano.
+                          </p>
+                          <button
+                            onClick={() => navigateTo("plans")}
+                            className="mt-5 w-full rounded-xl bg-[#2f7a3f] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#256633] transition-colors"
+                          >
+                            Ver planos e preços
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+
+                {/*
+                  Painel Master: restrito ao proprietário da plataforma.
+
+                  A checagem aqui é de experiência (não mostrar o que não vai
+                  funcionar). A autorização real está no servidor, em todas as
+                  rotas `/api/master/*` via `requirePlatformOwner` — se alguém
+                  digitar /master na barra de endereço, a chamada é recusada
+                  mesmo que a tela apareça.
+                */}
+                {activeScreen === "master" && (
+                  <motion.div
+                    key="master-tab"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="app-screen"
+                  >
+                    {isPlatformOwner(currentUser) ? (
+                      <MasterPanel onNavigate={navigateTo} onShowToast={showToast} />
+                    ) : (
+                      <div className="min-h-[60vh] flex items-center justify-center p-6">
+                        <div className="max-w-md w-full text-center rounded-3xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 p-8">
+                          <ShieldAlert className="w-12 h-12 mx-auto text-amber-600 dark:text-amber-400" />
+                          <h2 className="mt-4 text-lg font-bold text-slate-800 dark:text-slate-100">
+                            Área restrita
+                          </h2>
+                          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                            O painel Master é exclusivo do proprietário da plataforma.
+                            Entre com a conta administrativa responsável pela operação do eloEscola.
+                          </p>
+                          <button
+                            onClick={() => navigateTo("settings")}
+                            className="mt-5 w-full rounded-xl bg-[#2f7a3f] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#256633] transition-colors"
+                          >
+                            Voltar para configurações
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+
+                {activeScreen === "privacy" && (
+                  <motion.div
+                    key="privacy-tab"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="app-screen"
+                  >
+                    <PrivacyPolicy onNavigate={navigateTo} />
+                  </motion.div>
+                )}
+
                 {activeScreen === "schoolPortal" && (
                   <motion.div
                     key="school-portal-tab"
@@ -2443,6 +2645,11 @@ export default function App() {
             </div>
 
             {/* Bottom Menu Navigation Footer */}
+            {/*
+              O menu inferior continua só nas abas principais. Em planos,
+              assinatura, painel Master e privacidade a navegação é o botão de
+              voltar + o cabeçalho — o menu de abas não teria aba ativa.
+            */}
             {["feed", "schools", "calendar", "admin", "settings"].includes(activeScreen) && (
               <BottomNav
                 activeTab={activeScreen}

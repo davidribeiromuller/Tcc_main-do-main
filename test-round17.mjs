@@ -59,8 +59,11 @@ console.log("\n=== 2. Serviço dedicado ===");
     /account_status: ativo \? "active" : "suspended"/.test(servico));
   ok("verificação grava verified_by/verified_at",
     /verified_by: "ADM Chefe"/.test(servico));
+  // Rodada 32 (segurança): a senha passou a ser gravada com hash scrypt.
+  // O requisito original — "o Chefe redefine e o usuário é forçado a trocar" —
+  // continua valendo; o que muda é que não existe mais texto claro.
   ok("redefinir senha força troca no próximo acesso",
-    /must_change_password: true/.test(servico) && /password: novaSenha/.test(servico));
+    /must_change_password: true/.test(servico) && /password: hashPassword\(novaSenha\)/.test(servico));
   ok("remover conta existe como ação explícita",
     /export async function removerContaEscolar/.test(servico));
   ok("autentica por identificador OU e-mail",

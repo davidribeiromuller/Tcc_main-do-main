@@ -8,6 +8,15 @@ import {
   EventArchiveLog
 } from '../types.ts';
 import { EVENT_RETENTION_DAYS } from '../lib/eventLifecycle.ts';
+import { verifyPassword } from '../lib/security.ts';
+
+/**
+ * Parte 2 da auditoria: as contas de demonstração da loja em memória tinham
+ * senha fixa em texto claro (`senha123`, `senhaInstitucional123`) versionada no
+ * código. Agora elas nascem SEM senha utilizável: ninguém autentica com elas
+ * até um administrador definir uma senha pelo painel (que grava hash scrypt).
+ */
+const LEGACY_PLACEHOLDER_HASH: string | undefined = undefined;
 import fs from 'fs';
 import path from 'path';
 
@@ -207,7 +216,7 @@ const defaultInstitutionalAccounts: InstitutionalAccount[] = [
     escolaNome: "Colégio Estadual Professor Júlio Szymanski",
     identificador: "escola.szymanski",
     email: "aucjulio@seed.pr.gov.br",
-    password: "senhaInstitucional123",
+    password: LEGACY_PLACEHOLDER_HASH,
     status: "ativo",
     criadoPor: "ADM Chefe",
     createdAt: new Date().toISOString(),
@@ -219,7 +228,7 @@ const defaultInstitutionalAccounts: InstitutionalAccount[] = [
     escolaNome: "Colégio Estadual Professora Helena Wysocki",
     identificador: "escola.wysocki",
     email: "auchelena@seed.pr.gov.br",
-    password: "senhaInstitucional123",
+    password: LEGACY_PLACEHOLDER_HASH,
     status: "ativo",
     criadoPor: "ADM Chefe",
     createdAt: new Date().toISOString(),
@@ -231,7 +240,7 @@ const defaultInstitutionalAccounts: InstitutionalAccount[] = [
     escolaNome: "Colégio Estadual Professora Maria da Graça Siqueira Silva e Lima",
     identificador: "escola.mariadagraca",
     email: "aucmariagssilva@seed.pr.gov.br",
-    password: "senhaInstitucional123",
+    password: LEGACY_PLACEHOLDER_HASH,
     status: "ativo",
     criadoPor: "ADM Chefe",
     createdAt: new Date().toISOString()
@@ -242,7 +251,7 @@ const defaultInstitutionalAccounts: InstitutionalAccount[] = [
     escolaNome: "Colégio Estadual do Campo Guajuvira",
     identificador: "escola.guajuvira",
     email: "aucguajuvira@seed.pr.gov.br",
-    password: "senhaInstitucional123",
+    password: LEGACY_PLACEHOLDER_HASH,
     status: "ativo",
     criadoPor: "ADM Chefe",
     createdAt: new Date().toISOString()
@@ -253,7 +262,7 @@ const defaultInstitutionalAccounts: InstitutionalAccount[] = [
     escolaNome: "Colégio Estadual Professora Marilze da Luz Brand",
     identificador: "escola.marilze",
     email: "aucmarilzeluzbrand@seed.pr.gov.br",
-    password: "senhaInstitucional123",
+    password: LEGACY_PLACEHOLDER_HASH,
     status: "ativo",
     criadoPor: "ADM Chefe",
     createdAt: new Date().toISOString()
@@ -264,7 +273,7 @@ const defaultInstitutionalAccounts: InstitutionalAccount[] = [
     escolaNome: "Colégio Estadual Cecília Meireles",
     identificador: "escola.cecilia",
     email: "aucceciliameireles@seed.pr.gov.br",
-    password: "senhaInstitucional123",
+    password: LEGACY_PLACEHOLDER_HASH,
     status: "ativo",
     criadoPor: "ADM Chefe",
     createdAt: new Date().toISOString()
@@ -278,7 +287,7 @@ const defaultUsers: User[] = [
     uid: "fallback-admin-uid",
     nome: "Administração eloEscola",
     email: "diretoria@helenawysocki.com",
-    password: "senha123",
+    password: LEGACY_PLACEHOLDER_HASH,
     foto_perfil: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
     provider: "local",
     role: "Diretor",
@@ -293,7 +302,7 @@ const defaultUsers: User[] = [
     uid: "fallback-funcionario-uid",
     nome: "Coordenação Pedagógica",
     email: "funcionario@helenawysocki.com",
-    password: "senha123",
+    password: LEGACY_PLACEHOLDER_HASH,
     foto_perfil: "https://images.unsplash.com/photo-1537368910025-700350fe46c7?w=150",
     provider: "local",
     role: "Funcionário",
@@ -385,20 +394,9 @@ try {
       }
     }
 
-    // Safety: ensure director emails have admin privileges enabled
-    for (const u of fallbackUsers) {
-      const cleanEmail = (u.email || '').toLowerCase().trim();
-      if (cleanEmail === 'diretoria@helenawysocki.com' || cleanEmail === 'davidribeiromuller2009@gmail.com') {
-        if (!u.isAdmin) {
-          u.isAdmin = true;
-          updated = true;
-        }
-        if (u.role !== 'Diretor') {
-          u.role = 'Diretor';
-          updated = true;
-        }
-      }
-    }
+    // Parte 2: privilégio não é concedido por e-mail fixo. A promoção passa
+    // pelo painel administrativo (com auditoria) ou BOOTSTRAP_ADMIN_*.
+
 
     if (updated) {
       fs.writeFileSync(USERS_FILE, JSON.stringify(fallbackUsers, null, 2), 'utf-8');
@@ -1032,7 +1030,9 @@ export function authenticateInstitutionalAccountFallback(identificadorOrEmail: s
     throw new Error("A verificação desta instituição foi recusada pelo Chefe ADM.");
   }
 
-  if (account.password === password) {
+  // Hash scrypt quando já migrado; texto claro legado continua aceito e é
+  // convertido na próxima redefinição (ver redefinirSenhaContaEscolar).
+  if (account.password && verifyPassword(password, account.password).ok) {
     account.lastLogin = new Date().toISOString();
     account.lastLoginAt = account.lastLogin;
     saveInstitutionalAccounts();
@@ -1114,7 +1114,8 @@ export function getOrCreateUserFallback(
   }
 
   const cleanEmail = (email || '').toLowerCase().trim();
-  const isDirector = cleanEmail === 'diretoria@helenawysocki.com' || cleanEmail === 'davidribeiromuller2009@gmail.com';
+  // Parte 2: nenhum privilégio inferido de e-mail no cadastro.
+  const isDirector = false;
 
   const newUser: User = {
     id: Math.floor(Math.random() * 10000) + 1000,

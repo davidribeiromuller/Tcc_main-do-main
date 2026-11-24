@@ -5,18 +5,14 @@ const DEFAULT_SUPABASE_URL = "https://jaoheenjltzzglfncgfq.supabase.co";
 const DEFAULT_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_bpCOfPvR2p5aVpbDMOsCqw_D-E0TlcL";
 
 /**
- * Retrieves the effective Supabase URL from environment or localStorage override.
+ * URL efetiva do projeto Supabase (build-time).
+ *
+ * Parte 2 da auditoria: existia aqui um "override" lido de `localStorage`.
+ * Qualquer script na página — inclusive um XSS — podia trocar o endereço do
+ * banco e passar a receber os dados que o app enviava. A origem do backend
+ * não é configuração de usuário: vem do build (`VITE_SUPABASE_URL`).
  */
 export function getEffectiveSupabaseUrl(): string {
-  if (typeof window !== "undefined") {
-    try {
-      const override = window.localStorage?.getItem("ELOESCOLA_OVERRIDE_SUPABASE_URL");
-      if (override && override.startsWith("https://") && override.includes(".supabase.co")) {
-        return override.trim();
-      }
-    } catch (_) {}
-  }
-
   const envUrl =
     (typeof import.meta !== "undefined" && import.meta.env?.VITE_SUPABASE_URL) ||
     (typeof process !== "undefined" ? process.env?.SUPABASE_URL : "") ||
@@ -26,18 +22,13 @@ export function getEffectiveSupabaseUrl(): string {
 }
 
 /**
- * Retrieves the effective Supabase Anon/Publishable Key from environment or localStorage override.
+ * Chave publicável (anon) do Supabase, definida no build.
+ *
+ * Mesmo motivo da URL: a chave não deve ser substituível em tempo de execução.
+ * Ela é pública por natureza (a proteção vem das políticas RLS), mas trocá-la
+ * em `localStorage` permitiria apontar o app para outro projeto.
  */
 export function getEffectiveSupabaseAnonKey(): string {
-  if (typeof window !== "undefined") {
-    try {
-      const override = window.localStorage?.getItem("ELOESCOLA_OVERRIDE_SUPABASE_ANON_KEY");
-      if (override && override.length > 20) {
-        return override.trim();
-      }
-    } catch (_) {}
-  }
-
   const envKey =
     (typeof import.meta !== "undefined" && (import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env?.VITE_SUPABASE_ANON_KEY)) ||
     (typeof process !== "undefined" ? (process.env?.SUPABASE_PUBLISHABLE_KEY || process.env?.SUPABASE_ANON_KEY) : "") ||

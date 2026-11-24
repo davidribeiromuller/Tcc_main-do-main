@@ -1,15 +1,14 @@
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase.ts";
+import { hashPassword, verifyPassword } from "./security.ts";
+import { isStaticHosting } from "./staticHosting.ts";
 import { User } from "../types.ts";
 
 /**
  * Converte um registro da tabela 'users' do Supabase para a interface User do frontend.
  */
 export function mapSupabaseUserToUser(row: any): User {
-  const isDiretor =
-    row.role === "Diretor" ||
-    row.is_admin === true ||
-    row.isAdmin === true ||
-    (typeof row.email === "string" && row.email.toLowerCase() === "diretoria@helenawysocki.com");
+  // Parte 2: privilégio vem do banco (role/is_admin), nunca de e-mail fixo.
+  const isDiretor = row.role === "Diretor" || row.is_admin === true || row.isAdmin === true;
 
   const rawId = row.id;
   const numericId = typeof rawId === "number" ? rawId : parseInt(String(rawId), 10) || Date.now();
@@ -313,49 +312,6 @@ export async function findUserByPhoneDirectInSupabase(phone: string): Promise<Us
 }
 
 /**
- * Atualiza a senha de um usuário diretamente no Supabase.
- */
-export async function resetUserPasswordDirectInSupabase(
-  email: string,
-  newPassword: string
-): Promise<{ success: boolean; error: string | null }> {
-  if (!isSupabaseConfigured()) {
-    return { success: false, error: "Supabase não configurado." };
-  }
-
-  const cleanEmail = (email || "").trim().toLowerCase();
-  if (!cleanEmail) {
-    return { success: false, error: "Email não informado." };
-  }
-
-  const supabase = getSupabaseClient();
-  try {
-    const { data, error } = await supabase
-      .from("users")
-      .update({
-        password: newPassword,
-        updated_at: new Date().toISOString(),
-      })
-      .ilike("email", cleanEmail)
-      .select();
-
-    if (error) {
-      console.error("[usersService] Erro ao redefinir senha no Supabase:", error);
-      return { success: false, error: error.message };
-    }
-
-    if (!data || data.length === 0) {
-      return { success: false, error: "Usuário não localizado no banco para redefinição." };
-    }
-
-    return { success: true, error: null };
-  } catch (err: any) {
-    console.error("[usersService] Exceção ao redefinir senha no Supabase:", err);
-    return { success: false, error: err?.message || "Erro inesperado ao redefinir senha." };
-  }
-}
-
-/**
  * Realiza autenticação local diretamente no Supabase por e-mail e senha.
  */
 export async function authenticateUserDirectInSupabase(
@@ -382,7 +338,15 @@ export async function authenticateUserDirectInSupabase(
     }
 
     if (!data || data.length === 0) {
-      return { user: null, error: "Usuário não encontrado no diretório escolar." };
+      // Parte 2: o diretório `users` deixou de ser legível com a chave pública
+      // (continha senhas). Em hospedagem estática (GitHub Pages) não há backend
+      // para autenticar com segurança — a mensagem precisa ser honesta.
+      return {
+        user: null,
+        error: isStaticHosting()
+          ? "O login com senha exige o servidor do eloEscola. Esta demonstração estática permite apenas o modo visitante."
+          : "Usuário não encontrado no diretório escolar.",
+      };
     }
 
     const row = data[0];
@@ -392,9 +356,12 @@ export async function authenticateUserDirectInSupabase(
       return { user: null, error: "Sua conta escolar está desativada ou bloqueada pela diretoria." };
     }
 
-    // Verificar senha se o usuário tiver senha cadastrada
-    if (row.password && password && row.password !== password) {
-      return { user: null, error: "Credenciais inválidas. Verifique seu e-mail e a senha digitada." };
+    // Parte 2: comparação por hash (scrypt) em vez de igualdade de texto claro.
+    if (row.password) {
+      const check = verifyPassword(password || "", row.password);
+      if (!check.ok) {
+        return { user: null, error: "Credenciais inválidas. Verifique seu e-mail e a senha digitada." };
+      }
     }
 
     // Atualizar último acesso e atividade
@@ -442,18 +409,16 @@ export async function registerUserDirectInSupabase(
       return { user: null, error: "Este e-mail já está cadastrado no sistema escolar." };
     }
 
-    const isDirector =
-      userData.role === "Diretor" ||
-      cleanEmail === "diretoria@helenawysocki.com";
+    // Cadastro público nunca cria administrador.
+    const isDirector = false;
 
     const insertRow: Record<string, any> = {
       uid: userData.uid || `local-uid-${Math.floor(Math.random() * 88888 + 10000)}`,
       nome: userData.nome.trim(),
       email: cleanEmail,
-      // Guarda a senha provisória definida no cadastro. O app autentica na
-      // coluna `password` (não usa Supabase Auth), então sem isso o aluno era
-      // criado com uma senha que ele nunca digitou.
-      password: userData.password || "123456",
+      // Parte 2: a senha é gravada com hash scrypt (nunca em texto claro) e
+      // sem senha padrão previsível.
+      password: userData.password ? hashPassword(userData.password) : null,
       foto_perfil: userData.foto_perfil || "",
       provider: userData.provider || "local",
       role: userData.role || (isDirector ? "Diretor" : "Aluno"),
@@ -547,8 +512,8 @@ export async function syncOAuthUserDirectInSupabase(oauthUser: {
       };
     }
 
-    // Usuário novo autenticado via Google
-    const isDirector = cleanEmail === "diretoria@helenawysocki.com" || cleanEmail.includes("diretor");
+    // Usuário novo autenticado via Google — nasce sem privilégio.
+    const isDirector = false;
     const insertRow: Record<string, any> = {
       uid: oauthUser.uid || `google-${Date.now()}`,
       nome: oauthUser.nome,

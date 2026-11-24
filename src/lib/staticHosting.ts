@@ -70,3 +70,41 @@ export async function fetchJsonApi(
 
   return res;
 }
+
+/**
+ * Chave onde o App guarda o token de sessão (`elo1.<payload>.<hmac>`).
+ * Mantida aqui para que nenhum componente precise repetir a string.
+ */
+export const SESSION_TOKEN_STORAGE_KEY = "elo_session_token";
+
+/** Lê o token de sessão do armazenamento local (ou `null`). */
+export function getStoredSessionToken(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage?.getItem(SESSION_TOKEN_STORAGE_KEY) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * `fetchJsonApi` + `Authorization: Bearer <token>`.
+ *
+ * Usado nas rotas que passaram a exigir sessão na Parte 2 da auditoria
+ * (autorizações de menores, arquivamento de eventos). Sem o cabeçalho o
+ * servidor responde 401 — e a tela mostraria "nenhum registro" como se não
+ * houvesse dado, escondendo o problema.
+ *
+ * Se não houver token, a função devolve `null` (mesmo contrato do
+ * `fetchJsonApi`): o chamador segue para o estado vazio.
+ */
+export async function fetchJsonApiWithAuth(
+  input: string,
+  init?: RequestInit
+): Promise<Response | null> {
+  const token = getStoredSessionToken();
+  if (!token) return null;
+  const headers = new Headers(init?.headers || {});
+  headers.set("Authorization", `Bearer ${token}`);
+  return fetchJsonApi(input, { ...init, headers });
+}
