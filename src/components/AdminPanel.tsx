@@ -2301,11 +2301,11 @@ export default function AdminPanel({
                 (`auto-fill` + `minmax`): aproveitam toda a largura, mantêm
                 um card confortável e nunca criam espaços mortos.
               */}
-              {/* `min(100%, 17.5rem)` limita a coluna à largura disponível:
+              {/* `min(100%, 19rem)` limita a coluna à largura disponível:
                   nada de rolagem horizontal no celular. */}
               <div
                 className="grid gap-3.5 sm:gap-4"
-                style={{ gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 17.5rem), 1fr))" }}
+                style={{ gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 19rem), 1fr))" }}
               >
               {filteredEvents.length === 0 ? (
                 <div className="col-span-full flex flex-col items-center justify-center py-16 text-center text-slate-400 bg-white dark:bg-brand-card-dark rounded-3xl border border-dashed border-slate-300 dark:border-white/10 p-8">

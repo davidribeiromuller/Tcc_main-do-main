@@ -92,7 +92,7 @@ console.log("\n=== 4. Densidade e respiro no mobile ===");
   // Rodada 27: o card do mural virou componente (EventCardMural) e o banner
   // passou a ser único (h-36) em todos os tamanhos — sem escala no toque.
   ok("card do mural sem scale no toque", !/active:scale/.test(cardMural));
-  ok("banner do card compacto (h-36)", /h-36 w-full/.test(cardMural));
+  ok("banner do card compacto (h-36, h-40 no desktop)", /h-36 sm:h-40/.test(cardMural));
 
   ok("abas do painel rolam na horizontal", /overflow-x-auto no-scrollbar scroll-x-snap/.test(admin));
   ok("abas do painel não quebram linha", /whitespace-nowrap shrink-0/.test(admin));

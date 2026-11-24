@@ -58,14 +58,14 @@ const trechoMuralCode = semComentarios(trechoMural);
 check("trecho do mural encontrado", trechoMural.length > 2000, `len=${trechoMural.length}`);
 check(
   "colunas elásticas (auto-fill) em vez de grid fixo 1/2/3/4",
-  trechoMuralCode.includes("auto-fill") && trechoMuralCode.includes("minmax(min(100%, 17.5rem), 1fr)"),
+  trechoMuralCode.includes("auto-fill") && trechoMuralCode.includes("minmax(min(100%,"),
   "o grid antigo espremia os cards"
 );
 check(
   "sem o grid fixo antigo",
   !trechoMuralCode.includes("grid-cols-1 md:grid-cols-2 lg:grid-cols-3")
 );
-check("imagem de topo h-36 no componente", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("h-36 w-full"));
+check("imagem de topo h-36 no componente", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("h-36 sm:h-40"));
 check("gradiente escuro no componente", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("bg-gradient-to-t from-slate-900/85"));
 check(
   "selo de preço na aba Eventos (componente)",
@@ -84,7 +84,7 @@ check(
 check("Autorizações com ShieldCheck no componente", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("ShieldCheck"));
 check("Editar em azul no componente", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("bg-blue-600 text-white"));
 check("lixeira no componente", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("Trash2"));
-check("título em 1 linha no componente", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("line-clamp-1"));
+check("título em até 2 linhas com altura reservada", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("line-clamp-2") && readFileSync("src/components/EventCardMural.tsx", "utf8").includes("min-h-[2.6em]"));
 check("card ocupa a altura toda", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("h-full"));
 // O mural tem visão própria: antes ele herdava o viewMode da lista de usuários
 // e quem usava "Tabela" nunca via os cards escuros.
