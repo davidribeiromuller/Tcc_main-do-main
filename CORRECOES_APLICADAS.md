@@ -1792,7 +1792,17 @@ a faixa de metadados cortados por reticências desnecessárias.
 >   metadados em duas linhas nada é cortado;
 > - `items-stretch` mantido.
 >
-> Resultado: 1 coluna (celular) → 2 (≥640 px) → 3 (≥1024 px) → 4 (≥1280 px),
+> **Ajuste de 2026-11-24 (rodada 30)** — referência: print do painel em tela
+> cheia, com 5 cards por linha e sem espaço morto nas laterais. O `max-w-6xl`
+> (1152 px) ainda deixava o mural menor que a tela do usuário.
+>
+> - Contêiner do mural **`max-w-[88rem]` (1408 px)**; cabeçalho, busca, filtros
+>   e agenda pessoal do mural passaram à mesma largura (antes eram `max-w-6xl`,
+>   então a grade ficava desalinhada do título).
+> - **5 colunas a partir de `2xl` (≥1536 px)**, 4 a partir de `xl`, mantendo o
+>   desenho do card (faixa de metadados em duas linhas).
+>
+> Escala final: 1 (celular) → 2 (≥640) → 3 (≥1024) → 4 (≥1280) → 5 (≥1536),
 > sempre ocupando a largura toda do contêiner.
 
 ### 32.2 Proporção do card (`EventCardMural`)
@@ -1823,7 +1833,7 @@ Escolar").
 
 | Suíte | Resultado |
 |---|---|
-| `test-round28.mjs` | **26/26** |
+| `test-round28.mjs` | **27/27** |
 | `27` / `27-render` | 51 · 37 |
 | `26` / `26-mural` / `26-render` | 90 · 23 · 21 |
 | `25` / `25-render` / `24` / `23` / `22` / `21` | 44 · 10 · 40 · 142 · 27 · 41 |
