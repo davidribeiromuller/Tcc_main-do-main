@@ -1770,3 +1770,60 @@ toque, banner compacto, data sobre a imagem).
 **Como ver:** painel → Eventos (cards no padrão); app do aluno → Mural
 (mesmos cards) e alternar o tema claro/escuro no perfil para ver as duas
 versões.
+
+---
+
+## 32. Rodada 28 — tamanho e proporção dos cards do mural
+
+Feedback: "o design ficou bom, mas preciso que ajuste o tamanho dos eventos".
+No print, os cards do mural estavam estreitos (~200 px), altos e com o título e
+a faixa de metadados cortados por reticências desnecessárias.
+
+### 32.1 Grade do mural do aluno (`Feed`)
+
+| Antes | Depois |
+|---|---|
+| `max-w-6xl` + `xl:grid-cols-4` | `max-w-5xl` + **no máximo 3 colunas** |
+| card ~200 px de largura | card ~300 px (título cabe em 2 linhas) |
+| — | `items-stretch` (cards da mesma linha com a mesma altura) |
+
+Mantido: 1 coluna no celular, 2 no tablet, `gap-4 sm:gap-5`.
+
+### 32.2 Proporção do card (`EventCardMural`)
+
+- Imagem `h-36` no celular e **`h-40` no desktop** (proporção mais equilibrada,
+  sem dominar o card).
+- Título em **até 2 linhas com altura reservada** (`min-h-[2.6em]`): os cards da
+  mesma linha alinham, sem "pular" de altura conforme o título.
+- Título `13px` no celular e `14px` no desktop.
+- Corpo `p-3.5 sm:p-4` com ritmo vertical de `gap-1.5` (mais compacto, menos
+  espaços mortos).
+- Rodapé sempre no pé do card (`mt-auto`), ocupando a altura da linha.
+
+### 32.3 Faixa de metadados sem estourar
+
+Novo `layoutFaixa`:
+
+- `duplo` (**mural do aluno**, card mais estreito): origem e organizador em
+  **duas linhas**, cada uma com `truncate` e `title` (tooltip com o texto
+  completo). Antes era `Comunidade Escolar • Org: Diretoria...` numa linha só.
+- `unico` (**painel**, card mais largo): mantém a linha única.
+
+Os selos (Escolar/Público + categoria) passaram a ficar em **uma linha só, sem
+quebra** e com reticências — antes o selo duplicava o texto da faixa ("Escolar
+Escolar").
+
+### 32.4 Validação
+
+| Suíte | Resultado |
+|---|---|
+| `test-round28.mjs` (novo) | **25/25** |
+| `27` / `27-render` | 51 · 37 |
+| `26` / `26-mural` / `26-render` | 90 · 23 · 21 |
+| `25` / `25-render` / `24` / `23` / `22` / `21` | 44 · 10 · 40 · 142 · 27 · 41 |
+| `20` / `19` / `18`+`18-mobile` / `17` / `16` | 35 · 32 · 50+21 · 49 · 39 |
+| `14` / `13` / `12`+`12b`+`12c` / `11` | 36 · 31 · 32+18+21 · 64 |
+| `tsc --noEmit` / `npm run build` | 0 erros / ok |
+
+`test-round16` e `18` foram atualizados para a nova grade (1/2/3) e para a
+imagem `h-36 sm:h-40`, mantendo a intenção das checagens originais.

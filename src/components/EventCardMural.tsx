@@ -11,6 +11,7 @@ import {
   Map as MapIcon,
   GraduationCap,
   Globe2,
+  Users,
 } from "lucide-react";
 import { Event } from "../types";
 import { resolveEventCity, classifyEventAsSchool } from "../lib/eventClassification";
@@ -126,6 +127,12 @@ export interface EventCardMuralProps {
   seuEvento?: boolean;
   /** Rótulo do botão principal (`Ver` no painel, `Ver evento` no mural). */
   rotuloVer?: string;
+  /**
+   * `duplo` = faixa de metadados e selos em DUAS linhas (mural do aluno, onde
+   * o card é mais estreito e o texto era cortado). `unico` = uma linha só
+   * (painel, card mais largo).
+   */
+  layoutFaixa?: "duplo" | "unico";
   className?: string;
   /** Aceito explicitamente para o TypeScript não reclamar do `key` do map. */
   key?: React.Key;
@@ -141,6 +148,7 @@ export default function EventCardMural({
   bloqueadoParaEditar = false,
   seuEvento = false,
   rotuloVer = "Ver",
+  layoutFaixa = "unico",
   className = "",
 }: EventCardMuralProps) {
   const { origem, organizador } = faixaDeMetadados(event);
@@ -168,7 +176,7 @@ export default function EventCardMural({
       ].join(" ")}
     >
       {/* Imagem de topo + selo de preço + data */}
-      <div className="relative h-36 w-full shrink-0 overflow-hidden bg-slate-200 dark:bg-slate-800">
+      <div className="relative h-36 sm:h-40 w-full shrink-0 overflow-hidden bg-slate-200 dark:bg-slate-800">
         <img
           src={
             event.image ||
@@ -208,9 +216,9 @@ export default function EventCardMural({
       </div>
 
       {/* Corpo */}
-      <div className="p-4 flex-1 flex flex-col gap-2">
+      <div className="p-3.5 sm:p-4 flex-1 flex flex-col gap-1.5">
         <h4
-          className="font-bold text-sm text-slate-900 dark:text-white line-clamp-1 leading-snug"
+          className="font-bold text-[13px] sm:text-sm text-slate-900 dark:text-white line-clamp-2 leading-snug min-h-[2.6em]"
           title={event.title}
         >
           {event.title}
@@ -233,24 +241,45 @@ export default function EventCardMural({
           <span className="truncate max-w-[16rem]">{cidadeDoEvento(event)}</span>
         </button>
 
-        {/* Faixa de metadados */}
-        <div className="mt-0.5 flex items-center gap-1.5 text-[10px] font-semibold rounded-lg px-2 py-1.5 border bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:border-white/5">
-          <Building2 size={11} className="shrink-0 text-slate-400 dark:text-slate-400" />
-          <span className="shrink-0">{origem}</span>
-          <span className="text-slate-400 dark:text-slate-500">•</span>
-          <span className="truncate" title={`Org: ${organizador}`}>
-            Org: {organizador}
-          </span>
-        </div>
+        {/* Faixa de metadados.
+            O texto é cortado com reticências (pedido da rodada 28): o card
+            mantém a largura do grid e a linha não estoura. */}
+        {layoutFaixa === "duplo" ? (
+          <div className="mt-0.5 flex flex-col gap-1 text-[10px] font-semibold rounded-lg px-2 py-1.5 border bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:border-white/5">
+            <span className="flex items-center gap-1.5 min-w-0">
+              <Building2 size={11} className="shrink-0 text-slate-400" />
+              <span className="truncate" title={origem}>{origem}</span>
+            </span>
+            <span className="flex items-center gap-1.5 min-w-0">
+              <Users size={11} className="shrink-0 text-slate-400" />
+              <span className="truncate" title={organizador}>Org: {organizador}</span>
+            </span>
+          </div>
+        ) : (
+          <div className="mt-0.5 flex items-center gap-1.5 text-[10px] font-semibold rounded-lg px-2 py-1.5 border bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:border-white/5">
+            <Building2 size={11} className="shrink-0 text-slate-400" />
+            <span className="shrink-0">{origem}</span>
+            <span className="text-slate-400 dark:text-slate-500">•</span>
+            <span className="truncate" title={`Org: ${organizador}`}>
+              Org: {organizador}
+            </span>
+          </div>
+        )}
 
-        {/* Selo escolar/público (mural do aluno) */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-300 flex items-center gap-1">
+        {/* Selo escolar/público + categoria (uma linha, sem duplicar a faixa) */}
+        <div className="flex items-center gap-1.5 min-w-0 flex-nowrap">
+          <span
+            className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-300 flex items-center gap-1 shrink-0"
+            title={event.isSchool ? "Evento escolar" : "Aberto ao público"}
+          >
             {event.isSchool ? <GraduationCap size={10} /> : <Globe2 size={10} />}
             {event.isSchool ? "Escolar" : "Público"}
           </span>
           {event.category && (
-            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 dark:bg-white/5 dark:text-slate-400">
+            <span
+              className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 dark:bg-white/5 dark:text-slate-400 truncate min-w-0"
+              title={event.category}
+            >
               {event.category}
             </span>
           )}
