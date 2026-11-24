@@ -77,7 +77,7 @@ console.log("\n=== 4. Grade e estados ===");
     /grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 min-\[1440px\]:grid-cols-5/.test(fonteSemComentarios)
   );
   // Rodada 18 aumentou o respiro no mobile (gap-4) mantendo o do desktop.
-  ok("espaçamento regular entre cards", /gap-4 sm:gap-\[18px\]/.test(fonte));
+  ok("espaçamento regular entre cards", /gap-4 sm:gap-5/.test(fonte));
   ok("estado vazio explica quando não há eventos", /Nenhum evento na agenda ainda/.test(fonte));
   ok("estado vazio oferece limpar filtros", /Nada com esses filtros/.test(fonte));
   ok("estado vazio oferece criar compromisso", /Criar compromisso/.test(fonte));

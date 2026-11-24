@@ -26,12 +26,12 @@ const admin = semComentarios(readFileSync("src/components/AdminPanel.tsx", "utf8
 // ===========================================================================
 console.log("\n1) Container");
 
-check("largura relativa de 94%", feed.includes("w-[94%]"));
-check("teto de 1720px", feed.includes("max-w-[1720px]"));
-check("container centralizado (mx-auto)", feed.includes("w-[94%] max-w-[1720px] mx-auto"));
+check("largura relativa de 88%", feed.includes("w-[88%]"));
+check("teto de 1600px", feed.includes("max-w-[1600px]"));
+check("container centralizado (mx-auto)", feed.includes("w-[88%] max-w-[1600px] mx-auto"));
 check("não estreita com max-w-6xl / 88rem", !feed.includes("max-w-6xl") && !feed.includes("max-w-[88rem]") && !feed.includes("max-w-5xl"));
-check("todas as faixas (cabeçalho, filtros, busca, agenda) usam o container novo", (feed.match(/w-\[94%\] max-w-\[1720px\] mx-auto/g) || []).length >= 4, `${(feed.match(/w-\[94%\] max-w-\[1720px\] mx-auto/g) || []).length} usos`);
-check("sem padding lateral que estreite a grade", !feed.includes("w-[94%] max-w-[1720px] mx-auto px-4"));
+check("todas as faixas (cabeçalho, filtros, busca, agenda) usam o container novo", (feed.match(/w-\[88%\] max-w-\[1600px\] mx-auto/g) || []).length >= 4, `${(feed.match(/w-\[88%\] max-w-\[1600px\] mx-auto/g) || []).length} usos`);
+check("sem padding lateral que estreite a grade", !feed.includes("w-[88%] max-w-[1600px] mx-auto px-4"));
 
 // ===========================================================================
 // 2. Grade
@@ -43,7 +43,7 @@ check("2 colunas no tablet", feed.includes("sm:grid-cols-2"));
 check("4 colunas no desktop", feed.includes("xl:grid-cols-4"));
 check("5 colunas a partir de 1440px", feed.includes("min-[1440px]:grid-cols-5"));
 check("não usa 3 colunas no meio (era o que encolhia os cards)", !feed.includes("lg:grid-cols-3"));
-check("gap horizontal de 18px no desktop", feed.includes("sm:gap-[18px]"));
+check("gap horizontal de 20px no desktop", feed.includes("sm:gap-5"));
 check("gap de 16px no celular", feed.includes("gap-4"));
 check("cards esticados na linha (altura uniforme)", feed.includes("items-stretch"));
 
@@ -54,31 +54,30 @@ function larguraDoCard(viewport, containerPct, containerMax, colunas, gap) {
   return util / colunas;
 }
 
-const em1850 = larguraDoCard(1850, 94, 1720, 5, 18);
+const em1850 = larguraDoCard(1850, 88, 1600, 5, 20);
 check(
-  "em 1850px o card fica entre 325 e 335px",
-  em1850 >= 325 && em1850 <= 335,
+  "em 1850px o card fica entre 295 e 315px (harmônico, não gigante)",
+  em1850 >= 295 && em1850 <= 315,
   `${em1850.toFixed(1)}px`
 );
-check("5 cards por linha em 1850px", Math.round(em1850) === Math.round(em1850));
 
-const em1920 = larguraDoCard(1920, 94, 1720, 5, 18);
-check("em 1920px continua 5 por linha com ~315px", em1920 >= 310 && em1920 <= 340, `${em1920.toFixed(1)}px`);
+const em1920 = larguraDoCard(1920, 88, 1600, 5, 20);
+check("em 1920px o card fica em ~296px", em1920 >= 285 && em1920 <= 310, `${em1920.toFixed(1)}px`);
 
-const em2560 = larguraDoCard(2560, 94, 1720, 5, 18);
-check("ultrawide respeita o teto de 1720px (card ~320px)", em2560 >= 315 && em2560 <= 335, `${em2560.toFixed(1)}px`);
+const em2560 = larguraDoCard(2560, 88, 1600, 5, 20);
+check("ultrawide respeita o teto de 1600px", em2560 >= 285 && em2560 <= 310, `${em2560.toFixed(1)}px`);
 
-const em1440 = larguraDoCard(1440, 94, 1720, 5, 18);
-check("em 1440px o card tem >= 250px (5 colunas ainda cabem)", em1440 >= 250, `${em1440.toFixed(1)}px`);
+const em1440 = larguraDoCard(1440, 88, 1600, 5, 20);
+check("em 1440px o card ainda cabe com 5 colunas (>=230px)", em1440 >= 230, `${em1440.toFixed(1)}px`);
 
-const em1280 = larguraDoCard(1280, 94, 1720, 4, 18);
-check("em 1280px são 4 colunas com ~290px", em1280 >= 270 && em1280 <= 320, `${em1280.toFixed(1)}px`);
+const em1280 = larguraDoCard(1280, 88, 1600, 4, 20);
+check("em 1280px são 4 colunas com ~267px", em1280 >= 250 && em1280 <= 300, `${em1280.toFixed(1)}px`);
 
-const em768 = larguraDoCard(768, 94, 1720, 2, 18);
-check("em 768px são 2 colunas com ~345px", em768 >= 320 && em768 <= 380, `${em768.toFixed(1)}px`);
+const em768 = larguraDoCard(768, 88, 1600, 2, 20);
+check("em 768px são 2 colunas com ~318px", em768 >= 300 && em768 <= 350, `${em768.toFixed(1)}px`);
 
-const em375 = larguraDoCard(375, 94, 1720, 1, 18);
-check("em 375px é 1 coluna com ~352px", em375 >= 340, `${em375.toFixed(1)}px`);
+const em375 = larguraDoCard(375, 88, 1600, 1, 20);
+check("em 375px é 1 coluna com ~330px", em375 >= 315, `${em375.toFixed(1)}px`);
 
 check("nenhuma porcentagem acima de 100 (sem transbordo)", em1850 > 0 && em375 > 0);
 

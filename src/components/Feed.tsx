@@ -282,7 +282,7 @@ export default function Feed({
       */}
       <div className="sticky top-0 z-30 bg-brand-bg-light/95 dark:bg-brand-bg-dark/95 backdrop-blur-md border-b border-brand-primary/10">
         {/* Barra principal: título + ações */}
-        <div className="w-[94%] max-w-[1720px] mx-auto flex items-start justify-between gap-2 px-0.5 sm:px-1 pt-3.5 pb-2.5 sm:pt-4 sm:pb-3">
+        <div className="w-[88%] max-w-[1600px] mx-auto flex items-start justify-between gap-2 px-0.5 sm:px-1 pt-3.5 pb-2.5 sm:pt-4 sm:pb-3">
           <div className="min-w-0 flex-1">
             <h1 className="text-[1.35rem] sm:text-[1.7rem] font-display font-semibold tracking-tight text-slate-900 dark:text-white leading-tight">
               Eventos
@@ -327,7 +327,7 @@ export default function Feed({
 
         {/* Filtros: faixa própria, com rolagem horizontal no celular em vez de
             quebrar em várias linhas e empurrar o conteúdo para baixo. */}
-        <div className="w-[94%] max-w-[1720px] mx-auto px-0.5 sm:px-1 pb-2.5">
+        <div className="w-[88%] max-w-[1600px] mx-auto px-0.5 sm:px-1 pb-2.5">
           <div className="flex items-center gap-2.5 overflow-x-auto no-scrollbar scroll-x-snap -mx-4 px-4 sm:-mx-1 sm:px-1 py-0.5">
             <FiltroGrupo rotulo="Cidade">
               {([
@@ -391,7 +391,7 @@ export default function Feed({
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden bg-white/60 dark:bg-white/[0.03] border-b border-brand-primary/10"
           >
-            <div className="w-[94%] max-w-[1720px] mx-auto px-0.5 sm:px-1 py-3">
+            <div className="w-[88%] max-w-[1600px] mx-auto px-0.5 sm:px-1 py-3">
               <div className="relative flex items-center w-full max-w-xl">
                 <Search className="absolute left-3.5 text-slate-400 dark:text-slate-500" size={16} />
                 <input
@@ -426,7 +426,7 @@ export default function Feed({
         urgente. Só aparece para quem está conectado e tem algum compromisso.
       */}
       {currentUser?.id && eventosPessoais.length > 0 && (
-        <section className="w-[94%] max-w-[1720px] mx-auto px-0.5 sm:px-1 pt-4">
+        <section className="w-[88%] max-w-[1600px] mx-auto px-0.5 sm:px-1 pt-4">
           <div className="flex items-center justify-between gap-2 mb-2">
             <button
               type="button"
@@ -504,16 +504,15 @@ export default function Feed({
       {/*
         Grade do mural (rodada 31) — dimensionamento da referência.
         ----------------------------------------------------------------
-        - Contêiner: **94% da largura** com teto de **1720 px** (antes 88rem =
-          1408 px). Em 1850 px de tela a área útil fica ~1640 px, sem as faixas
-          vazias nas laterais.
+        - Contêiner: **88% da largura** com teto de **1600 px**. Em 1850 px de
+          tela a área útil fica ~1600 px — ocupa a tela sem ficar colado nas
+          bordas (ajuste de 2026-11-24: o card de ~330 px ficou grande demais).
         - **5 cards** a partir de 1440 px (`min-[1440px]`), 4 no desktop
-          intermediário, 2 no tablet e 1 no celular. Com ~1640 px úteis e 4
-          gaps de 18 px, cada card fica com ~324–330 px — exatamente a faixa
-          pedida (325–335 px).
+          intermediário, 2 no tablet e 1 no celular. Com 1600 px úteis e 4 gaps
+          de 20 px, cada card fica com ~304 px — proporção mais harmoniosa.
         - `items-stretch`: todos os cards da linha com a mesma altura.
       */}
-      <div className="w-[94%] max-w-[1720px] mx-auto pt-4 pb-bottom-nav grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 min-[1440px]:grid-cols-5 gap-4 sm:gap-[18px] items-stretch">
+      <div className="w-[88%] max-w-[1600px] mx-auto pt-4 pb-bottom-nav grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 min-[1440px]:grid-cols-5 gap-4 sm:gap-5 items-stretch">
         {isLoading && filteredEvents.length === 0 ? (
           // Skeleton loading state
           Array.from({ length: 4 }).map((_, i) => (
