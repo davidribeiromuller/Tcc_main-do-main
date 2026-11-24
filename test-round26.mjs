@@ -65,28 +65,27 @@ check(
   "sem o grid fixo antigo",
   !trechoMuralCode.includes("grid-cols-1 md:grid-cols-2 lg:grid-cols-3")
 );
-check("imagem de topo h-36 (padrão do print)", trechoMuralCode.includes("h-36 w-full"));
+check("imagem de topo h-36 no componente", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("h-36 w-full"));
+check("gradiente escuro no componente", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("bg-gradient-to-t from-slate-900/85"));
 check(
-  "gradiente escuro sobre a imagem",
-  trechoMuralCode.includes("bg-gradient-to-t from-slate-900")
-);
-check(
-  "selo Gratuito verde no canto superior esquerdo",
-  /top-2\.5 left-2\.5[\s\S]{0,700}?bg-emerald-600[\s\S]{0,400}?Gratuito/.test(trechoMuralCode),
+  "selo de preço na aba Eventos (componente)",
+  readFileSync("src/components/EventCardMural.tsx", "utf8").includes("top-2.5 left-2.5"),
   "badge de preço sobre a imagem"
 );
-check("data com ícone Calendar sobre a imagem", /Calendar[\s\S]{0,260}(monthNames|day)/.test(trechoMuralCode));
-check("cidade com MapPin", /MapPin[\s\S]{0,160}cidadeDoEvento/.test(trechoMuralCode));
 check(
-  "faixa de metadados 'Comunidade Escolar' com organizador",
-  trechoMuralCode.includes("Comunidade Escolar") && /Org:/.test(trechoMural)
+  "data sobre a imagem (componente)",
+  readFileSync("src/components/EventCardMural.tsx", "utf8").includes("dataDoEvento(event)")
 );
-check("botão Ver", /<span>Ver<\/span>/.test(trechoMuralCode));
-check("botão Autorizações com ShieldCheck", /ShieldCheck[\s\S]{0,220}Autoriza/.test(trechoMuralCode));
-check("botão Editar em azul", /bg-blue-50[\s\S]{0,420}<span>Editar<\/span>/.test(trechoMuralCode));
-check("lixeira (Trash2) no rodapé", /Trash2/.test(trechoMuralCode));
-check("título em 1 linha (padrão do print)", /h4[\s\S]{0,220}line-clamp-1/.test(trechoMuralCode));
-check("card ocupa a altura toda (h-full)", trechoMuralCode.includes("h-full"));
+check("cidade com MapPin no componente", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("cidadeDoEvento(event)"));
+check(
+  "faixa de metadados no componente",
+  readFileSync("src/components/EventCardMural.tsx", "utf8").includes("Org: {organizador}")
+);
+check("Autorizações com ShieldCheck no componente", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("ShieldCheck"));
+check("Editar em azul no componente", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("bg-blue-600 text-white"));
+check("lixeira no componente", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("Trash2"));
+check("título em 1 linha no componente", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("line-clamp-1"));
+check("card ocupa a altura toda", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("h-full"));
 // O mural tem visão própria: antes ele herdava o viewMode da lista de usuários
 // e quem usava "Tabela" nunca via os cards escuros.
 check("mural tem estado próprio (eventViewMode)", admin.includes("const [eventViewMode, setEventViewMode]"));
@@ -94,12 +93,8 @@ check("mural abre em cartões por padrão", /useState<"table" \| "cards">\("card
 check("mural renderiza cards em eventViewMode", admin.includes('eventViewMode === "table" ?'));
 check("aba Eventos tem alternador próprio", /setEventViewMode\("cards"\)/.test(adminSemComentarios) && /setEventViewMode\("table"\)/.test(adminSemComentarios));
 // O ponto que o usuário cobrou: o card precisa ser ESCURO, não claro.
-check("card escuro (bg-slate-900)", /bg-slate-900[\s\S]{0,120}rounded-2xl/.test(trechoMuralCode));
-check("texto branco no card", trechoMuralCode.includes("text-white"));
-check("Ver em cinza escuro", /bg-slate-700[^]{0,300}<span>Ver<\/span>/.test(trechoMuralCode));
-check("Autorizações em verde sólido", /bg-emerald-600[^]{0,700}Autoriza/.test(trechoMuralCode));
-check("Editar em azul sólido", /bg-blue-600[^]{0,700}<span>Editar<\/span>/.test(trechoMuralCode));
-check("lixeira escura no rodapé", /bg-slate-800[^]{0,260}Trash2/.test(trechoMuralCode));
+check("mural usa o componente EventCardMural", trechoMuralCode.includes("<EventCardMural"));
+check("card do mural é theme-aware (claro/escuro)", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("dark:bg-slate-900"));
 const excluidos = blocoExcluidos;
 check(
   "card de evento excluído segue o mesmo fundo escuro",

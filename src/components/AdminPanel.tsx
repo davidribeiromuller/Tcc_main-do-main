@@ -68,6 +68,7 @@ import {
 import EventSuggestionsTab from "./EventSuggestionsTab";
 import ProfileChangesTab from "./ProfileChangesTab";
 import SchoolProfileModal from "./SchoolProfileModal.tsx";
+import EventCardMural from "./EventCardMural.tsx";
 import { carregarEscolas } from "../lib/schoolProfilesService.ts";
 import type { SchoolProfile } from "../lib/schoolsData.ts";
 import {
@@ -2329,13 +2330,13 @@ export default function AdminPanel({
                 <div className="col-span-full bg-white dark:bg-brand-card-dark rounded-2xl border border-slate-200 dark:border-white/10 overflow-hidden">
                   <div className="admin-table-scroll">
                     <table className="admin-table text-left text-xs">
-                      <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-900">
-                        <tr className="border-b border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 font-semibold">
-                          <th className="py-3.5 px-4 bg-slate-100 dark:bg-slate-900">Evento</th>
-                          <th className="py-3.5 px-4 bg-slate-100 dark:bg-slate-900">Data</th>
-                          <th className="py-3.5 px-4 bg-slate-100 dark:bg-slate-900">Cidade</th>
-                          <th className="py-3.5 px-4 bg-slate-100 dark:bg-slate-900">Valor</th>
-                          <th className="py-3.5 px-4 bg-slate-100 dark:bg-slate-900 text-right">Ações</th>
+                      <thead className="sticky top-0 z-10 bg-slate-900">
+                        <tr className="border-b border-white/10 text-white font-semibold">
+                          <th className="py-3.5 px-4 bg-slate-900">Evento</th>
+                          <th className="py-3.5 px-4 bg-slate-900">Data</th>
+                          <th className="py-3.5 px-4 bg-slate-900">Cidade</th>
+                          <th className="py-3.5 px-4 bg-slate-900">Valor</th>
+                          <th className="py-3.5 px-4 bg-slate-900 text-right">Ações</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-white/5">
@@ -2345,7 +2346,7 @@ export default function AdminPanel({
                           const canModifyThisEvent = isChefe || (isFuncionario && isMyEvent);
                           return (
                             <tr key={ev.id} className="hover:bg-slate-50 dark:hover:bg-white/5">
-                              <td className="py-3 px-4 font-semibold text-slate-800 dark:text-slate-100">
+                              <td className="py-3 px-4 font-semibold text-slate-900 dark:text-slate-100">
                                 {ev.title}
                               </td>
                               <td className="py-3 px-4 text-slate-600 dark:text-slate-300 whitespace-nowrap">
@@ -2381,7 +2382,7 @@ export default function AdminPanel({
                                       <button
                                         type="button"
                                         onClick={() => handleOpenEditEventModal(ev)}
-                                        className="px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 text-[11px] font-semibold cursor-pointer"
+                                        className="px-2 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold cursor-pointer"
                                       >
                                         Editar
                                       </button>
@@ -2412,143 +2413,22 @@ export default function AdminPanel({
                   const canModifyThisEvent = isChefe || (isFuncionario && isMyEvent);
 
                   /*
-                    CARD ESCURO (design de referência da rodada 26).
-                    --------------------------------------------------------------
-                    O painel é claro, mas o mural de eventos usa card ESCURO
-                    (slate-900) — a mesma linguagem visual do print enviado:
-                    imagem de topo, selo de preço no canto superior esquerdo,
-                    data sobre a imagem, título em 1 linha, cidade com pino,
-                    faixa "Comunidade Escolar • Org: ..." e a barra de ações
-                    com Ver/Autorizações à esquerda e Editar/lixeira à direita.
+                    Card do mural (rodada 27) — componente único em
+                    `EventCardMural`. O mesmo componente desenha o card claro
+                    (modo claro) e o card escuro do print (modo escuro), então
+                    painel e mural do aluno nunca mais divergem.
                   */
                   return (
-                    <div
+                    <EventCardMural
                       key={ev.id}
-                      className="bg-slate-900 dark:bg-[#12161d] rounded-2xl border border-slate-700/60 dark:border-white/10 shadow-md hover:shadow-xl hover:border-slate-500/70 transition-all flex flex-col overflow-hidden group h-full text-white"
-                    >
-                      {/* Imagem de topo com gradiente para o card escuro */}
-                      <div className="relative h-36 w-full bg-slate-800 overflow-hidden shrink-0">
-                        <img
-                          src={
-                            ev.image ||
-                            "https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=600&auto=format&fit=crop"
-                          }
-                          alt={ev.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 opacity-90"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/45 to-slate-900/5" />
-
-                        {/* Selo de preço — canto superior esquerdo */}
-                        <span
-                          className={`absolute top-2.5 left-2.5 text-[10px] font-bold px-2 py-0.5 rounded-md shadow-sm ${
-                            ev.isPaid ? "bg-amber-500 text-slate-900" : "bg-emerald-600 text-white"
-                          }`}
-                        >
-                          {ev.isPaid ? (ev.price ? `R$ ${ev.price}` : "Pago") : "Gratuito"}
-                        </span>
-
-                        {isMyEvent && (
-                          <span className="absolute top-2.5 right-2.5 text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-600/90 text-white shadow-sm">
-                            Seu Evento
-                          </span>
-                        )}
-
-                        {/* Data sobre a imagem */}
-                        <div className="absolute bottom-2.5 left-2.5 right-2.5 flex items-center gap-1.5 text-[11px] font-semibold text-white/95 drop-shadow">
-                          <Calendar size={12} className="shrink-0 text-emerald-400" />
-                          <span className="truncate">
-                            {ev.day} de {monthNames[ev.month] || "Mês"} de {ev.year} •{" "}
-                            {ev.time || "14:00"}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Corpo escuro */}
-                      <div className="p-4 flex-1 flex flex-col gap-2">
-                        <h4
-                          className="font-bold text-sm text-white line-clamp-1 leading-snug"
-                          title={ev.title}
-                        >
-                          {ev.title}
-                        </h4>
-
-                        <div className="flex items-center gap-1.5 text-[11px] text-slate-300">
-                          <MapPin size={12} className="text-emerald-400 shrink-0" />
-                          <span className="truncate">{cidadeDoEvento(ev)}</span>
-                        </div>
-
-                        {/* Faixa de metadados: origem + organizador */}
-                        <div className="mt-0.5 flex items-center gap-1.5 text-[10px] font-semibold text-slate-300 bg-slate-800/80 rounded-lg px-2 py-1.5 border border-white/5">
-                          <Building2 size={11} className="shrink-0 text-slate-400" />
-                          <span className="shrink-0">
-                            {ev.isSchool ? "Comunidade Escolar" : "Aberto ao público"}
-                          </span>
-                          <span className="text-slate-500">•</span>
-                          <span className="truncate" title={`Org: ${organizadorDoEvento(ev)}`}>
-                            Org: {organizadorDoEvento(ev)}
-                          </span>
-                        </div>
-
-                        {ev.requirements && (
-                          <p className="text-[10px] text-slate-400 line-clamp-2 bg-slate-800/50 p-2 rounded-lg border border-white/5">
-                            {ev.requirements}
-                          </p>
-                        )}
-
-                        {/* Barra de ações — colada no rodapé do card */}
-                        <div className="mt-auto pt-3 border-t border-white/10 flex items-center justify-between gap-1.5">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            {onSelectEvent && (
-                              <button
-                                type="button"
-                                onClick={() => onSelectEvent(ev)}
-                                className="px-2.5 py-1.5 bg-slate-700/70 hover:bg-slate-600 text-white rounded-lg text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1"
-                              >
-                                <Info size={12} />
-                                <span>Ver</span>
-                              </button>
-                            )}
-
-                            <button
-                              type="button"
-                              onClick={() => setViewingAuthEvent(ev)}
-                              className="px-2.5 py-1.5 bg-emerald-600/90 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1"
-                              title="Visualizar autorizações dos pais/responsáveis para este evento"
-                            >
-                              <ShieldCheck size={12} />
-                              <span>Autorizações</span>
-                            </button>
-                          </div>
-
-                          {canModifyThisEvent ? (
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => handleOpenEditEventModal(ev)}
-                                className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1"
-                              >
-                                <Edit3 size={12} />
-                                <span>Editar</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => setEventToDelete(ev)}
-                                className="p-1.5 bg-slate-800 hover:bg-red-600/80 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer"
-                                title="Excluir evento"
-                              >
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
-                          ) : (
-                            <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1 shrink-0">
-                              <Lock size={10} />
-                              <span>Outro admin</span>
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                      event={ev}
+                      onOpen={onSelectEvent ? () => onSelectEvent(ev) : undefined}
+                      onAutorizacoes={() => setViewingAuthEvent(ev)}
+                      onEditar={canModifyThisEvent ? () => handleOpenEditEventModal(ev) : undefined}
+                      onExcluir={canModifyThisEvent ? () => setEventToDelete(ev) : undefined}
+                      bloqueadoParaEditar={!canModifyThisEvent}
+                      seuEvento={!!isMyEvent}
+                    />
                   );
                 })
               )}

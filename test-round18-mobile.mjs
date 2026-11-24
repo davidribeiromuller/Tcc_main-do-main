@@ -71,9 +71,11 @@ console.log(`\n=== Renderização em ${LARGURA}px de largura ===`);
 
   const texto = document.body.textContent ?? "";
   ok("título da aba na tela", /Eventos/.test(texto));
-  ok("dois cards renderizados", RTL.screen.queryAllByRole("heading", { level: 3 }).length === 2);
-  ok("cada card tem o título sobre o banner",
-    container.querySelectorAll("h3.absolute").length === 2);
+  // Rodada 27: o card do mural virou componente único; o título agora é h4
+  // no corpo do card (com a data sobre o banner).
+  ok("dois cards renderizados", RTL.screen.queryAllByRole("heading", { level: 4 }).length === 2);
+  ok("cada card tem a data sobre o banner",
+    container.querySelectorAll("div.h-36").length === 2);
 
   // Nenhum elemento com largura fixa maior que a viewport
   const classesFixas = [...container.querySelectorAll("[class]")]

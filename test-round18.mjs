@@ -23,6 +23,7 @@ const css = readFileSync("./src/index.css", "utf8");
 const feed = readFileSync("./src/components/Feed.tsx", "utf8");
 const admin = readFileSync("./src/components/AdminPanel.tsx", "utf8");
 const calendario = readFileSync("./src/components/CalendarView.tsx", "utf8");
+const cardMural = readFileSync("./src/components/EventCardMural.tsx", "utf8");
 const registro = readFileSync("./src/components/Register.tsx", "utf8");
 const validacao = readFileSync("./src/lib/schoolAccountValidation.ts", "utf8");
 const login = readFileSync("./src/components/Login.tsx", "utf8");
@@ -88,8 +89,10 @@ console.log("\n=== 4. Densidade e respiro no mobile ===");
   ok("título do Feed não usa mais 20px fixos", /text-\[1\.35rem\]/.test(feed));
   ok("botão de compromisso é 40×40 no mobile", /h-10 w-10 sm:w-auto/.test(feed));
   ok("grade do Feed tem gap de 16px no mobile", /gap-4 sm:gap-5/.test(feed));
-  ok("card não escala no toque (só com hover)", /\[@media\(hover:hover\)\]:active:scale-\[0\.995\]/.test(feed));
-  ok("banner do card menor no mobile", /h-36 sm:h-44/.test(feed));
+  // Rodada 27: o card do mural virou componente (EventCardMural) e o banner
+  // passou a ser único (h-36) em todos os tamanhos — sem escala no toque.
+  ok("card do mural sem scale no toque", !/active:scale/.test(cardMural));
+  ok("banner do card compacto (h-36)", /h-36 w-full/.test(cardMural));
 
   ok("abas do painel rolam na horizontal", /overflow-x-auto no-scrollbar scroll-x-snap/.test(admin));
   ok("abas do painel não quebram linha", /whitespace-nowrap shrink-0/.test(admin));

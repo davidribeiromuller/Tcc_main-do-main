@@ -21,18 +21,24 @@ const fonte = readFileSync("./src/components/Feed.tsx", "utf8");
 
 console.log("\n=== 1. Cards voltaram ao design anterior ===");
 {
+  // Rodada 27: o card do mural passou para `EventCardMural`; a imagem do evento
+  // continua sendo o visual (sem camada por área do conhecimento).
+  const cardFonte = readFileSync("./src/components/EventCardMural.tsx", "utf8");
   ok("usa a imagem (sem camada de área do conhecimento)",
-    /event\.image \|\| "https:\/\/images\.unsplash\.com/.test(fonte));
+    /event\.image[\s\S]{0,120}images\.unsplash\.com/.test(cardFonte));
   ok("não importa mais o módulo de visuais por área",
-    !/eventVisuals/.test(fonte));
+    !/eventVisuals/.test(cardFonte) && !/eventVisuals/.test(fonte));
   // O título continua sobreposto ao banner; na rodada 18 o respiro passou a
   // ser responsivo (menor no mobile), então validamos a posição, não o literal.
-  ok("título volta a ficar sobre o banner",
-    /absolute bottom-[\d.]+ left-[\d.]+ right-[\d.]+[^"]*text-white/.test(fonte));
-  ok("volta o cartão arredondado grande (rounded-3xl)",
-    /relative rounded-3xl overflow-hidden bg-white/.test(fonte));
-  ok("data volta ao formato dd/m/aaaa",
-    /\{event\.day\}\/\{event\.month \+ 1\}\/\{event\.year\}/.test(fonte));
+  // Rodada 27: a DATA fica sobre o banner (padrão do print) e o título no
+  // corpo do card, em uma linha.
+  ok("data sobre o banner, em branco",
+    /absolute bottom-2\.5[^]{0,400}text-white/.test(cardFonte));
+  ok("cartão arredondado (rounded-2xl) no componente",
+    /rounded-2xl border flex flex-col/.test(cardFonte));
+  ok("data por extenso a partir de day/month/year",
+    /\{ev\.day\} de \$\{mes\} de \$\{ev\.year\}/.test(cardFonte) ||
+    /dataDoEvento/.test(cardFonte));
   ok("não existe mais bloco de data destacado",
     !/Bloco de data/.test(fonte));
 }
@@ -106,7 +112,7 @@ console.log("\n=== 6. Renderização real (jsdom) ===");
 
   ok("título da aba na tela", RTL.screen.queryByText("Eventos") !== null);
   ok("contagem aparece na tela", /2 eventos/.test(document.body.textContent ?? ""));
-  ok("dois cards renderizados", RTL.screen.queryAllByRole("heading", { level: 3 }).length === 2);
+  ok("dois cards renderizados", RTL.screen.queryAllByRole("heading", { level: 4 }).length === 2);
   ok("grupo cidade acessível", RTL.screen.queryByRole("group", { name: /cidade/i }) !== null);
   ok("grupo tipo acessível", RTL.screen.queryByRole("group", { name: /tipo/i }) !== null);
   ok("chips marcam estado", RTL.screen.getAllByRole("button", { pressed: true }).length >= 2);
