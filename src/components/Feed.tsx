@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  Search, MapPin, Calendar, CircleDollarSign, PlusCircle, X, GraduationCap, Globe2,
+  Search, MapPin, Calendar, PlusCircle, X, GraduationCap, Globe2,
   CalendarPlus, Trash2, Clock, User, Sparkles, ArrowRight,
 } from "lucide-react";
 import { Event } from "../types";
 import { resolveEventCity, classifyEventAsSchool } from "../lib/eventClassification";
 import AIChatAssistant from "./AIChatAssistant";
+import EventCardMural from "./EventCardMural.tsx";
 import EventLocationModal from "./EventLocationModal";
 import PersonalEventModal from "./PersonalEventModal";
 import {
@@ -577,86 +578,18 @@ export default function Feed({
           </div>
         ) : (
           filteredEvents.map((event) => (
-            <motion.div
+            /*
+              Rodada 27: o mural do aluno usa o MESMO card do painel
+              (`EventCardMural`) — card escuro no modo escuro, claro no modo
+              claro. Antes eram dois desenhos diferentes que divergiam.
+            */
+            <EventCardMural
               key={event.id}
-              layoutId={`card-container-${event.id}`}
-              onClick={() => handleCardClick(event)}
-              /*
-                `active:scale` só onde existe hover: no celular a escala
-                disparava no início do gesto e dava a sensação de "travado"
-                ao rolar com o dedo em cima do card.
-              */
-              className="relative rounded-3xl overflow-hidden bg-white dark:bg-brand-card-dark shadow-sm transition-shadow duration-200 cursor-pointer group border border-brand-primary/15 [@media(hover:hover)]:hover:shadow-md [@media(hover:hover)]:hover:scale-[1.01] [@media(hover:hover)]:active:scale-[0.995]"
-            >
-              {/* Image banner with Gradient Overlay */}
-              <div className="relative w-full h-36 sm:h-44 overflow-hidden">
-                <img
-                  src={event.image || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600"}
-                  alt={event.title}
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-black/10" />
-
-                {/* Title Overlay in Banner */}
-                <h3 className="absolute bottom-2.5 left-3 right-3 sm:bottom-3 sm:left-3.5 sm:right-3.5 text-white font-display font-semibold text-[0.95rem] sm:text-lg leading-snug drop-shadow-md line-clamp-2 pr-1">
-                  {event.title}
-                </h3>
-
-                {/* Badges: localidade + tipo escolar */}
-                <div className="absolute top-2.5 left-2.5 right-2.5 sm:top-3 sm:left-3 sm:right-auto flex items-center gap-1.5 flex-wrap pr-16 sm:pr-0">
-                  {getEventCity(event) && (
-                    <span className="bg-white/95 dark:bg-black/70 backdrop-blur-sm text-slate-800 dark:text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
-                      <MapPin size={10} className="text-red-500" />
-                      {getEventCity(event)}
-                    </span>
-                  )}
-                  <span
-                    className={`backdrop-blur-sm text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm ${
-                      getEventIsSchool(event)
-                        ? "bg-brand-accent/95 text-white"
-                        : "bg-white/95 dark:bg-black/70 text-slate-800 dark:text-white"
-                    }`}
-                  >
-                    {getEventIsSchool(event) ? <GraduationCap size={10} /> : <Globe2 size={10} />}
-                    {getEventIsSchool(event) ? "Escolar" : "Público"}
-                  </span>
-                </div>
-
-                {/* Price indicator badge */}
-                {event.isPaid && (
-                  <span className="absolute top-2.5 right-2.5 sm:top-3 sm:right-3 bg-yellow-400 text-slate-900 text-[10px] font-bold px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full uppercase tracking-wider flex items-center gap-1 shadow max-w-[7.5rem] truncate">
-                    <CircleDollarSign size={12} />
-                    {event.price || "Pago"}
-                  </span>
-                )}
-              </div>
-
-              {/* Feed Meta Info */}
-              <div className="p-3.5 sm:p-4 flex flex-col gap-2.5 bg-white dark:bg-brand-card-dark">
-                <div
-                  onClick={(e) => {
-                    if (onOpenMap) {
-                      e.stopPropagation();
-                      onOpenMap(event.id);
-                    }
-                  }}
-                  className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300 hover:text-brand-accent transition-colors"
-                  title="Ver localização no mapa"
-                >
-                  <MapPin size={14} className="text-red-500 shrink-0 mt-0.5" />
-                  <span className="line-clamp-1 underline-offset-2 hover:underline">{event.location}</span>
-                </div>
-
-                <div className="flex items-center justify-between gap-2 text-[10px] font-mono uppercase tracking-wider text-slate-400 border-t border-slate-100 dark:border-slate-800 pt-2.5">
-                  <span className="flex items-center gap-1">
-                    <Calendar size={12} />
-                    {event.day}/{event.month + 1}/{event.year}
-                  </span>
-                  <span>{event.time}</span>
-                </div>
-              </div>
-            </motion.div>
+              event={event}
+              onOpen={() => handleCardClick(event)}
+              onAbrirMapa={onOpenMap ? () => onOpenMap(event.id) : undefined}
+              rotuloVer="Ver evento"
+            />
           ))
         )}
       </div>

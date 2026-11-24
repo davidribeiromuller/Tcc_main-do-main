@@ -1706,3 +1706,67 @@ trocar telefone → **Salvar informações** → abrir a aba **Escolas** do app 
 aluno e conferir o telefone novo. Na aba **Sugestões**, "Buscar links de
 inscrição" agora resolve as olimpíadas pelo catálogo e mostra **Procurar na
 web** quando não houver site oficial.
+
+---
+
+## 31. Rodada 27 — um único card para os dois murais (claro e escuro)
+
+Pedido: usar o card do print também no **mural de eventos** do aluno e criar a
+versão **clara** do mesmo desenho.
+
+### 31.1 Um componente, dois temas
+
+Novo `src/components/EventCardMural.tsx`. O painel tinha um card e o mural do
+aluno outro — e os dois divergiam a cada rodada. Agora existe **um** card:
+
+| | Modo claro | Modo escuro (print) |
+|---|---|---|
+| Card | `bg-white` + borda `slate-200` + `shadow-sm` | `dark:bg-slate-900` + borda `slate-700/60` |
+| Título | `text-slate-900`, 1 linha | `dark:text-white`, 1 linha |
+| Faixa de metadados | `bg-slate-100` / texto `slate-600` | `dark:bg-slate-800/80` / texto `slate-300` |
+| Data sobre a imagem | pílula `bg-black/45` | texto direto (como no print) |
+| Ações | Ver cinza, Mapa cinza, Autorizações verde, Editar azul, lixeira cinza | mesmas cores em tons escuros |
+
+Elementos fixos nos dois temas: imagem `h-36`, selo **Gratuito** verde
+(`bg-emerald-600`, pago em âmbar com o valor) no canto superior esquerdo, data
+por extenso sobre a imagem, cidade com pino, faixa
+`Comunidade Escolar • Org: …` (ou `Aberto ao público`), selo Escolar/Público,
+categoria e o rodapé de ações.
+
+### 31.2 Defeito visível no print: faixa duplicada
+
+No card do print a frase `Comunidade Escolar • Org: Diretoria Helena Wysocki`
+aparecia **duas vezes** — a segunda vinha de `requirements`, gravado com o mesmo
+texto. O card agora detecta essa repetição e **não** imprime o bloco de
+requisitos quando ele é igual à faixa (ou tem o mesmo formato).
+
+### 31.3 Onde é usado
+
+- **Painel → Eventos** (cartões): `EventCardMural` com
+  `onAutorizacoes`/`onEditar`/`onExcluir`, `seuEvento` e `bloqueadoParaEditar`.
+- **Mural do aluno** (`Feed`): o mesmo card com `onOpen` (abre o detalhe),
+  `onAbrirMapa` (mapa) e o rótulo `Ver evento`. O card antigo (título sobre a
+  imagem, sem faixa) foi removido.
+- A **tabela** do mural no painel também foi harmonizada: cabeçalho escuro e
+  ações sólidas (verde/azul).
+
+### 31.4 Validação
+
+| Suíte | Resultado |
+|---|---|
+| `test-round27.mjs` (novo: contrato do card + helpers) | **51/51** |
+| `test-round27-render.mjs` (novo: jsdom nos dois temas, ações e duplicação) | **37/37** |
+| `26` / `26-mural` / `26-render` | 90 · 23 · 21 |
+| `25` / `25-render` / `24` / `23` / `22` | 44 · 10 · 40 · 142 · 27 |
+| `21` / `20` / `19` / `18`+`18-mobile` / `17` | 41 · 35 · 32 · 50+21 · 49 |
+| `16` / `14` / `13` / `12`+`12b`+`12c` / `11` | 39 · 36 · 31 · 32+18+21 · 64 |
+| `tsc --noEmit` / `npm run build` | 0 erros / ok |
+
+As suítes 16, 18, 18-mobile e 26 foram **atualizadas** (não afrouxadas): as
+checagens do desenho antigo do card do mural do aluno passaram a validar o novo
+componente, mantendo a intenção original de cada uma (imagem real, sem escala no
+toque, banner compacto, data sobre a imagem).
+
+**Como ver:** painel → Eventos (cards no padrão); app do aluno → Mural
+(mesmos cards) e alternar o tema claro/escuro no perfil para ver as duas
+versões.

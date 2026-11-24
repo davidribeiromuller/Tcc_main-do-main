@@ -140,10 +140,16 @@ if (abaEventos) {
 }
 
 // O mural abre em CARTÕES por padrão (não depende mais da visão dos usuários).
+const cardMural = [...document.querySelectorAll("div.rounded-2xl")].find((d) =>
+  (d.textContent || "").includes("Feira de Profissões 2026")
+);
+check("mural abre em cartões sem clicar em nada", !!cardMural, "o card não apareceu ao abrir a aba");
 check(
-  "mural abre em cartões sem clicar em nada",
-  !!document.querySelector("div.bg-slate-900"),
-  "o card escuro não apareceu ao abrir a aba"
+  "card é theme-aware (claro branco / escuro slate-900)",
+  !!cardMural &&
+    String(cardMural.className).includes("bg-white") &&
+    String(cardMural.className).includes("dark:bg-slate-900"),
+  String(cardMural?.className || "")
 );
 
 // E existe um alternador próprio dentro da aba Eventos.
@@ -164,28 +170,20 @@ check("faixa Comunidade Escolar", texto.includes("Comunidade Escolar"));
 check("organizador na faixa", texto.includes("Org: Diretoria Helena Wysocki"));
 check("ações Ver / Autorizações / Editar", texto.includes("Autorizações") && texto.includes("Editar"));
 
-// O ponto central: o card do evento tem fundo escuro e texto branco.
-const card = [...document.querySelectorAll("div")].find((d) =>
-  (d.className || "").toString().includes("bg-slate-900") &&
-  (d.textContent || "").includes("Feira de Profissões 2026")
-);
+// O ponto central: o card usa as cores certas em cada modo.
+const card = cardMural;
 check("card do evento encontrado no DOM", !!card);
 if (card) {
   const classes = String(card.className);
-  check("card tem fundo escuro (bg-slate-900)", classes.includes("bg-slate-900"), classes);
-  check("card tem texto branco", classes.includes("text-white"), classes);
-  check(
-    "card não é mais branco",
-    !classes.includes("bg-white"),
-    classes
-  );
+  check("card claro no modo claro (bg-white)", classes.includes("bg-white"), classes);
+  check("card escuro no modo escuro (dark:bg-slate-900)", classes.includes("dark:bg-slate-900"), classes);
   check("borda escura sutil", classes.includes("border-slate-700") || classes.includes("border-white"));
   const html = card.outerHTML;
   check("imagem de topo h-36", /h-36/.test(html));
   check("gradiente escuro na imagem", html.includes("from-slate-900"));
   check("Autorizações em verde sólido", /bg-emerald-600/.test(html));
   check("Editar em azul sólido", /bg-blue-600/.test(html));
-  check("Ver em cinza escuro", /slate-700/.test(html));
+  check("ação Ver com contraste nos dois modos", /slate-700/.test(html) && /bg-slate-100/.test(html));
   check("botão Ver presente no card", html.includes("Ver"));
 }
 
