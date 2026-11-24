@@ -26,8 +26,11 @@ const admin = semComentarios(readFileSync("src/components/AdminPanel.tsx", "utf8
 // ===========================================================================
 console.log("\n1) Grade do mural do aluno");
 
-check("no máximo 3 colunas (card mais largo)", feed.includes("lg:grid-cols-3") && !feed.includes("xl:grid-cols-4"));
-check("container mais estreito (max-w-5xl)", feed.includes("max-w-5xl mx-auto w-full px-4 sm:px-6 pt-4"));
+// Rodada 29: a grade acompanha a largura do resto da tela (max-w-6xl) e usa
+// 4 colunas no desktop largo — os cards ficam maiores, não menores.
+check("grade com 4 colunas no desktop largo", feed.includes("lg:grid-cols-3 xl:grid-cols-4"));
+check("grade usa a mesma largura do cabeçalho (max-w-6xl)", feed.includes("max-w-6xl mx-auto w-full px-4 sm:px-6 pt-4 pb-bottom-nav grid"));
+check("grade não é mais estreita que o cabeçalho", !feed.includes("max-w-5xl"));
 check("colunas alinhadas no topo (items-stretch)", feed.includes("items-stretch"));
 check("respiro entre cards mantido", feed.includes("gap-4 sm:gap-5"));
 check("mobile continua 1 coluna / 2 no tablet", feed.includes("grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"));
