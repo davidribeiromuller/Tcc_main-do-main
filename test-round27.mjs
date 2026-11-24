@@ -52,7 +52,7 @@ check("bloco dark presente", blocoDark.length > 0);
 // Elementos do design
 check("selo Gratuito verde no topo esquerdo", /top-2\.5 left-2\.5[^]{0,400}bg-emerald-600[^]{0,200}Gratuito/.test(cardSemComentarios));
 check("pago em âmbar com o preço", cardSemComentarios.includes("bg-amber-500") && cardSemComentarios.includes("R$"));
-check("imagem de topo h-36 (h-40 no desktop)", cardSemComentarios.includes("h-36 sm:h-40"));
+check("capa de 160px (h-40)", cardSemComentarios.includes("h-40 w-full"));
 check("data sobre a imagem com Calendar", /bottom-2\.5[^]{0,400}Calendar/.test(cardSemComentarios));
 check("título em até 2 linhas com altura reservada", cardSemComentarios.includes("line-clamp-2") && cardSemComentarios.includes("min-h-[2.6em]"));
 check("cidade com MapPin", /MapPin[^]{0,400}cidadeDoEvento/.test(cardSemComentarios));

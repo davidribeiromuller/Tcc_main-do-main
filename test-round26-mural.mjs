@@ -179,7 +179,7 @@ if (card) {
   check("card escuro no modo escuro (dark:bg-slate-900)", classes.includes("dark:bg-slate-900"), classes);
   check("borda escura sutil", classes.includes("border-slate-700") || classes.includes("border-white"));
   const html = card.outerHTML;
-  check("imagem de topo h-36", /h-36/.test(html));
+  check("capa de 160px (h-40)", /h-40/.test(html));
   check("gradiente escuro na imagem", html.includes("from-slate-900"));
   check("Autorizações em verde sólido", /bg-emerald-600/.test(html));
   check("Editar em azul sólido", /bg-blue-600/.test(html));

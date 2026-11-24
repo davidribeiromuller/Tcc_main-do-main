@@ -28,24 +28,25 @@ console.log("\n1) Grade do mural do aluno");
 
 // Rodada 30: referência é o print do painel em tela cheia — 5 cards por linha
 // e o contêiner ocupando a largura toda do monitor.
-check("grade com 5 colunas em tela grande", feed.includes("xl:grid-cols-4 2xl:grid-cols-5"));
-check("grade com 4 colunas no desktop", feed.includes("lg:grid-cols-3 xl:grid-cols-4"));
-check("contêiner largo (88rem = 1408px)", feed.includes("max-w-[88rem] mx-auto w-full px-4 sm:px-6 pt-4 pb-bottom-nav grid"));
-check("grade não usa mais o contêiner estreito", !feed.includes("max-w-5xl") && !feed.includes("max-w-6xl mx-auto w-full px-4 sm:px-6 pt-4"));
+// Rodada 31: container de 94%/1720px e 5 colunas a partir de 1440px.
+check("grade com 5 colunas em tela grande", feed.includes("min-[1440px]:grid-cols-5"));
+check("grade com 4 colunas no desktop", feed.includes("xl:grid-cols-4"));
+check("contêiner de 94% com teto de 1720px", feed.includes("w-[94%] max-w-[1720px] mx-auto pt-4 pb-bottom-nav grid"));
+check("grade não usa contêiner estreito", !feed.includes("max-w-5xl") && !feed.includes("max-w-6xl") && !feed.includes("max-w-[88rem]"));
 check("colunas alinhadas no topo (items-stretch)", feed.includes("items-stretch"));
-check("respiro entre cards mantido", feed.includes("gap-4 sm:gap-5"));
-check("mobile continua 1 coluna / 2 no tablet", feed.includes("grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"));
+check("respiro entre cards mantido", feed.includes("gap-4 sm:gap-[18px]"));
+check("mobile continua 1 coluna / 2 no tablet", feed.includes("grid-cols-1 sm:grid-cols-2"));
 
 // ===========================================================================
 // 2. Card: proporção e alinhamento
 // ===========================================================================
 console.log("\n2) Card");
 
-check("imagem de topo 144px no mobile e 160px no desktop", card.includes("h-36 sm:h-40"));
+check("capa com 160px em todas as telas", card.includes("h-40 w-full"));
 check("título em até 2 linhas com altura reservada (cards alinham)", card.includes("line-clamp-2") && card.includes("min-h-[2.6em]"));
-check("título maior no desktop", card.includes("text-[13px] sm:text-sm"));
+check("título em 14px (destaque sem exagero)", card.includes("font-bold text-sm"));
 check("corpo mais compacto no mobile", card.includes("p-3.5 sm:p-4"));
-check("ritmo vertical uniforme", card.includes("flex flex-col gap-1.5"));
+check("ritmo vertical uniforme", card.includes("flex flex-col gap-2"));
 check("card ocupa a altura da linha", card.includes("h-full"));
 check("rodapé sempre no pé do card", card.includes("mt-auto pt-3"));
 
