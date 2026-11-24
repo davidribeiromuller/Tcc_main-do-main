@@ -1,4 +1,5 @@
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase.ts";
+import { fetchJsonApiWithAuth } from "./staticHosting.ts";
 import { updateUserDirectInSupabase } from "./usersService.ts";
 import type { User } from "../types.ts";
 
@@ -200,6 +201,23 @@ export async function criarSolicitacaoDePerfil(params: {
 export async function listarSolicitacoesDePerfil(
   status: "pending" | "approved" | "rejected" | "all" = "pending"
 ): Promise<{ solicitacoes: SolicitacaoDePerfil[]; error: any }> {
+  // Servidor primeiro: a fila mostra nome/CPF/e-mail que usuários pediram para
+  // mudar — não é dado para ficar legível com a chave pública.
+  try {
+    const res = await fetchJsonApiWithAuth(`/api/admin/profile-requests?status=${encodeURIComponent(status)}`);
+    if (res && res.ok) {
+      const corpo = await res.json().catch(() => null);
+      if (corpo && Array.isArray(corpo.requests)) {
+        return { solicitacoes: corpo.requests as SolicitacaoDePerfil[], error: null };
+      }
+    }
+    if (res && (res.status === 401 || res.status === 403)) {
+      return { solicitacoes: [], error: new Error("As alterações de perfil são visíveis apenas para administradores.") };
+    }
+  } catch {
+    /* servidor indisponível — leitura direta abaixo */
+  }
+
   if (!isSupabaseConfigured()) {
     return { solicitacoes: [], error: new Error("Supabase não configurado no cliente") };
   }
@@ -227,48 +245,41 @@ export async function aprovarSolicitacaoDePerfil(params: {
   solicitacao: SolicitacaoDePerfil;
   reviewedBy: string;
 }): Promise<{ user: User | null; error: any }> {
-  if (!isSupabaseConfigured()) {
-    return { user: null, error: new Error("Supabase não configurado no cliente") };
-  }
-
-  const { solicitacao, reviewedBy } = params;
+  const { solicitacao } = params;
   if (solicitacao.status !== "pending") {
     return { user: null, error: new Error("Esta solicitação já foi revisada.") };
   }
 
-  const supabase = getSupabaseClient();
+  /*
+    Aprovar aplica o valor direto em `users`. Fica no servidor, que confere o
+    papel, reivindica o pedido (evita aprovação dupla) e só então grava. Sem
+    servidor, a ação falha em vez de acontecer por um caminho inseguro.
+  */
+  try {
+    const res = await fetchJsonApiWithAuth(`/api/admin/profile-requests/${solicitacao.id}/approve`, {
+      method: "POST",
+    });
 
-  // 1. Reivindica a solicitação (evita aprovação dupla em duas abas).
-  const { data: reivindicada, error: claimError } = await supabase
-    .from("profile_change_requests")
-    .update({ status: "approved", reviewed_at: new Date().toISOString(), reviewed_by: reviewedBy })
-    .eq("id", solicitacao.id)
-    .eq("status", "pending")
-    .select();
+    if (res && res.ok) {
+      const payload: Partial<User> = {};
+      for (const a of solicitacao.alteracoes) (payload as any)[a.campo] = a.valorNovo;
+      return { user: { id: solicitacao.userId, ...payload } as User, error: null };
+    }
 
-  if (claimError) return { user: null, error: claimError };
-  if (!reivindicada || reivindicada.length === 0) {
-    return { user: null, error: new Error("Esta solicitação já foi revisada por outro administrador.") };
+    const detalhe = res ? await res.clone().json().catch(() => null) : null;
+    if (detalhe?.error) return { user: null, error: new Error(detalhe.error) };
+    if (!res) {
+      return {
+        user: null,
+        error: new Error("Aprovar alterações de perfil exige o servidor do eloEscola."),
+      };
+    }
+    if (res.status === 403) return { user: null, error: new Error("Somente o Administrador Chefe aprova alterações de perfil.") };
+    if (res.status === 409) return { user: null, error: new Error("Esta solicitação já foi revisada por outro administrador.") };
+    return { user: null, error: new Error("Não foi possível aprovar a solicitação.") };
+  } catch (err: any) {
+    return { user: null, error: err instanceof Error ? err : new Error("Falha de rede ao aprovar.") };
   }
-
-  // 2. Aplica no perfil.
-  const payload: Partial<User> = {};
-  for (const a of solicitacao.alteracoes) {
-    (payload as any)[a.campo] = a.valorNovo;
-  }
-
-  const { user, error } = await updateUserDirectInSupabase(solicitacao.userId, payload);
-
-  if (error || !user) {
-    // Reverte o estado da solicitação para não perder o pedido.
-    await supabase
-      .from("profile_change_requests")
-      .update({ status: "pending", reviewed_at: null, reviewed_by: null })
-      .eq("id", solicitacao.id);
-    return { user: null, error: error || new Error("Não foi possível aplicar as alterações") };
-  }
-
-  return { user, error: null };
 }
 
 /** Rejeita a solicitação sem tocar no perfil. */
@@ -277,27 +288,27 @@ export async function rejeitarSolicitacaoDePerfil(params: {
   reviewedBy: string;
   motivo?: string;
 }): Promise<{ success: boolean; error: any }> {
-  if (!isSupabaseConfigured()) {
-    return { success: false, error: new Error("Supabase não configurado no cliente") };
-  }
-
   try {
-    const supabase = getSupabaseClient();
-    const { error } = await supabase
-      .from("profile_change_requests")
-      .update({
-        status: "rejected",
-        reviewed_at: new Date().toISOString(),
-        reviewed_by: params.reviewedBy,
-        rejection_reason: params.motivo || null,
-      })
-      .eq("id", params.solicitacaoId)
-      .eq("status", "pending");
+    const res = await fetchJsonApiWithAuth(`/api/admin/profile-requests/${params.solicitacaoId}/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: params.motivo ?? null }),
+    });
 
-    if (error) return { success: false, error };
-    return { success: true, error: null };
-  } catch (err) {
-    return { success: false, error: err };
+    if (res && res.ok) return { success: true, error: null };
+
+    const detalhe = res ? await res.clone().json().catch(() => null) : null;
+    return {
+      success: false,
+      error: new Error(
+        detalhe?.error ||
+          (res?.status === 403
+            ? "Somente o Administrador Chefe rejeita alterações de perfil."
+            : "Não foi possível rejeitar a solicitação.")
+      ),
+    };
+  } catch (err: any) {
+    return { success: false, error: err instanceof Error ? err : new Error("Falha de rede.") };
   }
 }
 

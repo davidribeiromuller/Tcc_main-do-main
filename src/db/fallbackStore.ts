@@ -8,7 +8,7 @@ import {
   EventArchiveLog
 } from '../types.ts';
 import { EVENT_RETENTION_DAYS } from '../lib/eventLifecycle.ts';
-import { verifyPassword } from '../lib/security.ts';
+import { verifyPassword, hashPassword } from '../lib/security.ts';
 
 /**
  * Parte 2 da auditoria: as contas de demonstração da loja em memória tinham
@@ -396,6 +396,46 @@ try {
 
     // Parte 2: privilégio não é concedido por e-mail fixo. A promoção passa
     // pelo painel administrativo (com auditoria) ou BOOTSTRAP_ADMIN_*.
+    //
+    // RODADA 35: o BOOTSTRAP_ADMIN_* só era lido no caminho Postgres. Quem
+    // rodava no modo fallback (sem DATABASE_URL) ficava SEM nenhuma conta de
+    // administrador — e, como o painel ADM exige Chefe, ele era inalcançável.
+    // Agora o mesmo par de variáveis cria o administrador inicial também aqui.
+    const bootstrapEmail = (process.env.BOOTSTRAP_ADMIN_EMAIL || '').trim().toLowerCase();
+    const bootstrapPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD || '';
+
+    if (bootstrapEmail && bootstrapPassword.length >= 8) {
+      const existente = fallbackUsers.find(
+        (u) => (u.email || '').trim().toLowerCase() === bootstrapEmail
+      );
+
+      if (!existente) {
+        fallbackUsers.unshift({
+          id: 1,
+          uid: 'bootstrap-admin-uid',
+          nome: 'Administrador inicial',
+          email: bootstrapEmail,
+          password: hashPassword(bootstrapPassword),
+          foto_perfil: '',
+          provider: 'local',
+          role: 'Diretor',
+          ativo: true,
+          isAdmin: true,
+          institution: process.env.BOOTSTRAP_ADMIN_INSTITUTION || 'eloEscola',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } as any);
+        updated = true;
+        console.info('[Database] Administrador inicial criado (modo fallback) a partir de BOOTSTRAP_ADMIN_*.');
+      } else if (!existente.password) {
+        // Conta já existia sem senha utilizável (era o caso dos dados demo).
+        existente.password = hashPassword(bootstrapPassword);
+        existente.role = 'Diretor';
+        existente.isAdmin = true;
+        updated = true;
+        console.info('[Database] Senha do administrador inicial definida (modo fallback).');
+      }
+    }
 
 
     if (updated) {

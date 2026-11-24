@@ -3,10 +3,10 @@
 Documento de rastreabilidade: cada item da auditoria de segurança/comercialização
 com o **estado atual**, **onde está no código** e **como verificar**.
 
-- Versão: **2026-11-11** (Rodadas 32 e 33)
+- Versão: **2026-11-11** (Rodadas 32, 33 e 35)
 - Suítes: `test-round32-security.mjs` (121 verificações) e
-  `test-round33-saas.mjs` (135 verificações) — executam as regras de verdade,
-  não só procuram strings.
+  `test-round33-saas.mjs` (135) e `test-round35-admin.mjs` (90) — executam as
+  regras de verdade, não só procuram strings.
 - Legenda: ✅ resolvido · 🟡 parcial / depende de configuração · ⛔ pendência conhecida
 
 ---
@@ -25,6 +25,11 @@ com o **estado atual**, **onde está no código** e **como verificar**.
 | 1.8 | Rotas de arquivamento de eventos públicas | ✅ | `archived`, `restore`, `archive-logs`, `cleanup-expired` com `requireAdminOrStaff` | `round32` §7b |
 | 1.9 | URL/chave do Supabase trocáveis via `localStorage` | ✅ | removido o override em `src/lib/supabase.ts` | `round32` §1 |
 | 1.10 | Telas SaaS declaradas em bloco que nunca renderizava | ✅ | lista da casca em `App.tsx` + `ROTAS_POR_TELA` | `round32` §8b |
+| 1.11 | Painel ADM operava tabelas fechadas direto do navegador (falhava em silêncio, "lista vazia") | ✅ | todas as rotas do painel em `server.ts` + serviços chamando a API; diagnóstico em `AdminPanel.tsx` | `round35` |
+| 1.12 | Policies públicas de escrita ainda abertas em 9 tabelas | ✅ | `supabase/migrations/20261113_close_open_rls.sql` (aplicada em 2026-11-11); restam só SELECTs de mural/diretório | `round35` |
+| 1.13 | Agenda pessoal sem policy de dono | ✅ | `personal_events_owner_select/insert/update/delete` (`owner_id` do JWT) + rotas `/api/personal-events` | `round35` |
+| 1.14 | Sem administrador em modo fallback (painel inalcançável) | ✅ | `src/db/fallbackStore.ts` cria/promove com `BOOTSTRAP_ADMIN_*` | `round35` |
+| 1.15 | Falha de rede confundida com "sem registros" | ✅ | `isRedeIndisponivel`/`responderIndisponivel` → `503 SAAS_UNREACHABLE` + `hint`; `mensagemDeErroDaApi` no cliente | `round35` |
 
 ## Parte 2 — Autenticação e sessão
 

@@ -2033,3 +2033,66 @@ POST /api/ai/chat 401                     POST /api/billing/webhook            4
 E `test-round32-security.mjs` ganhou o grupo **§8b** justamente para isso: confere
 que as quatro telas estão na lista da casca, que as rotas canônicas existem, que
 `plans`/`privacy` são públicas e que `subscription`/`master` exigem sessão.
+
+---
+
+## 35. Rodada 35 — painel administrativo reconstruído sobre o servidor
+
+**Pedido:** "reconstrua a parte do adm no aplicativo, com todas as funcionalidades
+que o aplicativo tinha". Escopo confirmado com o usuário: **reconstrução completa**
+(não correção pontual) e **alvo = servidor Node/Express** — as funções
+administrativas não precisam existir no modo estático (GitHub Pages).
+
+### Por que era necessário reconstruir, e não corrigir
+
+O painel chamava o Supabase **direto do navegador**. As policies públicas de
+escrita foram fechadas nas rodadas anteriores, então cada aba do painel respondia
+"lista vazia" em vez de erro — um falso negativo pior que a falha, porque parecia
+que não havia dados. Além disso, operações sensíveis (redefinir senha, impersonar,
+excluir em definitivo) não podem depender do cliente: qualquer usuário com o
+`publishable key` conseguiria reproduzi-las.
+
+### O que foi feito
+
+| Camada | Mudança |
+|---|---|
+| `server.ts` | todas as rotas do painel com `requireAuth` + `requireAdminOrStaff`: usuários, bloqueio, exclusão lógica e definitiva, redefinição de senha, impersonação, CRUD de eventos, histórico de excluídos (`restore`/`purge`/retenção), sugestões de IA (`approve`/`reject`), alterações de perfil (`approve`/`reject`), agenda pessoal (visão do painel), contas escolares (`POST`, `reset-password`, bloqueio, verificação) e perfis de escola (`GET`/`PUT`) |
+| `src/lib/*Service.ts` | `schoolAccountsService`, `schoolProfilesService`, `eventSuggestionsService`, `deletedEventsService`, `profileChangeService` e `personalEventsService` passaram a chamar a API; nenhuma escrita direta em tabela fechada |
+| `src/lib/staticHosting.ts` | novo `mensagemDeErroDaApi(res, padrao)` traduz `SAAS_NOT_CONFIGURED`, `SAAS_UNREACHABLE`, 401, 403 e 503 em frase acionável |
+| `src/components/AdminPanel.tsx` | bloco de diagnóstico antes dos KPIs: consulta `/api/db-status` e distingue **modo estático** (aviso) de **`saasConfigured === false`** (erro); senha de usuário exibida como "protegida por hash (scrypt)" |
+| `src/db/fallbackStore.ts` | cria/promove o administrador inicial a partir de `BOOTSTRAP_ADMIN_*` também quando não há Postgres — antes o painel era **inalcançável** em modo fallback |
+| agenda pessoal | rotas próprias do usuário comum: `GET/POST /api/personal-events`, `DELETE /api/personal-events/:id`; o dono vem do token, nunca do corpo |
+| `supabase/migrations/20261113_close_open_rls.sql` | fecha as policies públicas restantes e cria as quatro `personal_events_owner_*` |
+
+### Rede indisponível não é "sem dados"
+
+Quando o sandbox não alcança `*.supabase.co`, o `fetch` lança `TypeError: fetch failed`.
+Antes isso virava `500 "Não foi possível consultar…"`, indistinguível de um bug.
+Agora os helpers `isRedeIndisponivel` / `responderIndisponivel` devolvem:
+
+```json
+{ "error": "…", "code": "SAAS_UNREACHABLE", "hint": "Verifique se o servidor alcança o Supabase (SUPABASE_URL/SUPABASE_SECRET_KEY)." }
+```
+
+`/api/db-status` passou a devolver `saasConfigured` em **todas** as respostas
+(inclusive `cachedOffline` e no `catch`), que é o campo usado pelo diagnóstico do painel.
+
+### Verificação em execução real (servidor local, modo fallback)
+
+```
+sem token:  /api/users 401   /api/admin/school-accounts 401   /api/events/deleted 401
+com Chefe:  /api/users 200   /api/events/archived 200
+            /api/events/deleted 503 SAAS_UNREACHABLE   (rede do sandbox, não bug)
+            /api/admin/personal-events 503 SAAS_UNREACHABLE
+```
+
+### Suítes
+
+- Nova: `test-round35-admin.mjs` — **90 verificações** (existência das rotas com
+  guardas, nenhuma rota do painel sem `requireAuth`, serviços usando API, painel
+  sem falso-vazio, hash de senha, bootstrap, migração, abas ligadas).
+- Atualizados porque o **dono da operação mudou de lado**, sem perder o requisito
+  original: `round17` (49 — conta escolar agora criada no servidor), `round25`
+  (45 — aprovação reivindica antes de aplicar, no servidor), `round26` (90 —
+  upsert de perfil por slug no servidor), `round32` (121 — hash de conta escolar
+  no servidor).

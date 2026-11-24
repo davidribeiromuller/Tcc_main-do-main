@@ -23,6 +23,7 @@
  */
 
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase.ts";
+import { fetchJsonApiWithAuth, mensagemDeErroDaApi } from "./staticHosting.ts";
 
 /** Evento pessoal, no formato usado pela interface. */
 export interface PersonalEvent {
@@ -135,6 +136,59 @@ function mapearLinha(linha: any): PersonalEvent {
  *                 Sem ele, devolve TODOS — uso exclusivo do Painel ADM.
  */
 export async function listarEventosPessoais(ownerId?: number): Promise<PersonalEvent[]> {
+  /*
+    Dono (agenda da própria conta): passa pelo servidor, que usa o `owner_id`
+    do token. Antes era escrita/leitura direta no Supabase — e a tabela estava
+    aberta para `anon` (qualquer visitante lia a agenda de todos).
+  */
+  if (ownerId) {
+    try {
+      const res = await fetchJsonApiWithAuth("/api/personal-events");
+      if (res && res.ok) {
+        const corpo = await res.json().catch(() => null);
+        if (corpo && Array.isArray(corpo.events)) {
+          const lista = corpo.events.map(mapearLinha);
+          gravarCache(lista, ownerId);
+          return lista;
+        }
+      }
+    } catch {
+      /* servidor indisponível — cai no caminho direto/cache abaixo */
+    }
+  }
+
+  /*
+    Visão do PAINEL (sem ownerId): passa pelo servidor.
+    `personal_events` tem política pública de leitura no Supabase, ou seja,
+    qualquer visitante lê a agenda de todos. O painel precisa desse dado, mas
+    não precisa (nem deve) obtê-lo pelo navegador — o servidor devolve a mesma
+    lista depois de conferir que quem pediu é administrador.
+  */
+  if (!ownerId) {
+    try {
+      const res = await fetchJsonApiWithAuth("/api/admin/personal-events");
+      if (res && res.ok) {
+        const corpo = await res.json().catch(() => null);
+        if (corpo && Array.isArray(corpo.events)) {
+          const lista = corpo.events.map(mapearLinha);
+          gravarCache(lista);
+          return lista;
+        }
+      }
+      if (res && !res.ok) {
+        // Falha de infraestrutura NÃO é "agenda vazia": o painel precisa
+        // mostrar o erro em vez de dizer que ninguém cadastrou nada.
+        console.warn(
+          "[eventos-pessoais] Painel não conseguiu ler a agenda:",
+          await mensagemDeErroDaApi(res, "Falha ao consultar a agenda pessoal.")
+        );
+        return [];
+      }
+    } catch {
+      /* servidor indisponível — cai no caminho direto abaixo */
+    }
+  }
+
   if (temCliente()) {
     try {
       const supabase = obterCliente();
@@ -219,6 +273,44 @@ export async function criarEventoPessoal(
     notes: dados.notes?.trim() || null,
   };
 
+  // Servidor primeiro: o dono é decidido pelo token, não pelo corpo.
+  try {
+    const res = await fetchJsonApiWithAuth("/api/personal-events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: registro.title,
+        description: registro.description,
+        location: registro.location,
+        city: registro.city,
+        day: registro.day,
+        month: registro.month,
+        year: registro.year,
+        time: registro.time,
+        category: registro.category,
+        isPaid: registro.is_paid,
+        price: registro.price,
+        reminder: registro.reminder,
+        notes: registro.notes,
+      }),
+    });
+
+    if (res && res.ok) {
+      const corpo = await res.json().catch(() => null);
+      if (corpo?.event) {
+        const evento = mapearLinha(corpo.event);
+        gravarCache([evento, ...lerCache(dados.ownerId)], dados.ownerId);
+        return { evento };
+      }
+    }
+    if (res && !res.ok) {
+      const detalhe = await res.clone().json().catch(() => null);
+      if (detalhe?.error) return { evento: null, erro: String(detalhe.error) };
+    }
+  } catch {
+    /* servidor indisponível — tenta o caminho direto abaixo */
+  }
+
   if (temCliente()) {
     try {
       const supabase = obterCliente();
@@ -274,6 +366,24 @@ export async function criarEventoPessoal(
 
 /** Remove um evento pessoal. Só o dono (ou o painel) deve chamar isto. */
 export async function removerEventoPessoal(id: number, ownerId?: number): Promise<boolean> {
+  // Remoção pelo servidor: vale tanto para o dono (agenda) quanto para o
+  // painel — em ambos os casos o servidor confere quem está pedindo.
+  try {
+    const url = ownerId
+      ? `/api/personal-events/${id}`
+      : `/api/admin/personal-events/${id}`;
+    const res = await fetchJsonApiWithAuth(url, { method: "DELETE" });
+    if (res && res.ok) {
+      if (ownerId) {
+        gravarCache(lerCache(ownerId).filter((e) => e.id !== id), ownerId);
+      }
+      return true;
+    }
+    if (res && (res.status === 401 || res.status === 403)) return false;
+  } catch {
+    /* servidor indisponível — tenta o caminho direto abaixo */
+  }
+
   if (temCliente()) {
     try {
       const supabase = obterCliente();

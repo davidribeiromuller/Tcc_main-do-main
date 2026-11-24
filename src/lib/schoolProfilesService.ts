@@ -1,4 +1,5 @@
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase.ts";
+import { fetchJsonApi, fetchJsonApiWithAuth } from "./staticHosting.ts";
 import { ARAUCARIA_SCHOOLS, type SchoolProfile } from "./schoolsData.ts";
 
 /**
@@ -153,6 +154,26 @@ export async function carregarPerfisEditados(): Promise<{
   perfis: Record<string, PerfilEditavel>;
   error: any;
 }> {
+  /*
+    Servidor primeiro: garante uma única fonte de verdade para o diretório
+    (o Supabase continua com leitura pública, mas quem grava é o servidor).
+  */
+  try {
+    const res = await fetchJsonApi("/api/school-profiles");
+    if (res && res.ok) {
+      const corpo = await res.json().catch(() => null);
+      if (corpo && Array.isArray(corpo.profiles)) {
+        const perfis: Record<string, PerfilEditavel> = {};
+        for (const p of corpo.profiles) {
+          if (p?.slug) perfis[p.slug] = p as PerfilEditavel;
+        }
+        return { perfis, error: null };
+      }
+    }
+  } catch {
+    /* sem servidor — cai no caminho direto */
+  }
+
   if (!isSupabaseConfigured()) return { perfis: {}, error: null };
 
   try {
@@ -201,62 +222,46 @@ export async function salvarPerfilEscola(
   perfil: PerfilEditavel,
   atualizadoPor: string
 ): Promise<{ perfil: PerfilEditavel | null; error: any }> {
-  if (!isSupabaseConfigured()) {
-    return { perfil: null, error: new Error("Supabase não configurado no cliente") };
-  }
   if (!perfil.slug) {
     return { perfil: null, error: new Error("Escola não identificada") };
   }
 
-  const limpar = (v?: string) => {
-    const t = (v || "").trim();
-    return t ? t : null;
-  };
-  const listaLimpa = (v?: string[]) => {
-    const arr = (v || []).map((s) => s.trim()).filter(Boolean);
-    return arr.length > 0 ? arr : [];
-  };
-
-  const payload = {
-    slug: perfil.slug,
-    name: limpar(perfil.name),
-    short_name: limpar(perfil.shortName),
-    type: limpar(perfil.type),
-    neighborhood: limpar(perfil.neighborhood),
-    city: limpar(perfil.city),
-    state: limpar(perfil.state),
-    address: limpar(perfil.address),
-    cep: limpar(perfil.cep),
-    phone: limpar(perfil.phone),
-    email: limpar(perfil.email),
-    website: limpar(perfil.website),
-    network: limpar(perfil.network),
-    nre: limpar(perfil.nre),
-    modalities: listaLimpa(perfil.modalities),
-    historical_overview: limpar(perfil.historicalOverview),
-    pedagogical_highlights: listaLimpa(perfil.pedagogicalHighlights),
-    infrastructure: listaLimpa(perfil.infrastructure),
-    latitude: typeof perfil.latitude === "number" ? perfil.latitude : null,
-    longitude: typeof perfil.longitude === "number" ? perfil.longitude : null,
-    image: limpar(perfil.image),
-    updated_at: new Date().toISOString(),
-    updated_by: atualizadoPor || null,
-  };
-
+  /*
+    Gravação pelo servidor. A política de `school_profiles` permite UPDATE
+    público no Supabase — inclusive porque foi escrita assim antes de existir
+    autenticação. Deixar o navegador gravar significaria que qualquer visitante
+    podia reescrever a ficha de uma escola no diretório.
+  */
   try {
-    const supabase = getSupabaseClient();
-    const { data, error } = await supabase
-      .from("school_profiles")
-      .upsert(payload, { onConflict: "slug" })
-      .select();
+    const res = await fetchJsonApiWithAuth(`/api/school-profiles/${encodeURIComponent(perfil.slug)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...perfil, atualizadoPor }),
+    });
 
-    if (error) return { perfil: null, error };
-    if (!data || data.length === 0) {
-      return { perfil: null, error: new Error("As informações não foram gravadas.") };
+    if (res && res.ok) {
+      const corpo = await res.json().catch(() => null);
+      if (corpo?.profile) return { perfil: corpo.profile as PerfilEditavel, error: null };
+      return { perfil, error: null };
     }
-    return { perfil: mapPerfil(data[0]), error: null };
-  } catch (err) {
-    return { perfil: null, error: err };
+
+    const detalhe = res ? await res.clone().json().catch(() => null) : null;
+    if (detalhe?.error) return { perfil: null, error: new Error(detalhe.error) };
+    if (res?.status === 401) return { perfil: null, error: new Error("Sua sessão expirou. Entre novamente.") };
+    if (res?.status === 403) {
+      return { perfil: null, error: new Error("Somente o Administrador Chefe pode editar os dados da escola.") };
+    }
+    if (!res) {
+      return {
+        perfil: null,
+        error: new Error(
+          "A edição das informações da escola exige o servidor do eloEscola (não funciona na versão estática)."
+        ),
+      };
+    }
+    return { perfil: null, error: new Error("Não foi possível gravar as informações da escola.") };
+  } catch (err: any) {
+    return { perfil: null, error: err?.message ? new Error(err.message) : err };
   }
 }
 
