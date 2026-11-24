@@ -152,6 +152,18 @@ export default function EventCardMural({
   className = "",
 }: EventCardMuralProps) {
   const { origem, organizador } = faixaDeMetadados(event);
+
+  /**
+   * A categoria só aparece se acrescentar informação. Quando ela repete o tipo
+   * ("Escolar"/"Público") o card mostrava o mesmo rótulo duas vezes.
+   */
+  const categoriaNormalizada = String(event.category || "").trim().toLowerCase();
+  const categoriaDiferente =
+    !!categoriaNormalizada &&
+    categoriaNormalizada !== "escolar" &&
+    categoriaNormalizada !== "publico" &&
+    categoriaNormalizada !== "público" &&
+    categoriaNormalizada !== (event.isSchool ? "escolar" : "publico");
   const faixaTexto = `${origem} • Org: ${organizador}`;
 
   // Já houve dado em que o campo `requirements` repetia a própria faixa.
@@ -176,7 +188,7 @@ export default function EventCardMural({
       ].join(" ")}
     >
       {/* Imagem de topo + selo de preço + data */}
-      <div className="relative h-36 sm:h-40 w-full shrink-0 overflow-hidden bg-slate-200 dark:bg-slate-800">
+      <div className="relative h-40 w-full shrink-0 overflow-hidden bg-slate-200 dark:bg-slate-800">
         <img
           src={
             event.image ||
@@ -216,9 +228,9 @@ export default function EventCardMural({
       </div>
 
       {/* Corpo */}
-      <div className="p-3.5 sm:p-4 flex-1 flex flex-col gap-1.5">
+      <div className="p-3.5 sm:p-4 flex-1 flex flex-col gap-2">
         <h4
-          className="font-bold text-[13px] sm:text-sm text-slate-900 dark:text-white line-clamp-2 leading-snug min-h-[2.6em]"
+          className="font-bold text-sm text-slate-900 dark:text-white line-clamp-2 leading-snug min-h-[2.6em]"
           title={event.title}
         >
           {event.title}
@@ -266,7 +278,8 @@ export default function EventCardMural({
           </div>
         )}
 
-        {/* Selo escolar/público + categoria (uma linha, sem duplicar a faixa) */}
+        {/* Selo escolar/público + categoria (uma linha, sem repetir o mesmo
+            rótulo duas vezes — era o "Escolar  Escolar" da referência). */}
         <div className="flex items-center gap-1.5 min-w-0 flex-nowrap">
           <span
             className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-300 flex items-center gap-1 shrink-0"
@@ -275,10 +288,10 @@ export default function EventCardMural({
             {event.isSchool ? <GraduationCap size={10} /> : <Globe2 size={10} />}
             {event.isSchool ? "Escolar" : "Público"}
           </span>
-          {event.category && (
+          {categoriaDiferente && (
             <span
               className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 dark:bg-white/5 dark:text-slate-400 truncate min-w-0"
-              title={event.category}
+              title={event.category || ""}
             >
               {event.category}
             </span>

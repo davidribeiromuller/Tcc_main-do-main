@@ -88,11 +88,11 @@ console.log("\n=== 4. Densidade e respiro no mobile ===");
   ok("cabeçalho do Feed tem respiro vertical no mobile", /pt-3\.5 pb-2\.5 sm:pt-4/.test(feed));
   ok("título do Feed não usa mais 20px fixos", /text-\[1\.35rem\]/.test(feed));
   ok("botão de compromisso é 40×40 no mobile", /h-10 w-10 sm:w-auto/.test(feed));
-  ok("grade do Feed tem gap de 16px no mobile", /gap-4 sm:gap-5/.test(feed));
+  ok("grade do Feed tem gap de 16px no mobile", /gap-4 sm:gap-\[18px\]/.test(feed));
   // Rodada 27: o card do mural virou componente (EventCardMural) e o banner
   // passou a ser único (h-36) em todos os tamanhos — sem escala no toque.
   ok("card do mural sem scale no toque", !/active:scale/.test(cardMural));
-  ok("banner do card compacto (h-36, h-40 no desktop)", /h-36 sm:h-40/.test(cardMural));
+  ok("banner do card com 160px (h-40)", /h-40 w-full/.test(cardMural));
 
   ok("abas do painel rolam na horizontal", /overflow-x-auto no-scrollbar scroll-x-snap/.test(admin));
   ok("abas do painel não quebram linha", /whitespace-nowrap shrink-0/.test(admin));

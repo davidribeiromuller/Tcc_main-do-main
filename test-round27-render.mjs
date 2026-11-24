@@ -132,7 +132,7 @@ check("modo escuro: data sem pílula", /dark:bg-transparent/.test(htmlClaro));
 check("Autorizações verde sólido nos dois modos", /bg-emerald-600 text-white/.test(htmlClaro));
 check("Editar azul sólido nos dois modos", /bg-blue-600 text-white/.test(htmlClaro));
 check("lixeira escura no modo escuro", /dark:bg-slate-800/.test(htmlClaro));
-check("imagem de topo h-36", /h-36/.test(htmlClaro));
+check("capa de 160px (h-40)", /h-40/.test(htmlClaro));
 
 // Simula o modo escuro: a classe `dark` é o que o Tailwind usa.
 document.documentElement.classList.add("dark");

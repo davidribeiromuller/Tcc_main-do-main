@@ -65,7 +65,7 @@ check(
   "sem o grid fixo antigo",
   !trechoMuralCode.includes("grid-cols-1 md:grid-cols-2 lg:grid-cols-3")
 );
-check("imagem de topo h-36 no componente", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("h-36 sm:h-40"));
+check("imagem de topo h-36 no componente", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("h-40 w-full"));
 check("gradiente escuro no componente", readFileSync("src/components/EventCardMural.tsx", "utf8").includes("bg-gradient-to-t from-slate-900/85"));
 check(
   "selo de preço na aba Eventos (componente)",

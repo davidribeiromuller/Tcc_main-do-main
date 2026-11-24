@@ -1843,3 +1843,64 @@ Escolar").
 
 `test-round16` e `18` foram atualizados para a nova grade (1/2/3) e para a
 imagem `h-36 sm:h-40`, mantendo a intenção das checagens originais.
+
+---
+
+## 33. Rodada 31 — dimensionamento da tela pública de Eventos
+
+Pedido: usar a referência (print do painel em tela cheia) como padrão de
+**dimensionamento e distribuição** da tela de Eventos do app, sem criar um
+design novo.
+
+### 33.1 Onde estava o limite
+
+| Camada | Antes | Depois |
+|---|---|---|
+| Container | `max-w-6xl`/`88rem` (1152/1408 px) | **`w-[94%]` com teto de `1720px`** |
+| Grade | `lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5` | **1 / 2 / 4 / 5** (`xl` e `min-[1440px]`) |
+| Gap | `gap-4 sm:gap-5` | `gap-4 sm:gap-[18px]` |
+
+- O container passou a ser **relativo** (94% da viewport) com **teto de 1720 px**:
+  em 1850 px de tela a área útil fica ~1640 px e **cada card sai com ~328 px** —
+  exatamente a faixa pedida (325–335 px), com 5 por linha.
+- Cabeçalho, pesquisa, filtros e agenda pessoal usam **o mesmo container**, então
+  nada fica desalinhado da grade.
+- A coluna intermediária de 3 foi removida (era ela que encolhia os cards em
+  notebooks): agora 1 (celular) → 2 (≥640) → 4 (≥1280) → 5 (≥1440).
+- `items-stretch` mantém todos os cards da linha com a mesma altura.
+
+### 33.2 Card
+
+- **Capa com 160 px** (`h-40`) em todas as resoluções, `object-fit: cover`,
+  cantos superiores arredondados, selo **Gratuito** no topo esquerdo e a
+  **data/hora sobre a imagem** com fundo escuro translúcido.
+- Padding interno de **14–16 px**, título em 14 px com **duas linhas
+  reservadas**, localização com ícone, faixa `Comunidade Escolar • Org: …`,
+  etiquetas de tipo/categoria e **divisor discreto** antes das ações.
+- Corrigido o **"Escolar  Escolar"**: a etiqueta de categoria não é mais
+  impressa quando repete o tipo do evento.
+- Ações da tela pública preservadas: **Ver evento** e **Mapa**. Nenhum controle
+  administrativo (Autorizações/Editar/Excluir) foi adicionado ao mural.
+
+### 33.3 Escopo
+
+Nada além dos dois componentes de tela (`Feed` e `EventCardMural`) foi alterado:
+banco, tabelas, Supabase, permissões, cadastro de eventos, filtros e busca
+seguem intactos. O painel administrativo continua funcionando (usa o mesmo card
+com os controles administrativos).
+
+### 33.4 Validação
+
+| Suíte | Resultado |
+|---|---|
+| `test-round31.mjs` (novo: container, escada de colunas e matemática do card em 375/768/1280/1440/1850/1920/2560 px) | **49/49** |
+| `28` / `27` / `27-render` | 27 · 51 · 37 |
+| `26` / `26-mural` / `26-render` | 90 · 23 · 21 |
+| `25` / `25-render` / `24` / `23` / `22` / `21` | 44 · 10 · 40 · 142 · 27 · 41 |
+| `20` / `19` / `18`+`18-mobile` / `17` / `16` | 35 · 32 · 50+21 · 49 · 39 |
+| `14` / `13` / `12`+`12b`+`12c` / `11` | 36 · 31 · 32+18+21 · 64 |
+| `tsc --noEmit` / `npm run build` | 0 erros / ok |
+
+**Como ver:** tela de Eventos em 1850 px de largura → 5 cards por linha,
+~328 px cada, ocupando 94% da tela. Reduzir a janela: 4 colunas abaixo de
+1440 px, 2 abaixo de 1280 px, 1 no celular.
