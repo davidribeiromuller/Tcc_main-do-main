@@ -1904,3 +1904,19 @@ com os controles administrativos).
 **Como ver:** tela de Eventos em 1850 px de largura → 5 cards por linha,
 ~328 px cada, ocupando 94% da tela. Reduzir a janela: 4 colunas abaixo de
 1440 px, 2 abaixo de 1280 px, 1 no celular.
+
+### 33.5 Ajuste fino (2026-11-24) — cards um pouco menores
+
+Os cards de ~330 px ficaram grandes demais para o conjunto. Ajuste aplicado
+**só na tela pública de Eventos** (`Feed`):
+
+| Item | Rodada 31 | Ajuste |
+|---|---|---|
+| Container | `w-[94%]` / teto `1720px` | **`w-[88%]` / teto `1600px`** |
+| Gap | `18px` | **`20px`** (`sm:gap-5`) |
+| Card em 1850 px | ~328 px | **~304 px** |
+| Card em 1920 px | ~318 px | **~296 px** |
+
+Diferença de ~24 px por card, mantendo as 5 colunas a partir de 1440 px e a
+mesma altura/proporção (capa 160 px). `test-round31` foi atualizado com a nova
+matemática (48 verificações).

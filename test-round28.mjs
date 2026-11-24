@@ -31,10 +31,10 @@ console.log("\n1) Grade do mural do aluno");
 // Rodada 31: container de 94%/1720px e 5 colunas a partir de 1440px.
 check("grade com 5 colunas em tela grande", feed.includes("min-[1440px]:grid-cols-5"));
 check("grade com 4 colunas no desktop", feed.includes("xl:grid-cols-4"));
-check("contêiner de 94% com teto de 1720px", feed.includes("w-[94%] max-w-[1720px] mx-auto pt-4 pb-bottom-nav grid"));
+check("contêiner de 88% com teto de 1600px", feed.includes("w-[88%] max-w-[1600px] mx-auto pt-4 pb-bottom-nav grid"));
 check("grade não usa contêiner estreito", !feed.includes("max-w-5xl") && !feed.includes("max-w-6xl") && !feed.includes("max-w-[88rem]"));
 check("colunas alinhadas no topo (items-stretch)", feed.includes("items-stretch"));
-check("respiro entre cards mantido", feed.includes("gap-4 sm:gap-[18px]"));
+check("respiro entre cards mantido", feed.includes("gap-4 sm:gap-5"));
 check("mobile continua 1 coluna / 2 no tablet", feed.includes("grid-cols-1 sm:grid-cols-2"));
 
 // ===========================================================================
