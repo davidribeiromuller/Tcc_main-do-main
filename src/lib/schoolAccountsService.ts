@@ -21,6 +21,7 @@
  */
 
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase.ts";
+import { hashPassword, verifyPassword } from "./security.ts";
 import { ARAUCARIA_SCHOOLS } from "./schoolsData.ts";
 import type { User } from "../types.ts";
 
@@ -173,6 +174,15 @@ export async function listarContasEscolares(opcoes?: {
     if (error) {
       // Tabela ainda não criada (migration pendente): mensagem acionável.
       const msg = String(error.message || "");
+      // Parte 2: `school_accounts` deixou de ser legível pela chave pública
+      // (continha senha). O painel do Chefe precisa do servidor.
+      if (error.code === "42501" || /permission denied|row-level security/i.test(msg)) {
+        return {
+          contas: [],
+          error:
+            "A lista de contas escolares só pode ser lida pelo servidor do eloEscola. Em hospedagem estática, use o ambiente com backend.",
+        };
+      }
       if (error.code === "42P01" || /does not exist|schema cache/i.test(msg)) {
         return {
           contas: [],
@@ -253,7 +263,9 @@ export async function criarContaEscolar(
           school_name: escola.name,
           login_identifier: identificador,
           institutional_email: email,
-          password: dados.password,
+          // Parte 2: a senha nunca é gravada em texto claro. O Chefe continua
+          // podendo DEFINIR uma senha nova (ver redefinirSenhaContaEscolar).
+          password: hashPassword(dados.password),
           responsible_name: dados.responsavel.trim(),
           responsible_role: dados.cargo.trim(),
           institutional_contact: dados.telefone?.trim() || email,
@@ -360,7 +372,7 @@ export async function redefinirSenhaContaEscolar(
     const { data, error } = await getSupabaseClient()
       .from("school_accounts")
       .update({
-        password: novaSenha,
+        password: hashPassword(novaSenha),
         must_change_password: true,
         updated_at: new Date().toISOString(),
       })
@@ -435,8 +447,21 @@ export async function autenticarContaEscolar(
       };
     }
 
-    if (conta.password && conta.password !== password) {
+    // Parte 2: comparação por hash (scrypt) com migração automática de
+    // registros legados em texto claro.
+    const senhaCheck = verifyPassword(password, conta.password);
+    if (!senhaCheck.ok) {
       return { user: null, error: "Credenciais inválidas. Verifique seu identificador e a senha." };
+    }
+    if (senhaCheck.needsUpgrade) {
+      try {
+        await getSupabaseClient()
+          .from("school_accounts")
+          .update({ password: hashPassword(password), updated_at: new Date().toISOString() })
+          .eq("id", conta.id);
+      } catch (migErr) {
+        console.warn("[schoolAccounts] Falha ao migrar senha legada:", migErr);
+      }
     }
 
     const agora = new Date().toISOString();

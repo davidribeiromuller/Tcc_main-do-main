@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import { Event, User, EventAttendanceAuthorization } from "../types";
 import { fetchStreetRoute } from "../lib/routing.ts";
-import { fetchJsonApi } from "../lib/staticHosting.ts";
+import { fetchJsonApi, fetchJsonApiWithAuth } from "../lib/staticHosting.ts";
 import { recordEventParticipation, recordRouteCalculation } from "../lib/userStats.ts";
 import ParentalAuthorizationModal from "./ParentalAuthorizationModal.tsx";
 import {
@@ -227,7 +227,7 @@ export default function EventDetail({
     if (currentUser && event?.id) {
       const studentId = currentUser.uid || currentUser.id;
       // Sem backend (GitHub Pages) a chamada simplesmente não acontece.
-      fetchJsonApi(`/api/events/${event.id}/authorizations/check?studentUserId=${encodeURIComponent(studentId)}`)
+      fetchJsonApiWithAuth(`/api/events/${event.id}/authorizations/check?studentUserId=${encodeURIComponent(studentId)}`)
         .then(res => (res ? res.json() : { authorized: false }))
         .then(data => {
           if (data.authorized && data.authorization) {

@@ -2788,7 +2788,7 @@ export default function AdminPanel({
                         <p className="flex items-center gap-1.5">
                           <span className="font-semibold text-slate-800 dark:text-slate-200">Senha:</span>
                           <code className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded font-mono text-slate-700 dark:text-slate-200">
-                            {acc.password || "não definida"}
+                            {acc.password ? "definida (hash)" : "não definida"}
                           </code>
                         </p>
                         {acc.lastLogin && (
@@ -4268,18 +4268,27 @@ export default function AdminPanel({
                       </span>
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="font-mono text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
-                          {userToViewDetails.password
-                            ? showUserPassword
-                              ? userToViewDetails.password
-                              : "•".repeat(Math.min(userToViewDetails.password.length, 12))
-                            : "não definida"}
+                          {/*
+                            Parte 2 da auditoria: a senha deixou de ser texto claro.
+                            O banco guarda somente o hash scrypt, então nem o Chefe
+                            consegue "ver" a senha antiga — mas ele continua podendo
+                            DEFINIR uma nova (botão de lápis), que é o fluxo real de
+                            suporte. Mostrar "••••" permanente seria pior: a UI fingiria
+                            um dado que não existe mais.
+                          */}
+                          {userToViewDetails.password ? "protegida por hash (scrypt)" : "não definida"}
                         </span>
 
                         {userToViewDetails.password && (
                           <>
                             <button
                               type="button"
-                              onClick={() => setShowUserPassword((v) => !v)}
+                              onClick={() =>
+                                notifyAdmin(
+                                  "A senha é guardada apenas como hash e não pode ser lida. Use o lápis para definir uma nova senha.",
+                                  "warning"
+                                )
+                              }
                               className="p-1 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-white/60 dark:hover:bg-white/10 transition-colors cursor-pointer shrink-0"
                               title={showUserPassword ? "Ocultar senha" : "Mostrar senha"}
                               aria-label={showUserPassword ? "Ocultar senha" : "Mostrar senha"}

@@ -23,12 +23,16 @@ import {
   CheckCircle2,
   Sparkles,
   ShieldCheck,
-  BellRing
+  BellRing,
+  CreditCard,
+  Scale,
+  X
 } from "lucide-react";
 import { SCHOOLS_LIST } from "../lib/schools.ts";
 import { Event } from "../types.ts";
 import { calculateRealUserStats } from "../lib/userStats.ts";
-import { isChefeAdmin, isFuncionarioAdmin } from "../lib/permissions.ts";
+import { isChefeAdmin, isFuncionarioAdmin, isPlatformOwner } from "../lib/permissions.ts";
+import { fetchJsonApi } from "../lib/staticHosting.ts";
 
 const ensureDbDateToInputFormat = (dateVal: string): string => {
   if (!dateVal) return "";
@@ -84,6 +88,7 @@ export default function Settings({
   const [role, setRole] = useState(user?.role || "Aluno");
   const [fotoPerfil, setFotoPerfil] = useState(user?.foto_perfil || "");
   const [participations, setParticipations] = useState<any[]>([]);
+  const [showPrivacyRequest, setShowPrivacyRequest] = useState(false);
   const [loadingParticipations, setLoadingParticipations] = useState(false);
 
   // Load user's permanent participation history
@@ -636,6 +641,72 @@ export default function Settings({
               </div>
             )}
 
+            {/* Área comercial: assinatura e painel Master */}
+            {(isChefeAdmin(user) || user?.role === "Escola") && (
+              <div className="bg-brand-secondary/30 dark:bg-brand-card-dark rounded-3xl p-5 border border-brand-primary/10 flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <CreditCard size={18} className="text-brand-accent dark:text-brand-primary" />
+                  <span className="text-sm font-semibold">Assinatura e instituição</span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Consulte o plano, os limites de alunos e a cota do assistente, e gerencie o pagamento da
+                  sua instituição.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onNavigate("subscription")}
+                  className="w-full h-11 rounded-2xl bg-white dark:bg-slate-900 border border-brand-primary/20 text-xs font-bold flex items-center justify-center gap-2 hover:bg-brand-primary/5 transition-colors"
+                >
+                  <CreditCard size={15} /> Minha assinatura
+                </button>
+                {isPlatformOwner(user) && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigate("master")}
+                    className="w-full h-11 rounded-2xl bg-brand-primary text-white text-xs font-bold flex items-center justify-center gap-2 hover:bg-brand-primary/90 transition-colors"
+                  >
+                    <ShieldCheck size={15} /> Painel Master
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Privacidade e LGPD */}
+            <div className="bg-brand-secondary/30 dark:bg-brand-card-dark rounded-3xl p-5 border border-brand-primary/10 flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <ShieldCheck size={18} className="text-brand-accent dark:text-brand-primary" />
+                <span className="text-sm font-semibold">Privacidade e seus dados</span>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                Você pode pedir acesso, correção ou exclusão dos seus dados a qualquer momento, conforme a
+                LGPD.
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => onNavigate("privacy")}
+                  className="h-10 rounded-2xl bg-white dark:bg-slate-900 border border-brand-primary/20 text-[11px] font-bold flex items-center justify-center gap-1.5 hover:bg-brand-primary/5 transition-colors"
+                >
+                  Política de privacidade
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPrivacyRequest(true)}
+                  className="h-10 rounded-2xl bg-white dark:bg-slate-900 border border-brand-primary/20 text-[11px] font-bold flex items-center justify-center gap-1.5 hover:bg-brand-primary/5 transition-colors"
+                >
+                  Falar sobre meus dados
+                </button>
+              </div>
+              {showPrivacyRequest && (
+                <PrivacyRequestForm
+                  defaultEmail={user?.email || ""}
+                  defaultName={user?.nome || ""}
+                  onClose={() => setShowPrivacyRequest(false)}
+                  onShowToast={onShowToast}
+                />
+              )}
+            </div>
+
             {/* Logout button */}
             <button
               onClick={onLogout}
@@ -841,5 +912,121 @@ export default function Settings({
         )}
       </AnimatePresence>
     </motion.div>
+  );
+}
+
+/**
+ * Formulário do canal do titular (LGPD).
+ *
+ * Registra o pedido em `data_subject_requests` pelo backend. Sem backend
+ * (hospedagem estática) informa o e-mail do encarregado em vez de fingir envio.
+ */
+function PrivacyRequestForm({
+  defaultEmail,
+  defaultName,
+  onClose,
+  onShowToast
+}: {
+  defaultEmail: string;
+  defaultName: string;
+  onClose: () => void;
+  onShowToast?: (message: string, type?: "error" | "warning" | "success" | "info") => void;
+}) {
+  const [requestType, setRequestType] = useState<"access" | "correction" | "deletion" | "portability" | "info">("access");
+  const [email, setEmail] = useState(defaultEmail);
+  const [name, setName] = useState(defaultName);
+  const [details, setDetails] = useState("");
+  const [sending, setSending] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim()) {
+      onShowToast?.("Informe o e-mail do titular.", "warning");
+      return;
+    }
+    setSending(true);
+    try {
+      const res = await fetchJsonApi("/api/privacy/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, name, requestType, details })
+      });
+      if (!res || !res.ok) {
+        const body = res ? await res.json().catch(() => ({})) : {};
+        onShowToast?.(
+          body.error || "Não foi possível registrar agora. Escreva para privacidade@eloescola.com.br.",
+          "error"
+        );
+        return;
+      }
+      setDone(true);
+      onShowToast?.("Solicitação registrada. Responderemos em até 15 dias.", "success");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="mt-2 rounded-2xl border border-brand-primary/20 bg-white dark:bg-slate-900 p-4">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-bold flex items-center gap-1.5">
+          <Scale size={14} /> Solicitação sobre dados pessoais
+        </p>
+        <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600">
+          <X size={14} />
+        </button>
+      </div>
+
+      {done ? (
+        <p className="text-[11px] text-emerald-700 dark:text-emerald-400 leading-relaxed flex items-center gap-1.5">
+          <CheckCircle2 size={14} /> Pedido registrado. Você receberá resposta no e-mail informado em até 15
+          dias corridos.
+        </p>
+      ) : (
+        <form onSubmit={submit} className="flex flex-col gap-2">
+          <select
+            value={requestType}
+            onChange={(e) => setRequestType(e.target.value as any)}
+            className="h-9 px-2 rounded-xl border border-brand-primary/20 bg-transparent text-[11px]"
+          >
+            <option value="access">Quero saber quais dados vocês têm sobre mim</option>
+            <option value="correction">Quero corrigir um dado incorreto</option>
+            <option value="deletion">Quero excluir meus dados</option>
+            <option value="portability">Quero uma cópia dos meus dados</option>
+            <option value="info">Tenho uma dúvida sobre privacidade</option>
+          </select>
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Seu nome"
+              className="h-9 px-2 rounded-xl border border-brand-primary/20 bg-transparent text-[11px]"
+            />
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="E-mail do titular"
+              type="email"
+              className="h-9 px-2 rounded-xl border border-brand-primary/20 bg-transparent text-[11px]"
+            />
+          </div>
+          <textarea
+            value={details}
+            onChange={(e) => setDetails(e.target.value)}
+            placeholder="Detalhe seu pedido (opcional)"
+            rows={2}
+            className="px-2 py-1.5 rounded-xl border border-brand-primary/20 bg-transparent text-[11px] resize-none"
+          />
+          <button
+            type="submit"
+            disabled={sending}
+            className="h-9 rounded-xl bg-brand-primary text-white text-[11px] font-bold disabled:opacity-60"
+          >
+            {sending ? "Enviando…" : "Enviar solicitação"}
+          </button>
+        </form>
+      )}
+    </div>
   );
 }

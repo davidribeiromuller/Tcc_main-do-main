@@ -1920,3 +1920,116 @@ Os cards de ~330 px ficaram grandes demais para o conjunto. Ajuste aplicado
 Diferença de ~24 px por card, mantendo as 5 colunas a partir de 1440 px e a
 mesma altura/proporção (capa 160 px). `test-round31` foi atualizado com a nova
 matemática (48 verificações).
+
+---
+
+## 34. Rodadas 32 e 33 — segurança, LGPD e SaaS multi-instituição
+
+Fechamento das Partes 1 a 15 da auditoria. O detalhamento item a item está em
+**`MATRIZ_AUDITORIA_SAAS.md`**; a configuração de produção, em
+**`GUIA_CONFIGURACAO_SECRETS.md`** e no **`.env.example`**.
+
+### 34.1 O que mudou de comportamento (visível para quem usa)
+
+| Antes | Agora |
+|---|---|
+| Painel exibia a senha das contas | mostra "protegida por hash (scrypt)"; a senha **não** é recuperável |
+| Contas demo entravam com `senha123` | nenhuma senha padrão; primeiro admin só por `BOOTSTRAP_ADMIN_*` |
+| Assinatura do responsável em URL pública | sessão + permissão → URL assinada de 5 min |
+| Qualquer visitante listava autorizações de menores | só o próprio estudante ou a equipe da escola |
+| Arquivamento de eventos acessível a anônimos | exige administrador da instituição |
+| Nenhum caminho para a vitrine de planos | link no rodapé e abaixo do herói da home |
+| Tela `/master` abria para qualquer usuário | checagem de tela + `requirePlatformOwner` no servidor |
+| `/subscription` abria para aluno | área da instituição, com explicação e link para planos |
+
+### 34.2 Rotas que passaram a exigir sessão nesta rodada
+
+| Rota | Guarda |
+|---|---|
+| `POST /api/events/:eventId/authorizations` | `requireAuth` + estudante só assina para si (vínculo vem do token) |
+| `GET /api/events/:eventId/authorizations` | `requireAuth` + `requireAdminOrStaff` |
+| `GET /api/events/:eventId/authorizations/check` | `requireAuth` + próprio aluno ou equipe |
+| `GET /api/users/:userId/authorizations` | `requireAuth` + próprio aluno ou equipe |
+| `GET /api/events/archived` | `requireAuth` + `requireAdminOrStaff` |
+| `POST /api/events/:id/restore` | idem |
+| `GET /api/events/archive-logs` | idem |
+| `POST /api/events/cleanup-expired` | idem |
+
+O `POST` de autorização grava o estudante a partir do token — o corpo da
+requisição não escolhe mais a quem a autorização pertence. Todas as recusas usam
+a mesma mensagem (`AUTHORIZATION_FORBIDDEN`), para não revelar quais ids existem.
+
+### 34.3 Cliente acompanhou as mudanças
+
+- `src/lib/staticHosting.ts`: `SESSION_TOKEN_STORAGE_KEY`,
+  `getStoredSessionToken()` e `fetchJsonApiWithAuth()` — o token deixou de ser
+  uma string literal repetida em quatro componentes.
+- `ParentalAuthorizationModal`: envia Bearer e traduz 401/403 em mensagem útil
+  em vez de "erro genérico".
+- `EventAuthorizationsModal` e `EventDetail`: usam `fetchJsonApiWithAuth`.
+- `src/lib/supabase.ts`: removido o override de URL/chave por `localStorage`.
+
+### 34.4 Correção de número exibido errado
+
+`getPlatformOverview()` lia `(s as any).plan_monthly_cents`, campo que **não
+existe** em `subscriptions` (a tabela guarda só `plan_id`) — o MRR saía sempre
+`0` e aparecia no painel como se fosse real. Agora há join com `plans`, desconto
+aplicado e plano anual mensalizado (`annual / 12`) para comparar na mesma base.
+
+### 34.5 Testes
+
+| Suíte | Resultado |
+|---|---|
+| `test-round32-security.mjs` (novo, 121 verificações) | **121/121** |
+| `test-round33-saas.mjs` (novo, 135 verificações, executa as regras) | **135/135** |
+| `11` · `12`+`12b`+`12c` · `13` · `14` | 64 · 32+18+21 · 31 · 36 |
+| `16` · `17` · `18`+`18-mobile` · `19` · `20` · `21` · `22` | 39 · 49 · 50+21 · 32 · 35 · 41 · 27 |
+| `23` · `24` · `25`+`25-render` · `26`+`26-mural`+`26-render` · `27`+`27-render` · `28` · `31` | 142 · 40 · 44+10 · 90+23+21 · 51+37 · 27 · 49 |
+| `tsc --noEmit` / `npm run build` | 0 erros / ok |
+
+`test-round16` e `test-round17` voltaram a rodar: faltava
+`@testing-library/react` no `package.json` — agora está em `devDependencies`
+(junto com `@testing-library/dom`).
+
+### 34.6 Bug encontrado na validação final (2026-11-11): telas que nunca abriam
+
+As telas `plans`, `subscription`, `master` e `privacy` tinham bloco próprio no
+`App.tsx`, mas estavam declaradas **dentro** da casca de navegação, cuja condição
+de abertura era uma lista fixa de telas que **não as incluía**:
+
+```tsx
+// antes
+{["feed","schools","schoolDetail","calendar","admin","settings","contact","eventDetail","map"].includes(activeScreen) && (
+  <div className="w-full min-h-[100dvh] flex flex-col">
+    ...
+    {activeScreen === "plans" && ( ... )}      // nunca renderizava
+    {activeScreen === "master" && ( ... )}     // nunca renderizava
+```
+
+Consequência prática: `navigateTo("plans")` mudava o estado e a URL, nada
+aparecia. O `tsc` não pega isso, e os testes anteriores verificavam que o bloco
+*existia* no arquivo, não que ele *renderizava*.
+
+Correções aplicadas:
+
+| Problema | Correção |
+|---|---|
+| telas fora da lista da casca | lista estendida com `plans`, `subscription`, `master`, `privacy` |
+| `navigateTo` montava `/${screen}` enquanto a leitura usava outra tabela | passou a usar `ROTAS_POR_TELA` de `navigation.ts` |
+| `/planos`, `/privacidade`, `/assinatura` não existiam na tabela de rotas | adicionadas (com apelidos em inglês) |
+| recarregar `/planos` caía na home | `resolverTelaInicial` reconhece as quatro |
+| `plans`/`privacy` exigiam login por engano | ficam fora de `TELAS_RESTRITAS`; `subscription`/`master` exigem sessão |
+
+Verificação em execução (não só no fonte):
+
+```
+GET /planos       200 (index servido)     /api/events/archived                 401
+GET /privacidade  200 (index servido)     /api/authorizations/auth-1/signature 401
+GET /master       200 (index servido)     /api/master/overview                 401
+GET /subscription 200 (index servido)     /api/users/x/authorizations          401
+POST /api/ai/chat 401                     POST /api/billing/webhook            400 (assinatura inválida)
+```
+
+E `test-round32-security.mjs` ganhou o grupo **§8b** justamente para isso: confere
+que as quatro telas estão na lista da casca, que as rotas canônicas existem, que
+`plans`/`privacy` são públicas e que `subscription`/`master` exigem sessão.

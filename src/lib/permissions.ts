@@ -4,20 +4,16 @@ export type AdminRole = "chefe" | "funcionario" | "user";
 
 /**
  * Retorna se o usuário possui permissão de Chefe Administrador (acesso total).
- * Considera:
- * - Emails canônicos da diretoria (davidribeiromuller2009@gmail.com, diretoria@helenawysocki.com)
- * - Papel no banco: "Diretor", "Chefe Administrador"
- * - Flag de sistema: isAdmin === true
+ *
+ * Parte 2 da auditoria: os e-mails da diretoria estavam HARDCODED aqui, no
+ * server e na loja de fallback — privilégio de plataforma embutido no código
+ * público. Agora a decisão usa apenas o que está persistido no usuário
+ * (`role` e `isAdmin`), administrado pelo painel. A allowlist de proprietário
+ * da PLATAFORMA continua existindo, mas só no servidor, via variável de
+ * ambiente (`PLATFORM_OWNER_EMAILS`) — nunca versionada.
  */
 export function isChefeAdmin(user: User | null | undefined): boolean {
   if (!user) return false;
-  const cleanEmail = (user.email || "").toLowerCase().trim();
-  if (
-    cleanEmail === "davidribeiromuller2009@gmail.com" ||
-    cleanEmail === "diretoria@helenawysocki.com"
-  ) {
-    return true;
-  }
   const role = (user.role || "").trim().toLowerCase();
   if (
     role === "diretor" ||
@@ -28,6 +24,32 @@ export function isChefeAdmin(user: User | null | undefined): boolean {
     return true;
   }
   return user.isAdmin === true;
+}
+
+/**
+ * Proprietário da PLATAFORMA (painel Master).
+ *
+ * Diferente de `isChefeAdmin` (que é por instituição), este papel controla a
+ * operação comercial do SaaS. A fonte de verdade é a allowlist do AMBIENTE
+ * (`PLATFORM_OWNER_EMAILS`), exposta ao cliente somente como sinalizador de
+ * interface — a autorização real é revalidada em cada rota do servidor por
+ * `requirePlatformOwner`.
+ */
+export function getPlatformOwnerEmails(): string[] {
+  const raw = (import.meta as any)?.env?.VITE_PLATFORM_OWNER_EMAILS || "";
+  return String(raw)
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+export function isPlatformOwner(user: User | null | undefined): boolean {
+  if (!user) return false;
+  const email = (user.email || "").trim().toLowerCase();
+  if (!email) return false;
+  const owners = getPlatformOwnerEmails();
+  if (owners.length === 0) return false;
+  return owners.includes(email) && isChefeAdmin(user);
 }
 
 /**

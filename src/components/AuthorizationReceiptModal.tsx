@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { X, ShieldCheck, CheckCircle2, Calendar, MapPin, School, UserCheck, Clock } from "lucide-react";
 import { EventAttendanceAuthorization } from "../types.ts";
+import { getStoredSessionToken } from "../lib/staticHosting.ts";
 
 interface AuthorizationReceiptModalProps {
   isOpen: boolean;
@@ -24,7 +25,56 @@ export const AuthorizationReceiptModal: React.FC<AuthorizationReceiptModalProps>
     minute: "2-digit",
   });
 
-  const signatureSrc = authorization.signatureDataUrl || `/api/authorizations/${authorization.id}/signature`;
+  /*
+    Parte 2 da auditoria: a assinatura do responsável deixou de ser pública.
+    O endpoint agora exige sessão e devolve uma URL assinada temporária do
+    bucket privado. Enquanto ela chega (ou se o acesso for negado), mostramos
+    um estado explícito — nunca um link que qualquer um poderia abrir.
+  */
+  const [signatureSrc, setSignatureSrc] = useState<string | null>(
+    authorization.signatureDataUrl || null
+  );
+  const [signatureError, setSignatureError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (authorization.signatureDataUrl) {
+      setSignatureSrc(authorization.signatureDataUrl);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = getStoredSessionToken() || "";
+        const res = await fetch(`/api/authorizations/${authorization.id}/signature`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) {
+          if (!cancelled) {
+            setSignatureError(
+              res.status === 403
+                ? "A assinatura só pode ser vista pelo responsável ou pela equipe da escola."
+                : "Não foi possível carregar a assinatura."
+            );
+          }
+          return;
+        }
+        const contentType = res.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const data = await res.json();
+          if (!cancelled && data.url) setSignatureSrc(data.url);
+          else if (!cancelled) setSignatureError("Não foi possível gerar o link da assinatura.");
+        } else {
+          const blob = await res.blob();
+          if (!cancelled) setSignatureSrc(URL.createObjectURL(blob));
+        }
+      } catch {
+        if (!cancelled) setSignatureError("Falha de conexão ao carregar a assinatura.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authorization.id, authorization.signatureDataUrl]);
 
   return (
     <AnimatePresence>
@@ -108,11 +158,17 @@ export const AuthorizationReceiptModal: React.FC<AuthorizationReceiptModalProps>
                 </span>
               </div>
               <div className="bg-white dark:bg-slate-900 rounded-xl p-2 border border-slate-200 dark:border-slate-800 flex items-center justify-center min-h-[90px]">
-                <img
-                  src={signatureSrc}
-                  alt="Assinatura manuscrita do responsável"
-                  className="max-h-24 max-w-full object-contain"
-                />
+                {signatureSrc ? (
+                  <img
+                    src={signatureSrc}
+                    alt="Assinatura manuscrita do responsável"
+                    className="max-h-24 max-w-full object-contain"
+                  />
+                ) : (
+                  <p className="text-[11px] text-slate-400 text-center px-2">
+                    {signatureError || "Carregando assinatura protegida…"}
+                  </p>
+                )}
               </div>
             </div>
 

@@ -171,13 +171,22 @@ export const defaultEvents: Event[] = [
   }
 ];
 
+/**
+ * Usuários de DEMONSTRAÇÃO (somente quando não há banco configurado).
+ *
+ * Parte 2 da auditoria: estes registros tinham `password: "senha123"` em texto
+ * claro versionado no repositório — qualquer pessoa que lesse o código entrava
+ * como administrador na loja de fallback. Agora nascem SEM senha utilizável;
+ * o provisionamento real usa BOOTSTRAP_ADMIN_EMAIL / BOOTSTRAP_ADMIN_PASSWORD
+ * e grava hash scrypt.
+ */
 export const defaultUsers: User[] = [
   {
     id: 9901,
     uid: "fallback-admin-uid",
     nome: "Administração eloEscola",
     email: "diretoria@helenawysocki.com",
-    password: "senha123",
+    password: undefined,
     foto_perfil: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
     provider: "local",
     role: "Diretor",
@@ -193,7 +202,7 @@ export const defaultUsers: User[] = [
     uid: "fallback-funcionario-uid",
     nome: "Coordenação Pedagógica",
     email: "funcionario@helenawysocki.com",
-    password: "senha123",
+    password: undefined,
     foto_perfil: "https://images.unsplash.com/photo-1537368910025-700350fe46c7?w=150",
     provider: "local",
     role: "Funcionário",

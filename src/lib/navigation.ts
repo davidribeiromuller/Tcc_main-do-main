@@ -22,9 +22,18 @@ export const TELAS_CONHECIDAS = [
   "splash", "welcome", "login", "register", "recovery", "codeSent",
   "feed", "schools", "schoolDetail", "eventDetail", "calendar", "map",
   "settings", "admin", "contact", "schoolPortal",
+  "plans", "subscription", "master", "privacy",
 ] as const;
 
 export type Tela = (typeof TELAS_CONHECIDAS)[number];
+
+/**
+ * Telas que exigem sessão.
+ *
+ * `plans` e `privacy` ficam de fora de propósito: a vitrine de planos e a
+ * política de privacidade precisam ser legíveis por quem ainda não tem conta.
+ */
+export const TELAS_RESTRITAS = ["admin", "settings", "subscription", "master"];
 
 /** Telas de entrada: onde não faz sentido "voltar" (não há o que desempilhar). */
 export const TELAS_DE_ENTRADA = ["splash", "welcome", "login", "register", "recovery", "codeSent"];
@@ -45,6 +54,13 @@ const ROTAS: Record<string, string> = {
   "/contato": "contact",
   "/contact": "contact",
   "/portal": "schoolPortal",
+  "/planos": "plans",
+  "/plans": "plans",
+  "/assinatura": "subscription",
+  "/subscription": "subscription",
+  "/master": "master",
+  "/privacidade": "privacy",
+  "/privacy": "privacy",
 };
 
 /** Rota canônica de cada tela (o inverso do mapa acima). */
@@ -61,6 +77,10 @@ export const ROTAS_POR_TELA: Record<string, string> = {
   admin: "/admin",
   contact: "/contato",
   schoolPortal: "/portal",
+  plans: "/planos",
+  subscription: "/assinatura",
+  master: "/master",
+  privacy: "/privacidade",
 };
 
 /**
@@ -112,7 +132,9 @@ export function resolverTelaInicial(params: {
   // cairia numa tela que não tem o que mostrar (e o usuário veria um painel
   // vazio, sem entender que precisa entrar).
   if (daRota && caminho !== "/") {
-    if ((daRota === "admin" || daRota === "settings") && !params.logado) return "welcome";
+    // `/planos` e `/privacidade` são públicas: são justamente as páginas que
+    // alguém abre antes de ter conta.
+    if (TELAS_RESTRITAS.includes(daRota as any) && !params.logado) return "welcome";
     return daRota;
   }
 
@@ -122,8 +144,7 @@ export function resolverTelaInicial(params: {
     // Telas que dependem de contexto não são restauradas por conta própria.
     if (ultima === "schoolDetail" || ultima === "eventDetail") return "splash";
     // Painel só faz sentido para quem tem permissão.
-    if (ultima === "admin" && !params.logado) return "welcome";
-    if (ultima === "settings" && !params.logado) return "welcome";
+    if (TELAS_RESTRITAS.includes(ultima as any) && !params.logado) return "welcome";
     return ultima;
   }
 
@@ -148,7 +169,7 @@ export function resolverTelaDoPopState(params: {
   logado: boolean;
 }): string {
   /** Telas que não fazem sentido sem sessão. */
-  const exigeSessao = (tela: string) => tela === "admin" || tela === "settings";
+  const exigeSessao = (tela: string) => TELAS_RESTRITAS.includes(tela as any);
 
   // 1. O histórico tem a tela? Confia nele: é a fonte mais precisa.
   //    Mas não devolve o usuário a uma tela restrita depois do logout.

@@ -23,7 +23,8 @@ import {
   requireChefeAdmin,
   requireAdminOrStaff,
   checkIsChefe,
-  checkIsFuncionario
+  checkIsFuncionario,
+  requirePlatformOwner
 } from "./src/middleware/admin.ts";
 import {
   getOrCreateUser,
@@ -85,14 +86,160 @@ import {
   listAuthorizationsByEvent,
   listAuthorizationsByStudent
 } from "./src/db/authorizations.ts";
+import { applyHttpSecurity, authLimiter, aiLimiter, publicWriteLimiter } from "./src/middleware/security.ts";
+import {
+  hashPassword,
+  verifyPassword,
+  validatePasswordStrength,
+  createSessionToken,
+  randomToken,
+  randomOtpCode,
+  hashOpaqueToken
+} from "./src/lib/security.ts";
+import {
+  createEmailResetToken,
+  createPhoneOtp,
+  verifyPhoneOtp,
+  findValidResetToken,
+  consumeResetToken,
+  revokeUserSessions,
+  recordSession,
+  sendEmail,
+  sendSms,
+  maskEmail,
+  maskPhone,
+  recordConsent,
+  createDataSubjectRequest,
+  RESET_TOKEN_TTL_MINUTES,
+  OTP_TTL_MINUTES
+} from "./src/lib/authTokens.ts";
+import { autenticarContaEscolar } from "./src/lib/schoolAccountsService.ts";
+import {
+  uploadSignature,
+  createSignedSignatureUrl,
+  SIGNED_URL_TTL_SECONDS
+} from "./src/lib/signatureStorage.ts";
+import {
+  resolveAccessState,
+  evaluateQuota,
+  effectivePriceCents,
+  nextPeriodEnd,
+  trialEndFrom,
+  featureLabel,
+  TRIAL_DAYS,
+  FOUNDER_SLOTS,
+  FOUNDER_DISCOUNT_PERCENT,
+  ANNUAL_DISCOUNT_PERCENT
+} from "./src/lib/subscription.ts";
+import {
+  createCharge,
+  getBillingDiagnostics,
+  verifyStripeSignature,
+  verifyGenericSignature,
+  normalizeWebhook
+} from "./src/lib/billing.ts";
+import {
+  isSaasBackendConfigured,
+  getSaasAdminClient,
+  listSchools,
+  listAdministeredSchools,
+  hasSchoolAdminRole,
+  createSchool,
+  addMembership,
+  countActiveStudents,
+  listPlans,
+  listPlanAddons,
+  updatePlan,
+  getSubscriptionBySchool,
+  listAllSubscriptions,
+  updateSubscription,
+  createSubscription,
+  logSubscriptionEvent,
+  listSubscriptionEvents,
+  listEntitlements,
+  syncEntitlementsFromPlan,
+  recordUsage,
+  countUsageInPeriod,
+  createPaymentTransaction,
+  updatePaymentStatus,
+  listPaymentsForSchool,
+  listAllPayments,
+  registerWebhookEvent,
+  markWebhookProcessed,
+  listPartners,
+  createPartner,
+  setPartnerStatus,
+  listCampaignsForSchool,
+  createCampaign,
+  decideCampaign,
+  logPlatformAudit,
+  listPlatformAudit,
+  listSalesLeads,
+  createSalesLead,
+  updateSalesLeadStatus,
+  getPlatformOverview
+} from "./src/lib/saasStore.ts";
+
+/**
+ * Carrega a linha de `users` correspondente ao token, do jeito que o resto do
+ * servidor já faz (por uid e, se falhar, por e-mail).
+ */
+async function resolveDbUserForRequest(req: AuthRequest): Promise<any> {
+  try {
+    if (!req.user) return null;
+    let dbUser = await getUserByUid(req.user.uid);
+    if (!dbUser && req.user.email) dbUser = await getUserByEmail(req.user.email);
+    return dbUser || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Identidade do próprio usuário autenticado.
+ *
+ * Um mesmo usuário aparece como `uid` (token) e como `id` (banco). Comparar
+ * sempre o conjunto evita negar acesso legítimo por diferença de formato.
+ */
+function ownIdentityCandidates(req: AuthRequest, dbUser?: any): string[] {
+  const values = [
+    req.user?.uid,
+    (req.user as any)?.id,
+    dbUser?.uid,
+    dbUser?.id,
+    (dbUser as any)?.user_uid,
+  ]
+    .filter((v) => v !== undefined && v !== null)
+    .map((v) => String(v));
+  return Array.from(new Set(values));
+}
+
+/**
+ * Mensagem padrão de recusa para dados sensíveis (autorizações de menores).
+ *
+ * Não distingue "não existe" de "não é seu": distinguir permitiria descobrir
+ * quais ids de estudante existem.
+ */
+const AUTHORIZATION_FORBIDDEN = "Você não tem permissão para acessar esta autorização.";
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT || 3000);
+  const isProduction = process.env.NODE_ENV === "production";
 
   // Body parsing middleware
+  // O webhook precisa do corpo CRU para validar assinatura HMAC, então ele é
+  // montado ANTES do parser JSON global e capturado como Buffer.
+  app.use(
+    "/api/billing/webhook",
+    express.raw({ type: "*/*", limit: "1mb" }),
+    (_req, _res, next) => next()
+  );
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ limit: "10mb", extended: true }));
+
+  // Endurecimento HTTP (Helmet/CSP/HSTS/CORS/rate limit) — Parte 2.
+  applyHttpSecurity(app, { isProduction });
 
   // --- API ROUTES ---
 
@@ -332,11 +479,31 @@ async function startServer() {
     }
   });
 
+  // =========================================================================
+  // RECUPERAÇÃO DE SENHA — Parte 2 da auditoria
+  // =========================================================================
+  // O que mudou e por quê:
+  //  1. Nenhum endpoint devolve token, código SMS ou link de reset no JSON.
+  //     Antes bastava saber o e-mail de alguém para tomar a conta.
+  //  2. Respostas são NEUTRAS: pedir recuperação para e-mail inexistente
+  //     devolve o mesmo 200 de um e-mail válido (evita enumeração de contas).
+  //  3. Tokens e OTP são persistidos com hash (tabela password_reset_tokens).
+  //  4. A entrega depende de provedor real (Resend/Twilio). Sem credencial, a
+  //     resposta informa `deliveryPending: true` — nunca fingimos envio.
+  //  5. Senha nova passa por validação de força e é gravada como scrypt.
+
+  const recoveryIp = (req: any) =>
+    ((req.headers["x-forwarded-for"] as string) || req.socket?.remoteAddress || "ip").split(",")[0].trim();
+
+  const genericRecoveryMessage =
+    "Se os dados informados estiverem cadastrados, enviaremos as instruções de recuperação em instantes. Verifique sua caixa de entrada e o spam.";
+
   // PASSWORD RECOVERY: Request via Email
-  app.post("/api/auth/recovery/request-email", async (req, res) => {
+  app.post("/api/auth/recovery/request-email", authLimiter(), async (req, res) => {
     try {
       const { email } = req.body;
       const cleanEmail = (email || "").trim().toLowerCase();
+
       if (!cleanEmail) {
         return res.status(400).json({ error: "Por favor, informe seu endereço de e-mail." });
       }
@@ -346,64 +513,86 @@ async function startServer() {
         return res.status(400).json({ error: "Formato de e-mail inválido. Exemplo: aluno@escola.pr.gov.br" });
       }
 
-      const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "ip";
+      const ip = recoveryIp(req);
       if (!checkRecoveryRateLimit(`email-rate-${cleanEmail}`, 5, 15 * 60 * 1000) || !checkRecoveryRateLimit(`ip-email-${ip}`, 20, 15 * 60 * 1000)) {
         return res.status(429).json({ error: "Muitas solicitações de recuperação para este e-mail. Aguarde alguns minutos." });
       }
 
       const user = await getUserByEmail(cleanEmail);
+
+      // Resposta neutra quando a conta não existe: mesmo status e mesmo texto.
       if (!user) {
-        return res.status(404).json({
-          error: "Os dados informados não foram encontrados. Confira as informações e tente novamente."
+        return res.json({
+          success: true,
+          message: genericRecoveryMessage,
+          deliveryPending: false,
         });
       }
 
       if (user.ativo === false) {
-        return res.status(403).json({
-          error: "Sua conta está desativada ou bloqueada. Entre em contato com a diretoria do C.E. Helena Wysocki para regularizar seu acesso."
+        return res.json({
+          success: true,
+          message: genericRecoveryMessage,
+          deliveryPending: false,
+          accountInactive: true,
         });
       }
 
-      // Invalidate previous sessions for this email
-      for (const [key, sess] of resetSessionsMap.entries()) {
-        if (sess.email === cleanEmail) {
-          resetSessionsMap.delete(key);
-        }
-      }
-
-      const resetToken = crypto.randomBytes(32).toString("hex");
-      const expiresAt = Date.now() + 15 * 60 * 1000; // 15 minutes
-
-      resetSessionsMap.set(resetToken, {
-        token: resetToken,
+      const created = await createEmailResetToken({
         email: cleanEmail,
-        userId: user.id,
-        expiresAt,
-        used: false,
-        type: "email"
+        userUid: user.uid,
+        ip,
       });
 
-      const host = req.get("host") || "localhost:3000";
-      const protocol = req.protocol === "https" || req.headers["x-forwarded-proto"] === "https" ? "https" : "http";
-      const resetUrl = `${protocol}://${host}/?reset_token=${resetToken}`;
+      if (created.error || !created.data) {
+        console.error("[Password Recovery] Falha ao criar token:", created.error);
+        return res.status(503).json({
+          error:
+            "A recuperação de senha está temporariamente indisponível. Fale com a secretaria da escola.",
+          code: "RECOVERY_UNAVAILABLE",
+        });
+      }
 
-      console.log(`[Password Recovery] Link gerado para ${cleanEmail}: ${resetUrl}`);
+      const baseUrl =
+        (process.env.PUBLIC_APP_URL || "").replace(/\/$/, "") ||
+        `${req.protocol}://${req.get("host")}`;
+      const resetUrl = `${baseUrl}/?reset_token=${created.data.token}`;
 
+      const delivery = await sendEmail(
+        cleanEmail,
+        "eloEscola — redefinição de senha",
+        [
+          "Olá!",
+          "",
+          "Recebemos um pedido de redefinição de senha da sua conta no eloEscola.",
+          `Acesse o link abaixo nos próximos ${RESET_TOKEN_TTL_MINUTES} minutos:`,
+          "",
+          resetUrl,
+          "",
+          "Se não foi você, ignore esta mensagem — sua senha continua a mesma.",
+          "",
+          "eloEscola",
+        ].join("\n")
+      );
+
+      // O token JÁ está persistido. Se o e-mail não saiu, o pedido fica
+      // registrado para o suporte, mas NUNCA é devolvido ao navegador.
       res.json({
         success: true,
-        message: "Link de recuperação gerado com sucesso. Utilize o link para cadastrar uma nova senha.",
-        token: resetToken,
-        resetUrl,
-        expiresMinutes: 15
+        message: delivery.delivered
+          ? genericRecoveryMessage
+          : "O envio automático de e-mail ainda não está configurado neste ambiente. Fale com a secretaria da escola para redefinir sua senha com segurança.",
+        deliveryPending: !delivery.delivered,
+        expiresMinutes: RESET_TOKEN_TTL_MINUTES,
       });
     } catch (error: any) {
       console.error("Erro na recuperação por email:", error);
-      res.status(500).json({ error: error.message || "Erro ao processar recuperação por e-mail." });
+      res.status(500).json({ error: "Erro ao processar recuperação por e-mail." });
     }
   });
 
   // PASSWORD RECOVERY: Request via Phone (SMS Code)
-  app.post("/api/auth/recovery/request-phone", async (req, res) => {
+  app.post("/api/auth/recovery/request-phone", authLimiter(), async (req, res) => {
     try {
       const { phone } = req.body;
       const cleanPhone = (phone || "").trim();
@@ -413,16 +602,13 @@ async function startServer() {
         return res.status(400).json({ error: "Informe um número de telefone celular válido com DDD (mínimo 10 dígitos)." });
       }
 
-      const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "ip";
+      const ip = recoveryIp(req);
       const phoneKey = digitsOnly.startsWith("55") && digitsOnly.length >= 12 ? digitsOnly.slice(2) : digitsOnly;
 
-      const existingOtp = phoneOtpMap.get(phoneKey);
-      const now = Date.now();
-      if (existingOtp && now - existingOtp.lastRequestedAt < 60 * 1000) {
-        const waitSec = Math.ceil((60 * 1000 - (now - existingOtp.lastRequestedAt)) / 1000);
+      if (!checkRecoveryRateLimit(`phone-cooldown-${phoneKey}`, 1, 60 * 1000)) {
         return res.status(429).json({
-          error: `Aguarde ${waitSec} segundos antes de solicitar um novo código SMS.`,
-          cooldownSeconds: waitSec
+          error: "Aguarde 60 segundos antes de solicitar um novo código SMS.",
+          cooldownSeconds: 60,
         });
       }
 
@@ -431,154 +617,119 @@ async function startServer() {
       }
 
       const user = await getUserByPhone(digitsOnly);
+
       if (!user) {
-        return res.status(404).json({
-          error: "Os dados informados não foram encontrados. Confira as informações e tente novamente."
+        return res.json({
+          success: true,
+          message: "Se o telefone estiver cadastrado em uma conta, você receberá um código em instantes.",
+          deliveryPending: false,
+          maskedPhone: maskPhone(digitsOnly),
         });
       }
 
       if (user.ativo === false) {
-        return res.status(403).json({
-          error: "Sua conta está desativada ou bloqueada pela administração escolar."
+        return res.json({
+          success: true,
+          message: "Se o telefone estiver cadastrado em uma conta, você receberá um código em instantes.",
+          deliveryPending: false,
+          accountInactive: true,
+          maskedPhone: maskPhone(digitsOnly),
         });
       }
 
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = now + 10 * 60 * 1000; // 10 minutes
-
-      phoneOtpMap.set(phoneKey, {
-        phone: cleanPhone,
-        normalizedPhone: phoneKey,
-        code,
-        email: user.email,
-        userId: user.id,
-        expiresAt,
-        attempts: 0,
-        maxAttempts: 5,
-        createdAt: now,
-        lastRequestedAt: now,
-        verified: false
+      const otp = await createPhoneOtp({
+        email: user.email || "",
+        phone: digitsOnly,
+        userUid: user.uid,
+        ip,
       });
 
-      console.log(`[SMS Gateway Simulator] Código de verificação para ${cleanPhone} (${phoneKey}): [${code}] (Válido por 10 min)`);
+      if (otp.error || !otp.data) {
+        console.error("[Password Recovery] Falha ao criar OTP:", otp.error);
+        return res.status(503).json({
+          error: "A recuperação por SMS está temporariamente indisponível. Use a recuperação por e-mail.",
+          code: "RECOVERY_UNAVAILABLE",
+        });
+      }
 
-      const last4 = digitsOnly.slice(-4);
-      const ddd = digitsOnly.slice(0, 2);
-      const masked = `(${ddd}) •••••-${last4}`;
+      const delivery = await sendSms(
+        digitsOnly.startsWith("+") ? digitsOnly : `+55${phoneKey}`,
+        `eloEscola: seu código de verificação é ${otp.data.code}. Vale por ${OTP_TTL_MINUTES} minutos. Não compartilhe.`
+      );
 
       res.json({
         success: true,
-        message: `Código de verificação SMS enviado para ${masked}.`,
-        maskedPhone: masked,
-        expiresMinutes: 10,
+        message: delivery.delivered
+          ? `Código enviado para ${otp.data.maskedPhone}.`
+          : "O envio de SMS ainda não está configurado neste ambiente. Use a recuperação por e-mail.",
+        deliveryPending: !delivery.delivered,
+        maskedPhone: otp.data.maskedPhone,
+        expiresMinutes: OTP_TTL_MINUTES,
         cooldownSeconds: 60,
-        testCode: code
       });
     } catch (error: any) {
       console.error("Erro na solicitação SMS:", error);
-      res.status(500).json({ error: error.message || "Erro ao solicitar código por SMS." });
+      res.status(500).json({ error: "Erro ao solicitar código por SMS." });
     }
   });
 
   // PASSWORD RECOVERY: Verify Phone Code
-  app.post("/api/auth/recovery/verify-phone-code", async (req, res) => {
+  app.post("/api/auth/recovery/verify-phone-code", authLimiter(), async (req, res) => {
     try {
-      const { phone, code } = req.body;
-      const cleanDigits = (phone || "").replace(/\D/g, "");
-      const phoneKey = cleanDigits.startsWith("55") && cleanDigits.length >= 12 ? cleanDigits.slice(2) : cleanDigits;
+      const { phone, email, code } = req.body;
       const cleanCode = (code || "").trim();
+      const cleanDigits = (phone || "").replace(/\D/g, "");
 
-      if (!phoneKey || !cleanCode) {
-        return res.status(400).json({ error: "Telefone e código são obrigatórios." });
+      if (!cleanCode) {
+        return res.status(400).json({ error: "Informe o código recebido por SMS." });
       }
 
-      const otpData = phoneOtpMap.get(phoneKey);
-      if (!otpData) {
-        return res.status(400).json({ error: "Nenhum código ativo encontrado para este telefone. Solicite um novo código." });
+      // Precisamos do e-mail da conta para localizar o OTP; aceitamos telefone
+      // OU e-mail como identificador para não expor o e-mail no formulário.
+      let targetEmail = (email || "").trim().toLowerCase();
+      if (!targetEmail && cleanDigits) {
+        const user = await getUserByPhone(cleanDigits);
+        targetEmail = (user?.email || "").trim().toLowerCase();
+      }
+      if (!targetEmail) {
+        return res.status(400).json({ error: "Não foi possível identificar a conta. Solicite um novo código." });
       }
 
-      const now = Date.now();
-      if (now > otpData.expiresAt) {
-        phoneOtpMap.delete(phoneKey);
-        return res.status(400).json({ error: "O código informado expirou. Por favor, solicite um novo código." });
-      }
+      const result = await verifyPhoneOtp({ email: targetEmail, code: cleanCode, ip: recoveryIp(req) });
 
-      if (otpData.attempts >= otpData.maxAttempts) {
-        phoneOtpMap.delete(phoneKey);
-        return res.status(429).json({ error: "Limite máximo de tentativas excedido. Solicite um novo código SMS." });
-      }
-
-      if (otpData.code !== cleanCode) {
-        otpData.attempts += 1;
-        const remaining = otpData.maxAttempts - otpData.attempts;
-        if (remaining <= 0) {
-          phoneOtpMap.delete(phoneKey);
-          return res.status(400).json({ error: "Código incorreto. Limite de tentativas esgotado. Solicite um novo código." });
-        }
+      if (!result.token) {
         return res.status(400).json({
-          error: `Código de verificação incorreto. Tentativas restantes: ${remaining}.`,
-          remainingAttempts: remaining
+          error: result.error || "Código incorreto ou expirado.",
+          remainingAttempts: result.remainingAttempts,
         });
       }
 
-      otpData.verified = true;
-      phoneOtpMap.delete(phoneKey);
-
-      const resetToken = crypto.randomBytes(32).toString("hex");
-      const expiresAt = now + 15 * 60 * 1000; // 15 minutes
-
-      resetSessionsMap.set(resetToken, {
-        token: resetToken,
-        email: otpData.email,
-        userId: otpData.userId,
-        expiresAt,
-        used: false,
-        type: "phone"
-      });
-
       res.json({
         success: true,
-        message: "Telefone confirmado com sucesso!",
-        resetToken,
-        expiresMinutes: 15
+        message: "Telefone confirmado. Defina sua nova senha.",
+        resetToken: result.token,
+        expiresMinutes: RESET_TOKEN_TTL_MINUTES,
       });
     } catch (error: any) {
       console.error("Erro ao validar código SMS:", error);
-      res.status(500).json({ error: error.message || "Erro ao validar código SMS." });
+      res.status(500).json({ error: "Erro ao validar código SMS." });
     }
   });
 
   // PASSWORD RECOVERY: Verify Token validity
   app.get("/api/auth/recovery/verify-token", async (req, res) => {
     try {
-      const token = req.query.token as string;
+      const token = String(req.query.token || "");
       if (!token) {
         return res.status(400).json({ valid: false, error: "Token ausente." });
       }
 
-      const session = resetSessionsMap.get(token);
-      if (!session) {
-        return res.status(404).json({ valid: false, error: "Link de recuperação inválido ou não encontrado." });
+      const found = await findValidResetToken(token);
+      if (!found) {
+        return res.status(404).json({ valid: false, error: "Link de recuperação inválido, expirado ou já utilizado." });
       }
 
-      if (session.used) {
-        return res.status(400).json({ valid: false, error: "Este link de recuperação já foi utilizado." });
-      }
-
-      if (Date.now() > session.expiresAt) {
-        resetSessionsMap.delete(token);
-        return res.status(400).json({ valid: false, error: "Este link de recuperação expirou. Por favor, solicite um novo." });
-      }
-
-      const [userPart, domain] = session.email.split("@");
-      const maskedUser = userPart.length > 2 ? `${userPart.slice(0, 2)}••••` : `${userPart}•`;
-      const maskedEmail = `${maskedUser}@${domain || ""}`;
-
-      res.json({
-        valid: true,
-        email: maskedEmail,
-        type: session.type
-      });
+      res.json({ valid: true, email: maskEmail(found.email) });
     } catch (error: any) {
       console.error("Erro ao verificar token:", error);
       res.status(500).json({ valid: false, error: "Erro ao verificar validade do link." });
@@ -586,59 +737,94 @@ async function startServer() {
   });
 
   // PASSWORD RECOVERY: Reset Password
-  app.post("/api/auth/recovery/reset-password", async (req, res) => {
+  app.post("/api/auth/recovery/reset-password", authLimiter(), async (req, res) => {
     try {
       const { token, newPassword } = req.body;
       if (!token) {
         return res.status(400).json({ error: "Token de recuperação ausente." });
       }
 
-      if (!newPassword || typeof newPassword !== "string" || newPassword.length < 4) {
-        return res.status(400).json({ error: "A nova senha deve conter no mínimo 4 caracteres." });
+      const strengthError = validatePasswordStrength(newPassword || "");
+      if (strengthError) {
+        return res.status(400).json({ error: strengthError });
       }
 
-      const session = resetSessionsMap.get(token);
-      if (!session) {
-        return res.status(404).json({ error: "Token de recuperação inválido ou inexistente." });
+      const consumed = await consumeResetToken(token);
+      if (!consumed) {
+        return res.status(400).json({ error: "Token inválido, expirado ou já utilizado. Solicite um novo link." });
       }
 
-      if (session.used) {
-        return res.status(400).json({ error: "Este token já foi utilizado anteriormente." });
+      const user = await getUserByEmail(consumed.email);
+      if (!user) {
+        return res.status(404).json({ error: "Conta não encontrada." });
       }
 
-      if (Date.now() > session.expiresAt) {
-        resetSessionsMap.delete(token);
-        return res.status(400).json({ error: "Este token expirou. Solicite um novo link ou código." });
-      }
+      // Hash scrypt (antes: texto claro comparado com !==).
+      await updateUserPassword(user.id || consumed.email, hashPassword(newPassword));
 
-      await updateUserPassword(session.userId || session.email, newPassword);
+      // Troca de senha invalida sessões anteriores.
+      await revokeUserSessions(user.uid);
 
-      session.used = true;
-      resetSessionsMap.delete(token);
-
-      for (const [k, s] of resetSessionsMap.entries()) {
-        if (s.email === session.email) {
-          resetSessionsMap.delete(k);
-        }
-      }
-
-      console.log(`[Password Recovery] Senha atualizada com sucesso para ${session.email}`);
+      console.log(`[Password Recovery] Senha atualizada (hash) para ${maskEmail(consumed.email)}`);
 
       res.json({
         success: true,
         message: "Senha alterada com sucesso! Você já pode entrar com sua nova senha.",
-        email: session.email
+        email: maskEmail(consumed.email),
       });
     } catch (error: any) {
       console.error("Erro ao redefinir senha:", error);
-      res.status(500).json({ error: error.message || "Erro ao redefinir senha." });
+      res.status(500).json({ error: "Erro ao redefinir senha." });
     }
   });
+  // =========================================================================
+  // CADASTRO E LOGIN — Parte 2 da auditoria
+  // =========================================================================
+  // Mudanças obrigatórias:
+  //  - senha mínima de 8 caracteres com letras e números, gravada como scrypt;
+  //  - NUNCA aceitar `role` do corpo do cadastro: todo mundo nasce "Aluno";
+  //  - e-mail que consta em PLATFORM_OWNER_EMAILS não vira admin por si só —
+  //    privilégio agora vem de `users.role`/`users.is_admin`/`memberships`,
+  //    administrados pelo painel;
+  //  - a sessão é assinada (HMAC) e registrada em `auth_sessions`.
+
+  function sessionIp(req: any): string {
+    return ((req.headers["x-forwarded-for"] as string) || req.socket?.remoteAddress || "")
+      .split(",")[0]
+      .trim();
+  }
+
+  async function issueSession(
+    req: any,
+    user: { uid: string; email?: string | null },
+    via: "password" | "google" | "supabase" | "school" | "guest"
+  ): Promise<string | null> {
+    const token = createSessionToken({ sub: user.uid, via });
+    if (!token) {
+      console.error("[Auth] Não foi possível assinar a sessão: SESSION_SECRET ausente em produção.");
+      return null;
+    }
+    try {
+      const parts = token.split(".");
+      const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+      await recordSession({
+        sessionId: payload.sid,
+        userUid: user.uid,
+        via,
+        ip: sessionIp(req),
+        userAgent: String(req.headers["user-agent"] || "").slice(0, 300),
+        expiresAt: new Date(payload.exp * 1000).toISOString(),
+      });
+    } catch (err: any) {
+      console.warn("[Auth] Falha ao registrar sessão:", err?.message || err);
+    }
+    return token;
+  }
 
   // Dedicated Registration Endpoint with duplicate check (email + phone)
-  app.post("/api/auth/register", async (req, res) => {
+  app.post("/api/auth/register", authLimiter(), async (req, res) => {
     try {
-      const { email, password, nome, cpf, phone, birthdate, gender, institution, role } = req.body;
+      const { email, password, nome, cpf, phone, birthdate, gender, institution } = req.body;
       const cleanEmail = (email || "").trim().toLowerCase();
 
       if (!cleanEmail) {
@@ -650,13 +836,11 @@ async function startServer() {
         return res.status(400).json({ error: "Formato de e-mail inválido. Exemplo: aluno@escola.pr.gov.br" });
       }
 
-      // STRICT DUPLICATE EMAIL CHECK
       const existingUser = await getUserByEmail(cleanEmail);
       if (existingUser) {
         return res.status(400).json({ error: "Este e-mail já está cadastrado no sistema. Por favor, tente fazer login ou recupere sua senha." });
       }
 
-      // STRICT DUPLICATE PHONE CHECK IF PHONE PROVIDED
       if (phone) {
         const cleanDigits = String(phone).replace(/\D/g, "");
         if (cleanDigits.length >= 8) {
@@ -667,19 +851,22 @@ async function startServer() {
         }
       }
 
-      if (!password || password.length < 3) {
-        return res.status(400).json({ error: "A senha precisa ter no mínimo 3 caracteres." });
+      const strengthError = validatePasswordStrength(password || "");
+      if (strengthError) {
+        return res.status(400).json({ error: strengthError });
       }
 
-      const uid = "local-uid-" + Math.floor(Math.random() * 88888 + 10000);
+      const uid = "local-uid-" + crypto.randomBytes(6).toString("hex");
       let registeredUser = await getOrCreateUser(
         uid,
         cleanEmail,
-        nome || cleanEmail.split("@")[0],
+        (nome || "").trim() || cleanEmail.split("@")[0],
         "",
         "local",
-        role || "Aluno",
-        password
+        // Papel fixo: cadastro público nunca cria administrador. A promoção é
+        // feita por um Chefe Administrador no painel, com registro de auditoria.
+        "Aluno",
+        hashPassword(password)
       );
 
       if (cpf || phone || birthdate || gender || institution) {
@@ -695,7 +882,13 @@ async function startServer() {
         }
       }
 
-      const token = `local-${uid}|${registeredUser.role || 'Aluno'}|${encodeURIComponent(registeredUser.nome || '')}|${encodeURIComponent(cleanEmail)}|${encodeURIComponent(password)}`;
+      const token = await issueSession(req, { uid, email: cleanEmail }, "password");
+      if (!token) {
+        return res.status(503).json({
+          error: "Cadastro concluído, mas a sessão não pôde ser criada. Configure SESSION_SECRET e entre novamente.",
+          code: "SESSION_UNAVAILABLE",
+        });
+      }
 
       res.json({ user: registeredUser, token });
     } catch (error: any) {
@@ -705,7 +898,7 @@ async function startServer() {
   });
 
   // Local password login with database verification
-  app.post("/api/auth/local-login-password", async (req, res) => {
+  app.post("/api/auth/local-login-password", authLimiter(), async (req, res) => {
     try {
       const { email, password } = req.body;
       if (!email || !password) {
@@ -713,43 +906,41 @@ async function startServer() {
       }
 
       const cleanEmail = email.trim().toLowerCase();
-      let user = await getUserByEmail(cleanEmail);
-      
+      const user = await getUserByEmail(cleanEmail);
+
       if (!user) {
-        const isDirector = cleanEmail === "davidribeiromuller2009@gmail.com" || cleanEmail === "diretoria@helenawysocki.com";
-        const isKnownDefault = isDirector || cleanEmail === "aluno@escola.pr.gov.br";
-        
-        if (isKnownDefault) {
-          const defaultName = cleanEmail === "davidribeiromuller2009@gmail.com" 
-            ? "David Ribeiro Müller" 
-            : (cleanEmail === "diretoria@helenawysocki.com" ? "Diretoria Helena Wysocki" : "Aluno Helena Wysocki");
-          
-          user = await getOrCreateUser(
-            "auto-uid-" + Math.floor(Math.random() * 88888 + 10000),
-            cleanEmail,
-            defaultName,
-            "",
-            "local",
-            isDirector ? "Diretor" : "Aluno",
-            password || "senha123"
-          );
-        } else {
-          return res.status(404).json({ error: "Nenhuma conta cadastrada com este e-mail. Por favor, crie uma conta primeiro." });
-        }
-      } else {
-        if (user.password && user.password !== password) {
-          return res.status(401).json({ error: "Senha incorreta. Verifique os dados digitados e tente novamente." });
-        }
+        // Antes: contas "conhecidas" eram criadas automaticamente com senha
+        // padrão só informando o e-mail. Isso era uma porta de entrada aberta.
+        return res.status(404).json({ error: "Nenhuma conta cadastrada com este e-mail. Por favor, crie uma conta primeiro." });
       }
 
-      if (user && user.ativo === false) {
+      if (user.ativo === false) {
         return res.status(403).json({
-          error: "Sua conta foi bloqueada ou desativada pela administração. Entre em contato com a diretoria da Escola Helena Wysocki para solicitar o desbloqueio."
+          error: "Sua conta foi bloqueada ou desativada pela administração. Entre em contato com a diretoria da escola para solicitar o desbloqueio."
         });
       }
 
-      // Generate local token matching standard requireAuth middleware expectation
-      const token = `local-${user.uid}|${user.role || 'Aluno'}|${encodeURIComponent(user.nome || '')}|${encodeURIComponent(user.email)}`;
+      // Senha em texto claro? Compara e MIGRA para hash no mesmo login.
+      const check = verifyPassword(password, user.password);
+      if (!check.ok) {
+        return res.status(401).json({ error: "Senha incorreta. Verifique os dados digitados e tente novamente." });
+      }
+      if (check.needsUpgrade) {
+        try {
+          await updateUserPassword(user.id || cleanEmail, hashPassword(password));
+          console.info(`[Auth] Senha legada convertida para scrypt: ${maskEmail(cleanEmail)}`);
+        } catch (upgradeErr) {
+          console.warn("[Auth] Falha ao migrar senha legada:", upgradeErr);
+        }
+      }
+
+      const token = await issueSession(req, { uid: user.uid, email: user.email }, "password");
+      if (!token) {
+        return res.status(503).json({
+          error: "Login indisponível: SESSION_SECRET não configurado no servidor.",
+          code: "SESSION_UNAVAILABLE",
+        });
+      }
 
       res.json({ user, token });
     } catch (error: any) {
@@ -759,16 +950,15 @@ async function startServer() {
   });
 
   // Direct Google Authentication endpoint (supports web preview / sandboxed iframe environments)
-  app.post("/api/auth/google-direct-login", async (req, res) => {
+  app.post("/api/auth/google-direct-login", authLimiter(), async (req, res) => {
     try {
-      const { email, nome, foto_perfil, role } = req.body;
+      const { email, nome, foto_perfil } = req.body;
       if (!email || typeof email !== "string" || !email.trim()) {
         return res.status(400).json({ error: "O endereço de e-mail é obrigatório para autenticação Google." });
       }
       const cleanEmail = email.trim().toLowerCase();
       const userName = nome || (cleanEmail ? cleanEmail.split("@")[0].replace(/[._]/g, " ") : "Usuário Google");
       const userPhoto = foto_perfil || "";
-      const userRole = role || "Aluno";
       let hash = 0;
       for (let i = 0; i < cleanEmail.length; i++) {
         hash = (Math.imul(31, hash) + cleanEmail.charCodeAt(i)) | 0;
@@ -781,16 +971,23 @@ async function startServer() {
         userName,
         userPhoto,
         "google",
-        userRole
+        // Papel nunca vem do corpo: consulta o existente ou nasce Aluno.
+        undefined
       );
 
       if (user && user.ativo === false) {
         return res.status(403).json({
-          error: "Sua conta foi bloqueada ou desativada pela administração escolar. Entre em contato com a diretoria da Escola Helena Wysocki para solicitar o desbloqueio."
+          error: "Sua conta foi bloqueada ou desativada pela administração escolar. Entre em contato com a diretoria da escola para solicitar o desbloqueio."
         });
       }
 
-      const token = `google-${uid}|${user.role || 'Aluno'}|${encodeURIComponent(user.nome || '')}|${encodeURIComponent(cleanEmail)}|${encodeURIComponent(userPhoto)}`;
+      const token = await issueSession(req, { uid, email: cleanEmail }, "google");
+      if (!token) {
+        return res.status(503).json({
+          error: "Login indisponível: SESSION_SECRET não configurado no servidor.",
+          code: "SESSION_UNAVAILABLE",
+        });
+      }
 
       res.json({ user, token });
     } catch (error: any) {
@@ -799,35 +996,25 @@ async function startServer() {
     }
   });
 
-  // Autenticação: Login / Registrar Sincronizado
+  // Autenticação: Login / Registrar Sincronizado (token do provedor já validado)
   app.post("/api/auth/login", requireAuth, async (req: AuthRequest, res) => {
     try {
-      if (!req.user) {
+      const authUser = req.user as any;
+      if (!authUser) {
         return res.status(401).json({ error: "Contexto de autenticação ausente" });
       }
 
-      const uid = req.user.uid || (req.user as any).sub || (req.user as any).user_id;
-      const email = req.user.email || req.body?.email || "";
-      const name = req.body?.nome || (req.user as any).name || (req.user as any).displayName || (email ? email.split("@")[0] : "Usuário Google");
-      const picture = req.body?.foto_perfil || (req.user as any).picture || (req.user as any).photoURL || "";
-      const provider = req.user.iss === "local-sim" ? "local" : "google";
-      const role = req.body?.role || (req.user as any).role || "Aluno";
-      const password = (req.user as any).password;
+      const uid = authUser.uid || authUser.sub;
+      const email = authUser.email || "";
+      const name = req.body?.nome || authUser.name || (email ? email.split("@")[0] : "Usuário");
+      const picture = req.body?.foto_perfil || authUser.picture || "";
+      const provider = req.authSource === "supabase" || authUser.iss?.includes("supabase") ? "google" : "local";
 
       if (!uid) {
         return res.status(400).json({ error: "UID não identificado no token de autenticação." });
       }
-      
-      // Sincroniza o usuário do Firebase/Local com nossa tabela PostgreSQL/Fallback
-      const user = await getOrCreateUser(
-        uid,
-        email,
-        name,
-        picture,
-        provider,
-        role,
-        password
-      );
+
+      const user = await getOrCreateUser(uid, email, name, picture, provider, "Aluno");
 
       if (user && user.ativo === false) {
         return res.status(403).json({
@@ -843,9 +1030,9 @@ async function startServer() {
   });
 
   // Autenticação: Login de Convidado (Modo Visitante sem senha nem CGM)
-  app.post("/api/auth/guest-login", (req, res) => {
+  app.post("/api/auth/guest-login", async (req, res) => {
     try {
-      const guestId = Math.floor(Math.random() * 80000) + 20000;
+      const guestId = crypto.randomInt(20000, 99999);
       const guestUser = {
         id: guestId,
         uid: `guest-${guestId}`,
@@ -859,21 +1046,36 @@ async function startServer() {
         createdAt: new Date().toISOString()
       };
 
-      const token = `guest-${guestUser.uid}|Convidado|${encodeURIComponent(guestUser.nome)}|${encodeURIComponent(guestUser.email)}|`;
+      // Convidado também recebe sessão assinada — nenhum token é montado por
+      // concatenação de strings no cliente.
+      const token = await issueSession(req, { uid: guestUser.uid, email: guestUser.email }, "guest");
       res.json({ user: guestUser, token });
     } catch (err: any) {
       res.status(500).json({ error: "Erro ao iniciar sessão de convidado." });
     }
   });
 
-  // Autenticação: Login Institucional da Escola (Acesso Exclusivo das Instituições de Ensino)
-  app.post("/api/auth/institutional-login", (req, res) => {
+  // Autenticação: Login Institucional da Escola
+  app.post("/api/auth/institutional-login", authLimiter(), async (req, res) => {
     try {
       const { identificador, password } = req.body;
       if (!identificador || !password) {
         return res.status(400).json({ error: "Identificador institucional e senha são obrigatórios." });
       }
 
+      // 1) Contas escolares na tabela dedicada (senha com hash).
+      const schoolAccount = await autenticarContaEscolar(identificador, password).catch(() => null);
+      if (schoolAccount?.user) {
+        const token = await issueSession(
+          req,
+          { uid: schoolAccount.user.uid, email: schoolAccount.user.email },
+          "school"
+        );
+        return res.json({ user: schoolAccount.user, token });
+      }
+
+      // 2) Fallback da loja institucional local (apenas quando o banco não está
+      //    disponível). A senha é comparada com hash quando já migrada.
       const account = authenticateInstitutionalAccountFallback(identificador, password);
       if (!account) {
         return res.status(401).json({ error: "Identificador institucional ou senha incorretos." });
@@ -895,13 +1097,12 @@ async function startServer() {
         lastLogin: new Date().toISOString()
       };
 
-      const token = `inst-${schoolUser.uid}|Escola|${encodeURIComponent(schoolUser.nome)}|${encodeURIComponent(schoolUser.email)}|${account.escolaId}`;
+      const token = await issueSession(req, { uid: schoolUser.uid, email: schoolUser.email }, "school");
       res.json({ user: schoolUser, token, schoolAccount: account });
     } catch (err: any) {
       res.status(403).json({ error: err.message || "Falha na autenticação institucional." });
     }
   });
-
   // Autenticação: Obter Perfil do database
   app.get("/api/auth/profile", requireAuth, async (req: AuthRequest, res) => {
     try {
@@ -1438,6 +1639,12 @@ async function startServer() {
   // --- ESCOLAS DE ARAUCÁRIA & COMUNICADOS DINÂMICOS ---
 
   // Listar todas as 6 escolas cadastradas
+  // Catálogo público de escolas de Araucária.
+  //
+  // Fica aberto de propósito: é o diretório institucional (nome, endereço,
+  // contato da secretaria), não dado de instituição cliente. Nenhum dado de
+  // aluno, responsável ou assinatura passa por estas duas rotas — elas leem a
+  // lista estática `ARAUCARIA_SCHOOLS`, não as tabelas multi-tenant.
   app.get("/api/schools", (req, res) => {
     try {
       res.json({ schools: ARAUCARIA_SCHOOLS });
@@ -1874,7 +2081,13 @@ async function startServer() {
   });
 
   // Listar histórico geral de eventos excluídos (retenção de 3 dias)
-  app.get("/api/events/archived", (req, res) => {
+  // --- ARQUIVAMENTO E RETENÇÃO DE EVENTOS (exclusivo administração) ---
+  //
+  // Parte 2 da auditoria: estas quatro rotas eram PÚBLICAS. Qualquer visitante
+  // podia listar o histórico arquivado das escolas, restaurar um evento para o
+  // mural e — pior — disparar `cleanup-expired` em laço, forçando arquivamentos
+  // e reescritas em massa. Todas passam a exigir administrador da instituição.
+  app.get("/api/events/archived", requireAuth, requireAdminOrStaff, async (req: AuthRequest, res) => {
     try {
       const archived = listArchivedEventsFallback();
       res.json({ archived, retentionDays: EVENT_RETENTION_DAYS });
@@ -1884,7 +2097,7 @@ async function startServer() {
   });
 
   // Restaurar evento arquivado de volta aos eventos ativos (Painel ADM)
-  app.post("/api/events/:id/restore", (req, res) => {
+  app.post("/api/events/:id/restore", requireAuth, requireAdminOrStaff, async (req: AuthRequest, res) => {
     try {
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) {
@@ -1902,7 +2115,7 @@ async function startServer() {
   });
 
   // Consultar logs da rotina de arquivamento automático
-  app.get("/api/events/archive-logs", (req, res) => {
+  app.get("/api/events/archive-logs", requireAuth, requireAdminOrStaff, async (req: AuthRequest, res) => {
     try {
       const logs = getEventArchiveLogsFallback();
       res.json({ logs, retentionDays: EVENT_RETENTION_DAYS });
@@ -1912,7 +2125,7 @@ async function startServer() {
   });
 
   // Executar rotina manual de expiração de eventos (3 dias após encerramento)
-  app.post("/api/events/cleanup-expired", (req, res) => {
+  app.post("/api/events/cleanup-expired", requireAuth, requireAdminOrStaff, async (req: AuthRequest, res) => {
     try {
       const result = archiveAndPruneExpiredEvents();
       res.json({
@@ -2083,7 +2296,15 @@ async function startServer() {
   }
 
   // 1. Submit parental authorization with digital handwritten signature
-  app.post("/api/events/:eventId/authorizations", async (req, res) => {
+  //
+  // Parte 2 da auditoria: esta rota era PÚBLICA. Qualquer pessoa podia gravar
+  // uma autorização em nome de um estudante — inclusive de outra escola — com
+  // nome de responsável inventado e assinatura desenhada no navegador. Agora:
+  //  * exige sessão válida (`requireAuth`);
+  //  * o próprio estudante só assina para si;
+  //  * a equipe administrativa (Chefe/Funcionário) pode registrar em nome de
+  //    um aluno da própria instituição.
+  app.post("/api/events/:eventId/authorizations", requireAuth, async (req: AuthRequest, res) => {
     try {
       const eventId = parseInt(req.params.eventId, 10);
       if (isNaN(eventId)) {
@@ -2121,21 +2342,60 @@ async function startServer() {
         return res.status(400).json({ error: "A assinatura digital manuscrita é obrigatória." });
       }
 
-      const authId = `auth-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
-      const filename = `${authId}.png`;
-      const filePath = path.join(SIGNATURES_DIR, filename);
+      // Quem está assinando? A autorização é sempre vinculada a um estudante;
+      // só o próprio estudante (ou a equipe da escola) pode criá-la.
+      const dbUser = await resolveDbUserForRequest(req);
+      if (dbUser && dbUser.ativo === false) {
+        return res.status(403).json({
+          error: "Sua conta está bloqueada pela administração escolar.",
+          blocked: true,
+        });
+      }
 
-      // Save binary image to disk
-      const base64Data = signatureDataUrl.replace(/^data:image\/\w+;base64,/, "");
-      fs.writeFileSync(filePath, Buffer.from(base64Data, "base64"));
-      const signaturePath = `/uploads/signatures/${filename}`;
+      const identidades = ownIdentityCandidates(req, dbUser);
+      const alvo = String(studentUserId || "").trim();
+      const assinandoParaSi = identidades.length > 0 && identidades.includes(alvo);
+      const isEquipeAdmin =
+        checkIsChefe(dbUser, req.user) || checkIsFuncionario(dbUser, req.user);
+      const isAlunoAssinandoParaSi =
+        assinandoParaSi && Boolean(dbUser) && /aluno|estudante/i.test(String(dbUser?.role || ""));
+
+      if (!isEquipeAdmin && !isAlunoAssinandoParaSi) {
+        return res.status(403).json({
+          error:
+            "Somente o próprio estudante ou a equipe administrativa da escola pode registrar uma autorização.",
+        });
+      }
+
+      const authId = `auth-${Date.now()}-${crypto.randomBytes(8).toString("hex")}`;
+
+      // Parte 2 da auditoria: assinatura vai para bucket PRIVADO com URL
+      // assinada de curta duração. O disco local é apenas fallback quando o
+      // Storage não está configurado (e aí a leitura exige autenticação).
+      let signaturePath = "";
+      const upload = await uploadSignature({ authorizationId: authId, dataUrl: signatureDataUrl });
+      if (upload.ok && upload.path) {
+        signaturePath = upload.path;
+      } else {
+        const filename = `${authId}.png`;
+        const filePath = path.join(SIGNATURES_DIR, filename);
+        fs.mkdirSync(SIGNATURES_DIR, { recursive: true });
+        const base64Data = signatureDataUrl.replace(/^data:image\/\w+;base64,/, "");
+        fs.writeFileSync(filePath, Buffer.from(base64Data, "base64"));
+        signaturePath = `/uploads/signatures/${filename}`;
+        console.warn("[Authorizations] Storage indisponível; assinatura gravada em disco local.");
+      }
 
       const authoritativeSignedAt = new Date().toISOString();
 
       const authorization = await createAuthorization({
         id: authId,
         eventId,
-        studentUserId: String(studentUserId || "student-anonymous"),
+        // O vínculo vem do token, não do corpo da requisição: sem isso o
+        // cliente escolheria a qual estudante a autorização pertence.
+        studentUserId: isEquipeAdmin
+          ? String(studentUserId || "student-anonymous")
+          : String(dbUser?.uid || req.user!.uid),
         studentName: studentName || "Estudante",
         studentSchool: studentSchool || "Colégio Estadual de Araucária",
         studentClass: studentClass || "Turma Regular",
@@ -2187,13 +2447,22 @@ async function startServer() {
   });
 
   // 2. Check if student already has authorization for this event
-  app.get("/api/events/:eventId/authorizations/check", async (req, res) => {
+  app.get("/api/events/:eventId/authorizations/check", requireAuth, async (req: AuthRequest, res) => {
     try {
       const eventId = parseInt(req.params.eventId, 10);
-      const studentUserId = req.query.studentUserId as string;
+      const studentUserId = String(req.query.studentUserId || "");
 
       if (!studentUserId || isNaN(eventId)) {
         return res.json({ authorized: false, authorization: null });
+      }
+
+      // Consulta sobre situação de autorização de menor: só o próprio
+      // estudante ou a equipe administrativa.
+      const dbUser = await resolveDbUserForRequest(req);
+      const isEquipeAdmin =
+        checkIsChefe(dbUser, req.user) || checkIsFuncionario(dbUser, req.user);
+      if (!isEquipeAdmin && !ownIdentityCandidates(req, dbUser).includes(studentUserId)) {
+        return res.status(403).json({ authorized: false, authorization: null, error: AUTHORIZATION_FORBIDDEN });
       }
 
       const auth = await getAuthorizationByStudentAndEvent(studentUserId, eventId);
@@ -2207,23 +2476,40 @@ async function startServer() {
   });
 
   // 3. List authorizations for an event (admins, directors, pedagogos)
-  app.get("/api/events/:eventId/authorizations", async (req, res) => {
+  //
+  // Antes era pública: qualquer visitante listava nome completo dos estudantes,
+  // nome e contato do responsável legal e o texto assinado. Agora exige sessão
+  // de administrador da instituição (Chefe ou Funcionário).
+  app.get(
+    "/api/events/:eventId/authorizations",
+    requireAuth,
+    requireAdminOrStaff,
+    async (req: AuthRequest, res) => {
     try {
       const eventId = parseInt(req.params.eventId, 10);
       if (isNaN(eventId)) {
         return res.status(400).json({ error: "ID de evento inválido." });
       }
-      const list = await listAuthorizationsByEvent(eventId);
-      res.json(list);
-    } catch (error: any) {
-      res.status(500).json({ error: "Erro ao listar autorizações do evento." });
+        const list = await listAuthorizationsByEvent(eventId);
+        res.json(list);
+      } catch (error: any) {
+        res.status(500).json({ error: "Erro ao listar autorizações do evento." });
+      }
     }
-  });
+  );
 
   // 4. List authorizations for a student
-  app.get("/api/users/:userId/authorizations", async (req, res) => {
+  app.get("/api/users/:userId/authorizations", requireAuth, async (req: AuthRequest, res) => {
     try {
-      const userId = req.params.userId;
+      const userId = String(req.params.userId);
+
+      const dbUser = await resolveDbUserForRequest(req);
+      const isEquipeAdmin =
+        checkIsChefe(dbUser, req.user) || checkIsFuncionario(dbUser, req.user);
+      if (!isEquipeAdmin && !ownIdentityCandidates(req, dbUser).includes(userId)) {
+        return res.status(403).json({ error: AUTHORIZATION_FORBIDDEN });
+      }
+
       const list = await listAuthorizationsByStudent(userId);
       res.json(list);
     } catch (error: any) {
@@ -2232,23 +2518,1083 @@ async function startServer() {
   });
 
   // 5. Get signature image by authorization ID
-  app.get("/api/authorizations/:id/signature", (req, res) => {
+  //
+  // Parte 2 da auditoria: antes esta rota era PÚBLICA e servia a assinatura do
+  // responsável para qualquer um que tivesse o id. Agora exige sessão e
+  // devolve uma URL assinada de 5 minutos (bucket privado). O acesso ao disco
+  // local só acontece depois da checagem de permissão.
+  app.get("/api/authorizations/:id/signature", requireAuth, async (req: AuthRequest, res) => {
     try {
-      const authId = req.params.id;
-      const filename = `${authId}.png`;
-      const filePath = path.join(SIGNATURES_DIR, filename);
+      const authId = String(req.params.id);
+      if (!/^auth-[A-Za-z0-9-]+$/.test(authId)) {
+        return res.status(400).json({ error: "Identificador de autorização inválido." });
+      }
 
+      const authorization = await getAuthorizationByStudentAndEvent(
+        (req.user as any)?.uid || "",
+        Number(req.query.eventId) || 0
+      ).catch(() => null);
+
+      const dbUser = req.dbUser || (await getUserByUid((req.user as any)?.uid).catch(() => null));
+      const requesterIsStaff = checkIsChefe(dbUser, req.user) || checkIsFuncionario(dbUser, req.user);
+
+      // Só a própria pessoa (dono da autorização) ou a equipe administrativa
+      // pode ver a assinatura. Sem autorização, não há nem 404 nem imagem.
+      if (!requesterIsStaff && !authorization) {
+        return res.status(403).json({ error: "Você não tem permissão para acessar esta assinatura." });
+      }
+
+      // Preferência: URL assinada do bucket privado.
+      const signed = await createSignedSignatureUrl(`${authId}.png`).catch(() => null);
+      if (signed) {
+        return res.json({ url: signed, expiresInSeconds: SIGNED_URL_TTL_SECONDS });
+      }
+      const signedJpg = await createSignedSignatureUrl(`${authId}.jpg`).catch(() => null);
+      if (signedJpg) {
+        return res.json({ url: signedJpg, expiresInSeconds: SIGNED_URL_TTL_SECONDS });
+      }
+
+      // Fallback legado (disco local), agora protegido por autenticação.
+      const filePath = path.join(SIGNATURES_DIR, `${authId}.png`);
       if (fs.existsSync(filePath)) {
         res.setHeader("Content-Type", "image/png");
-        res.setHeader("Cache-Control", "private, max-age=3600");
+        res.setHeader("Cache-Control", "private, no-store");
         return fs.createReadStream(filePath).pipe(res);
       }
       res.status(404).json({ error: "Assinatura não encontrada." });
     } catch (err: any) {
+      console.error("[Authorizations] Erro ao carregar assinatura:", err);
       res.status(500).json({ error: "Erro ao carregar assinatura." });
     }
   });
 
+  // =========================================================================
+  // NÚCLEO SaaS — Parte 4 a 13 da auditoria
+  // =========================================================================
+  // Convenções:
+  //   `/api/saas/*`       → leitura pública (planos, parceiros, instituições)
+  //   `/api/school/*`     → painel da escola (exige vínculo de admin)
+  //   `/api/master/*`     → painel Master (exige proprietário da plataforma)
+  //   `/api/billing/*`    → cobrança e webhooks
+  //
+  // Toda rota de escola resolve a instituição PELO VÍNCULO do usuário
+  // (`memberships`), nunca por `schoolId` enviado no corpo — é isso que impede
+  // uma escola de operar os dados de outra.
+
+  const saasUnavailable = (res: any, detail?: string) =>
+    res.status(503).json({
+      error:
+        "Núcleo SaaS não está disponível neste ambiente. Configure SUPABASE_URL e SUPABASE_SECRET_KEY no servidor.",
+      code: "SAAS_NOT_CONFIGURED",
+      detail,
+    });
+
+  /** Resolve o usuário autenticado e a instituição que ele administra. */
+  async function resolveSchoolScope(req: AuthRequest, res: any, schoolIdFromParam?: string) {
+    const authUser = req.user as any;
+    if (!authUser) {
+      res.status(401).json({ error: "Não autenticado." });
+      return null;
+    }
+
+    const dbUser = req.dbUser || (await getUserByUid(authUser.uid).catch(() => null));
+    if (!dbUser) {
+      res.status(403).json({ error: "Conta não encontrada no diretório. Entre novamente." });
+      return null;
+    }
+    if (dbUser.ativo === false) {
+      res.status(403).json({ error: "Sua conta está bloqueada pela administração.", blocked: true });
+      return null;
+    }
+
+    const administered = await listAdministeredSchools(dbUser.uid);
+    if (administered.length === 0) {
+      res.status(403).json({
+        error: "Sua conta não administra nenhuma instituição no eloEscola.",
+        code: "NO_SCHOOL_MEMBERSHIP",
+      });
+      return null;
+    }
+
+    let school = schoolIdFromParam
+      ? administered.find((s) => s.id === schoolIdFromParam || s.slug === schoolIdFromParam) || null
+      : administered[0];
+
+    if (!school) {
+      res.status(403).json({
+        error: "Você não tem permissão para operar esta instituição.",
+        code: "SCHOOL_FORBIDDEN",
+      });
+      return null;
+    }
+
+    const subscription = (await getSubscriptionBySchool(school.id)).data;
+    const plan = subscription
+      ? (await listPlans(true)).data?.find((p) => p.id === subscription.plan_id) || null
+      : null;
+    const entitlements = (await listEntitlements(school.id)).data || [];
+    const access = resolveAccessState(subscription as any);
+    const activeStudents = await countActiveStudents(school.id);
+
+    return {
+      dbUser,
+      school,
+      subscription,
+      plan,
+      entitlements,
+      access,
+      activeStudents,
+      administered,
+    };
+  }
+
+  /** Garante escrita liberada (assinatura em dia + cota do plano). */
+  function ensureCanWrite(context: NonNullable<Awaited<ReturnType<typeof resolveSchoolScope>>>, res: any) {
+    if (!context.access.canWrite) {
+      res.status(402).json({
+        error: context.access.reason || "Assinatura inativa: publicação bloqueada.",
+        code: "SUBSCRIPTION_INACTIVE",
+        subscriptionStatus: context.access.effectiveStatus,
+        canRead: context.access.canRead,
+      });
+      return false;
+    }
+    return true;
+  }
+
+  function hasFeature(context: NonNullable<Awaited<ReturnType<typeof resolveSchoolScope>>>, key: string) {
+    const row = context.entitlements.find((e: any) => e.feature_key === key);
+    return !!(row && row.enabled);
+  }
+
+  // -----------------------------------------------------------------------
+  // Catálogo comercial (público)
+  // -----------------------------------------------------------------------
+  app.get("/api/saas/plans", async (req, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const plans = await listPlans();
+    if (plans.error) return res.status(500).json({ error: plans.error });
+    const addons = await listPlanAddons();
+    const founderSlotsTaken = (await listSchools()).data?.filter((s) => s.is_founder).length || 0;
+
+    res.json({
+      plans: plans.data,
+      addons: addons.data || [],
+      founders: {
+        totalSlots: FOUNDER_SLOTS,
+        takenSlots: founderSlotsTaken,
+        availableSlots: Math.max(0, FOUNDER_SLOTS - founderSlotsTaken),
+        discountPercent: FOUNDER_DISCOUNT_PERCENT,
+        discountMonths: 12,
+      },
+      trialDays: TRIAL_DAYS,
+      annualDiscountPercent: ANNUAL_DISCOUNT_PERCENT,
+      // Diagnóstico honesto de cobrança: a UI mostra "sandbox" quando não há
+      // provedor configurado, em vez de fingir checkout funcionando.
+      billing: getBillingDiagnostics(),
+    });
+  });
+
+  app.get("/api/saas/partners", async (req, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const partners = await listPartners("approved");
+    if (partners.error) return res.status(500).json({ error: partners.error });
+    // Nunca expõe contato interno: apenas dados de vitrine.
+    const publicPartners = (partners.data || []).map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      category: p.category,
+      description: p.description,
+      city: p.city,
+      state: p.state,
+      website: p.website,
+      logo_url: p.logo_url,
+    }));
+    res.json({ partners: publicPartners });
+  });
+
+  app.post("/api/saas/leads", publicWriteLimiter(), async (req, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const { name, email, phone, schoolName, city, state, planInterest, source } = req.body || {};
+    if (!name || !email) {
+      return res.status(400).json({ error: "Informe nome e e-mail para que possamos entrar em contato." });
+    }
+    const result = await createSalesLead({
+      name: String(name).trim(),
+      email: String(email).trim().toLowerCase(),
+      phone: phone ? String(phone).trim() : undefined,
+      schoolName: schoolName ? String(schoolName).trim() : undefined,
+      city: city ? String(city).trim() : undefined,
+      state: state ? String(state).trim() : undefined,
+      planInterest: planInterest ? String(planInterest).trim() : undefined,
+      source: source ? String(source).trim() : "site",
+    });
+    if (result.error) return res.status(500).json({ error: result.error });
+    res.status(201).json({ success: true, message: "Recebemos seu contato. Nossa equipe responde em até 1 dia útil." });
+  });
+
+  // -----------------------------------------------------------------------
+  // Painel da escola — "Minha assinatura"
+  // -----------------------------------------------------------------------
+  app.get("/api/school/me", requireAuth, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const ctx = await resolveSchoolScope(req, res);
+    if (!ctx) return;
+
+    // Mapeia entitlements para limites legíveis na UI.
+    const limitFor = (key: string) =>
+      ctx.entitlements.find((e: any) => e.feature_key === key)?.limit_value ?? null;
+
+    const aiUsage = await countUsageInPeriod(ctx.school.id, "ai_assistant");
+
+    res.json({
+      school: ctx.school,
+      administeredSchools: ctx.administered.map((s) => ({ id: s.id, slug: s.slug, name: s.name })),
+      subscription: ctx.subscription
+        ? {
+            id: ctx.subscription.id,
+            status: ctx.subscription.status,
+            effectiveStatus: ctx.access.effectiveStatus,
+            planId: ctx.subscription.plan_id,
+            planName: ctx.plan?.name || ctx.subscription.plan_id,
+            billingCycle: ctx.subscription.billing_cycle,
+            trialEndsAt: ctx.subscription.trial_ends_at,
+            currentPeriodEnd: ctx.subscription.current_period_end,
+            graceUntil: ctx.subscription.grace_until,
+            cancelAtPeriodEnd: ctx.subscription.cancel_at_period_end,
+            discountPercent: Number(ctx.subscription.discount_percent) || 0,
+            founderDiscount: ctx.subscription.founder_discount,
+            provider: ctx.subscription.provider,
+            nextDueAt: ctx.subscription.next_due_at,
+          }
+        : null,
+      access: ctx.access,
+      usage: {
+        activeStudents: ctx.activeStudents,
+        studentLimit: ctx.plan?.max_active_students ?? null,
+        studentQuota: evaluateQuota(ctx.activeStudents, ctx.plan?.max_active_students, "alunos ativos"),
+        adminLimit: ctx.plan?.max_admins ?? null,
+        unitLimit: ctx.plan?.max_units ?? null,
+        aiRequestsThisMonth: aiUsage,
+        aiLimit: limitFor("ai_assistant"),
+        aiQuota: evaluateQuota(aiUsage, limitFor("ai_assistant"), "mensagens de IA"),
+      },
+      entitlements: ctx.entitlements.map((e: any) => ({
+        key: e.feature_key,
+        label: featureLabel(e.feature_key),
+        enabled: e.enabled,
+        limit: e.limit_value,
+      })),
+      features: Object.fromEntries(ctx.entitlements.map((e: any) => [e.feature_key, e.enabled])),
+    });
+  });
+
+  app.get("/api/school/payments", requireAuth, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const ctx = await resolveSchoolScope(req, res);
+    if (!ctx) return;
+    const payments = await listPaymentsForSchool(ctx.school.id, 50);
+    if (payments.error) return res.status(500).json({ error: payments.error });
+    res.json({ payments: payments.data });
+  });
+
+  app.get("/api/school/subscription-events", requireAuth, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const ctx = await resolveSchoolScope(req, res);
+    if (!ctx) return;
+    const events = await listSubscriptionEvents(ctx.school.id, 50);
+    if (events.error) return res.status(500).json({ error: events.error });
+    res.json({ events: events.data });
+  });
+
+  /**
+   * Troca de plano / ciclo. Não cobra nada aqui: cria a intenção de cobrança
+   * (pendente) e o Master ou o provedor confirmam.
+   */
+  app.post("/api/school/subscription/change-plan", requireAuth, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const ctx = await resolveSchoolScope(req, res);
+    if (!ctx) return;
+
+    const { planId, billingCycle } = req.body || {};
+    const plans = (await listPlans()).data || [];
+    const target = plans.find((p) => p.id === planId);
+    if (!target) return res.status(400).json({ error: "Plano inválido." });
+    const cycle: "monthly" | "annual" = billingCycle === "annual" ? "annual" : "monthly";
+
+    if (!ctx.subscription) {
+      return res.status(400).json({ error: "Nenhuma assinatura para alterar. Fale com o suporte." });
+    }
+
+    const basePrice = cycle === "annual" ? target.annual_price_cents : target.monthly_price_cents;
+    const amount = effectivePriceCents(ctx.subscription as any, basePrice);
+
+    // Assinatura em teste passa a valer a partir de agora, mantendo o teste.
+    const now = new Date();
+    const keepingTrial = ctx.subscription.status === "trialing";
+    const periodEnd = keepingTrial
+      ? ctx.subscription.trial_ends_at || nextPeriodEnd(now, cycle).toISOString()
+      : nextPeriodEnd(now, cycle).toISOString();
+
+    const updated = await updateSubscription(ctx.subscription.id, {
+      plan_id: target.id,
+      billing_cycle: cycle,
+      current_period_start: now.toISOString(),
+      current_period_end: periodEnd,
+      next_due_at: keepingTrial ? ctx.subscription.trial_ends_at || null : periodEnd,
+    } as any);
+
+    if (updated.error) return res.status(500).json({ error: updated.error });
+
+    await syncEntitlementsFromPlan(ctx.school.id, ctx.subscription.id, target);
+    await logSubscriptionEvent({
+      subscriptionId: ctx.subscription.id,
+      schoolId: ctx.school.id,
+      eventType: "plan_changed",
+      fromStatus: ctx.subscription.plan_id,
+      toStatus: target.id,
+      payload: { billingCycle: cycle, amountCents: amount },
+      actorEmail: ctx.dbUser.email,
+    });
+    await logPlatformAudit({
+      actorEmail: ctx.dbUser.email,
+      actorRole: "school_admin",
+      action: "subscription.plan_changed",
+      targetType: "subscription",
+      targetId: ctx.subscription.id,
+      metadata: { school: ctx.school.slug, plan: target.id, cycle },
+    });
+
+    // Cobrança fica PENDENTE por definição (sem provedor configurado não há
+    // como confirmar pagamento). Nunca marcamos como paga.
+    const charge = await createCharge({
+      schoolId: ctx.school.id,
+      subscriptionId: ctx.subscription.id,
+      amountCents: amount,
+      method: "pix",
+      kind: "subscription",
+      description: `eloEscola — plano ${target.name} (${cycle === "annual" ? "anual" : "mensal"})`,
+      idempotencyKey: `plan-${ctx.subscription.id}-${target.id}-${cycle}-${now.toISOString().slice(0, 10)}`,
+      customerEmail: ctx.dbUser.email,
+    });
+
+    const payment = await createPaymentTransaction({
+      schoolId: ctx.school.id,
+      subscriptionId: ctx.subscription.id,
+      provider: charge.provider,
+      providerChargeId: charge.providerChargeId,
+      method: "pix",
+      kind: "subscription",
+      amountCents: amount,
+      status: "pending",
+      idempotencyKey: `plan-${ctx.subscription.id}-${target.id}-${cycle}-${now.toISOString().slice(0, 10)}`,
+      metadata: { message: charge.message, paymentUrl: charge.paymentUrl },
+    });
+
+    res.json({
+      success: true,
+      subscription: updated.data,
+      charge: {
+        status: charge.status,
+        provider: charge.provider,
+        paymentUrl: charge.paymentUrl,
+        message: charge.message,
+      },
+      payment: payment.data,
+    });
+  });
+
+  app.post("/api/school/subscription/cancel", requireAuth, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const ctx = await resolveSchoolScope(req, res);
+    if (!ctx || !ctx.subscription) return;
+
+    const updated = await updateSubscription(ctx.subscription.id, {
+      cancel_at_period_end: true,
+      canceled_at: new Date().toISOString(),
+    } as any);
+    if (updated.error) return res.status(500).json({ error: updated.error });
+
+    await logSubscriptionEvent({
+      subscriptionId: ctx.subscription.id,
+      schoolId: ctx.school.id,
+      eventType: "cancel_at_period_end",
+      fromStatus: ctx.subscription.status,
+      toStatus: ctx.subscription.status,
+      payload: { requestedAt: new Date().toISOString() },
+      actorEmail: ctx.dbUser.email,
+    });
+
+    res.json({
+      success: true,
+      message:
+        "Cancelamento agendado. A instituição continua publicando até o fim do período já pago e nenhum dado é apagado.",
+      subscription: updated.data,
+    });
+  });
+
+  app.get("/api/school/campaigns", requireAuth, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const ctx = await resolveSchoolScope(req, res);
+    if (!ctx) return;
+    const campaigns = await listCampaignsForSchool(ctx.school.id);
+    if (campaigns.error) return res.status(500).json({ error: campaigns.error });
+    res.json({ campaigns: campaigns.data });
+  });
+
+  app.post("/api/school/campaigns/:id/decision", requireAuth, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const ctx = await resolveSchoolScope(req, res);
+    if (!ctx) return;
+
+    const campaigns = await listCampaignsForSchool(ctx.school.id);
+    const campaign = (campaigns.data || []).find((c: any) => c.id === req.params.id);
+    if (!campaign) {
+      return res.status(404).json({ error: "Campanha não encontrada para esta instituição." });
+    }
+
+    const approve = req.body?.approve === true;
+    const decided = await decideCampaign({
+      campaignId: campaign.id,
+      approve,
+      actorUid: ctx.dbUser.uid,
+      reason: req.body?.reason,
+    });
+    if (decided.error) return res.status(500).json({ error: decided.error });
+
+    await logPlatformAudit({
+      actorEmail: ctx.dbUser.email,
+      actorRole: "school_admin",
+      action: approve ? "campaign.approved" : "campaign.rejected",
+      targetType: "partner_campaign",
+      targetId: campaign.id,
+      metadata: { school: ctx.school.slug },
+    });
+
+    res.json({ success: true, campaign: decided.data });
+  });
+
+  // -----------------------------------------------------------------------
+  // Painel MASTER (proprietário da plataforma)
+  // -----------------------------------------------------------------------
+  app.get("/api/master/overview", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const overview = await getPlatformOverview();
+    if (overview.error) return res.status(500).json({ error: overview.error });
+
+    const subs = overview.data!.subscriptions;
+    const plans = (await listPlans(true)).data || [];
+    const priceOf = (planId: string, cycle: string) => {
+      const p = plans.find((x) => x.id === planId);
+      if (!p) return 0;
+      return cycle === "annual" ? Math.round(p.annual_price_cents / 12) : p.monthly_price_cents;
+    };
+
+    const mrrCents = subs
+      .filter((s) => s.status === "active")
+      .reduce((acc, s) => {
+        const base = priceOf(s.plan_id, s.billing_cycle);
+        return acc + effectivePriceCents(s as any, base);
+      }, 0);
+
+    const founderSlotUsed = (overview.data!.schools || []).filter((s) => s.is_founder).length;
+
+    res.json({
+      ...overview.data,
+      totals: {
+        ...overview.data!.totals,
+        mrrCents,
+        arrCents: mrrCents * 12,
+        founderSlotsUsed: founderSlotUsed,
+        founderSlotsTotal: FOUNDER_SLOTS,
+      },
+      plans,
+      billing: getBillingDiagnostics(),
+    });
+  });
+
+  app.get("/api/master/schools", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const schools = await listSchools();
+    if (schools.error) return res.status(500).json({ error: schools.error });
+    res.json({ schools: schools.data });
+  });
+
+  app.post("/api/master/schools", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const { name, slug, city, state, cnpj, planId, ownerEmail, startTrial } = req.body || {};
+    if (!name || !slug) return res.status(400).json({ error: "Nome e identificador (slug) são obrigatórios." });
+
+    const cleanSlug = String(slug)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+
+    const created = await createSchool({ name: String(name).trim(), slug: cleanSlug, city, state, cnpj });
+    if (created.error || !created.data) return res.status(400).json({ error: created.error });
+
+    const founderCount = (await listSchools()).data?.filter((s) => s.is_founder).length || 0;
+    const isFounder = founderCount < FOUNDER_SLOTS;
+
+    const chosenPlan = planId || "escola";
+    const trialEnd = startTrial === false ? null : trialEndFrom(new Date()).toISOString();
+
+    const sub = await createSubscription({
+      schoolId: created.data.id,
+      planId: chosenPlan,
+      status: startTrial === false ? "active" : "trialing",
+      trialEndsAt: trialEnd,
+      periodEnd: trialEnd,
+      discountPercent: isFounder ? FOUNDER_DISCOUNT_PERCENT : 0,
+      founderDiscount: isFounder,
+    });
+
+    const plans = (await listPlans(true)).data || [];
+    const plan = plans.find((p) => p.id === chosenPlan);
+    if (sub.data && plan) {
+      await syncEntitlementsFromPlan(created.data.id, sub.data.id, plan);
+    }
+
+    // Vincula o primeiro administrador da instituição, se informado.
+    let membershipError: string | null = null;
+    if (ownerEmail) {
+      const owner = await getUserByEmail(String(ownerEmail).trim().toLowerCase());
+      if (owner) {
+        const m = await addMembership({
+          userUid: owner.uid,
+          schoolId: created.data.id,
+          role: "school_admin",
+          invitedBy: (req.dbUser as any)?.email || null,
+        });
+        membershipError = m.error;
+      } else {
+        membershipError = "E-mail do responsável não encontrado no diretório de usuários.";
+      }
+    }
+
+    await logPlatformAudit({
+      actorEmail: (req.dbUser as any)?.email,
+      actorRole: "owner",
+      action: "school.created",
+      targetType: "school",
+      targetId: created.data.id,
+      metadata: { slug: cleanSlug, planId: chosenPlan, trial: startTrial !== false, isFounder },
+    });
+
+    res.status(201).json({
+      success: true,
+      school: created.data,
+      subscription: sub.data,
+      founderDiscount: isFounder,
+      membershipError,
+    });
+  });
+
+  app.put("/api/master/schools/:id", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const sb = getSaasAdminClient();
+    if (!sb) return saasUnavailable(res);
+
+    const patch: Record<string, any> = { updated_at: new Date().toISOString() };
+    for (const key of ["name", "city", "state", "status", "notes", "legal_name", "cnpj"]) {
+      if (req.body?.[key] !== undefined) patch[key] = req.body[key];
+    }
+    const { data, error } = await sb.from("schools").update(patch).eq("id", req.params.id).select().single();
+    if (error) return res.status(400).json({ error: error.message });
+
+    await logPlatformAudit({
+      actorEmail: (req.dbUser as any)?.email,
+      actorRole: "owner",
+      action: "school.updated",
+      targetType: "school",
+      targetId: req.params.id,
+      metadata: patch,
+    });
+    res.json({ success: true, school: data });
+  });
+
+  app.get("/api/master/subscriptions", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const subs = await listAllSubscriptions();
+    if (subs.error) return res.status(500).json({ error: subs.error });
+    const schools = (await listSchools()).data || [];
+    const plans = (await listPlans(true)).data || [];
+    res.json({
+      subscriptions: (subs.data || []).map((s) => ({
+        ...s,
+        schoolName: schools.find((x) => x.id === s.school_id)?.name || "—",
+        planName: plans.find((p) => p.id === s.plan_id)?.name || s.plan_id,
+        access: resolveAccessState(s as any),
+      })),
+      plans,
+    });
+  });
+
+  app.put("/api/master/subscriptions/:id", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const allowed = ["status", "plan_id", "billing_cycle", "grace_until", "current_period_end", "next_due_at", "discount_percent", "notes"];
+    const patch: Record<string, any> = {};
+    for (const key of allowed) if (req.body?.[key] !== undefined) patch[key] = req.body[key];
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ error: "Nenhum campo válido para atualizar." });
+    }
+
+    const before = (await listAllSubscriptions()).data?.find((s) => s.id === req.params.id);
+    const updated = await updateSubscription(req.params.id, patch as any);
+    if (updated.error) return res.status(400).json({ error: updated.error });
+
+    // Mudança de plano no Master também ressincroniza entitlements.
+    if (patch.plan_id) {
+      const plan = (await listPlans(true)).data?.find((p) => p.id === patch.plan_id);
+      if (plan && updated.data) {
+        await syncEntitlementsFromPlan(updated.data.school_id, updated.data.id, plan);
+      }
+    }
+
+    await logSubscriptionEvent({
+      subscriptionId: req.params.id,
+      schoolId: updated.data?.school_id,
+      eventType: "master_update",
+      fromStatus: before?.status,
+      toStatus: updated.data?.status,
+      payload: patch,
+      actorEmail: (req.dbUser as any)?.email,
+    });
+    await logPlatformAudit({
+      actorEmail: (req.dbUser as any)?.email,
+      actorRole: "owner",
+      action: "subscription.updated",
+      targetType: "subscription",
+      targetId: req.params.id,
+      metadata: patch,
+    });
+
+    res.json({ success: true, subscription: updated.data });
+  });
+
+  app.get("/api/master/plans", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const plans = await listPlans(true);
+    if (plans.error) return res.status(500).json({ error: plans.error });
+    const addons = await listPlanAddons();
+    res.json({ plans: plans.data, addons: addons.data || [] });
+  });
+
+  app.put("/api/master/plans/:id", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const allowed = [
+      "name",
+      "tagline",
+      "monthly_price_cents",
+      "annual_price_cents",
+      "setup_fee_cents",
+      "max_active_students",
+      "max_units",
+      "max_admins",
+      "is_active",
+      "is_public",
+    ];
+    const patch: Record<string, any> = {};
+    for (const key of allowed) if (req.body?.[key] !== undefined) patch[key] = req.body[key];
+    if (Object.keys(patch).length === 0) return res.status(400).json({ error: "Nenhum campo válido." });
+
+    const updated = await updatePlan(req.params.id, patch as any);
+    if (updated.error) return res.status(400).json({ error: updated.error });
+
+    await logPlatformAudit({
+      actorEmail: (req.dbUser as any)?.email,
+      actorRole: "owner",
+      action: "plan.updated",
+      targetType: "plan",
+      targetId: req.params.id,
+      metadata: patch,
+    });
+    res.json({ success: true, plan: updated.data });
+  });
+
+  app.get("/api/master/payments", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const payments = await listAllPayments(200);
+    if (payments.error) return res.status(500).json({ error: payments.error });
+    const schools = (await listSchools()).data || [];
+    res.json({
+      payments: (payments.data || []).map((p: any) => ({
+        ...p,
+        schoolName: schools.find((s) => s.id === p.school_id)?.name || "—",
+      })),
+      billing: getBillingDiagnostics(),
+    });
+  });
+
+  /**
+   * Baixa manual: o proprietário confirma um pagamento recebido fora do sistema
+   * (Pix direto, transferência). É a ÚNICA forma de marcar `paid` sem webhook, e
+   * fica registrada na auditoria de plataforma.
+   */
+  app.post("/api/master/payments/manual", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const { schoolId, subscriptionId, amountCents, method, note, dueDate } = req.body || {};
+    if (!schoolId || !amountCents || Number(amountCents) <= 0) {
+      return res.status(400).json({ error: "Informe a instituição e o valor recebido." });
+    }
+
+    const created = await createPaymentTransaction({
+      schoolId,
+      subscriptionId: subscriptionId || null,
+      provider: "manual",
+      method: method || "pix",
+      kind: "manual",
+      amountCents: Number(amountCents),
+      status: "paid",
+      dueDate: dueDate || null,
+      idempotencyKey: `manual-${schoolId}-${Date.now()}`,
+      metadata: { note: note || null, by: (req.dbUser as any)?.email || null, source: "manual_by_owner" },
+    });
+    if (created.error) return res.status(500).json({ error: created.error });
+
+    // Se a assinatura estava em atraso, a baixa manual regulariza o ciclo.
+    if (subscriptionId) {
+      const sub = (await listAllSubscriptions()).data?.find((s) => s.id === subscriptionId);
+      if (sub && ["past_due", "suspended", "expired", "trialing"].includes(sub.status)) {
+        const start = new Date();
+        const end = nextPeriodEnd(start, sub.billing_cycle);
+        await updateSubscription(subscriptionId, {
+          status: "active",
+          current_period_start: start.toISOString(),
+          current_period_end: end.toISOString(),
+          next_due_at: end.toISOString(),
+          grace_until: null,
+          last_payment_at: new Date().toISOString(),
+        } as any);
+        await logSubscriptionEvent({
+          subscriptionId,
+          schoolId,
+          eventType: "payment_confirmed_manual",
+          fromStatus: sub.status,
+          toStatus: "active",
+          payload: { amountCents },
+          actorEmail: (req.dbUser as any)?.email,
+        });
+      }
+    }
+
+    await logPlatformAudit({
+      actorEmail: (req.dbUser as any)?.email,
+      actorRole: "owner",
+      action: "payment.manual_confirmed",
+      targetType: "payment",
+      targetId: created.data?.id,
+      metadata: { schoolId, amountCents, method, note },
+    });
+
+    res.status(201).json({ success: true, payment: created.data });
+  });
+
+  app.get("/api/master/partners", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const partners = await listPartners();
+    if (partners.error) return res.status(500).json({ error: partners.error });
+    res.json({ partners: partners.data });
+  });
+
+  app.post("/api/master/partners", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const { name, category, description, city, state, contactEmail, contactPhone, website } = req.body || {};
+    if (!name) return res.status(400).json({ error: "Informe o nome do parceiro." });
+    const created = await createPartner({ name, category, description, city, state, contactEmail, contactPhone, website });
+    if (created.error) return res.status(400).json({ error: created.error });
+    await logPlatformAudit({
+      actorEmail: (req.dbUser as any)?.email,
+      actorRole: "owner",
+      action: "partner.created",
+      targetType: "partner",
+      targetId: (created.data as any)?.id,
+      metadata: { name },
+    });
+    res.status(201).json({ success: true, partner: created.data });
+  });
+
+  app.put("/api/master/partners/:id/status", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const status = req.body?.status;
+    if (!["pending", "approved", "suspended", "rejected"].includes(status)) {
+      return res.status(400).json({ error: "Status inválido." });
+    }
+    const updated = await setPartnerStatus(req.params.id, status);
+    if (updated.error) return res.status(400).json({ error: updated.error });
+    await logPlatformAudit({
+      actorEmail: (req.dbUser as any)?.email,
+      actorRole: "owner",
+      action: "partner.status_changed",
+      targetType: "partner",
+      targetId: req.params.id,
+      metadata: { status },
+    });
+    res.json({ success: true, partner: updated.data });
+  });
+
+  app.post("/api/master/campaigns", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const { partnerId, schoolId, title, body, days } = req.body || {};
+    if (!partnerId || !schoolId || !title) {
+      return res.status(400).json({ error: "Informe parceiro, instituição e título da campanha." });
+    }
+    const created = await createCampaign({ partnerId, schoolId, title, body, days: Number(days) || 30 });
+    if (created.error) return res.status(400).json({ error: created.error });
+    await logPlatformAudit({
+      actorEmail: (req.dbUser as any)?.email,
+      actorRole: "owner",
+      action: "campaign.created",
+      targetType: "partner_campaign",
+      targetId: (created.data as any)?.id,
+      metadata: { partnerId, schoolId, days },
+    });
+    res.status(201).json({ success: true, campaign: created.data });
+  });
+
+  app.get("/api/master/audit", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const logs = await listPlatformAudit(200);
+    if (logs.error) return res.status(500).json({ error: logs.error });
+    res.json({ logs: logs.data });
+  });
+
+  app.get("/api/master/leads", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const leads = await listSalesLeads(200);
+    if (leads.error) return res.status(500).json({ error: leads.error });
+    res.json({ leads: leads.data });
+  });
+
+  app.put("/api/master/leads/:id/status", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const status = req.body?.status;
+    if (!["new", "contacted", "trial_started", "won", "lost"].includes(status)) {
+      return res.status(400).json({ error: "Status inválido." });
+    }
+    const updated = await updateSalesLeadStatus(req.params.id, status);
+    if (updated.error) return res.status(400).json({ error: updated.error });
+    res.json({ success: true, lead: updated.data });
+  });
+
+  // -----------------------------------------------------------------------
+  // LGPD — canal do titular e consentimento (Parte 15)
+  // -----------------------------------------------------------------------
+  app.post("/api/privacy/request", publicWriteLimiter(), async (req, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const { email, name, requestType, details } = req.body || {};
+    const cleanEmail = String(email || "").trim().toLowerCase();
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      return res.status(400).json({ error: "Informe um e-mail válido para retorno." });
+    }
+    const allowed = ["access", "correction", "deletion", "portability", "info"];
+    if (!allowed.includes(requestType)) {
+      return res.status(400).json({ error: "Tipo de solicitação inválido." });
+    }
+    if (!checkRecoveryRateLimit(`privacy-${cleanEmail}`, 3, 60 * 60 * 1000)) {
+      return res.status(429).json({ error: "Você já enviou solicitações recentemente. Aguarde uma hora." });
+    }
+
+    const created = await createDataSubjectRequest({
+      email: cleanEmail,
+      name: name ? String(name).slice(0, 120) : undefined,
+      requestType,
+      details: details ? String(details).slice(0, 2000) : undefined,
+    });
+    if (created.error) return res.status(500).json({ error: created.error });
+
+    await logPlatformAudit({
+      actorEmail: cleanEmail,
+      actorRole: "data_subject",
+      action: "privacy.request_created",
+      targetType: "data_subject_request",
+      targetId: (created.data as any)?.id,
+      metadata: { requestType },
+      ip: recoveryIp(req),
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Solicitação registrada. Responderemos em até 15 dias corridos no e-mail informado.",
+    });
+  });
+
+  app.post("/api/privacy/consent", async (req, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const { userUid, email, consentType, policyVersion, granted } = req.body || {};
+    if (!consentType || !policyVersion) {
+      return res.status(400).json({ error: "Informe o tipo de consentimento e a versão da política." });
+    }
+    await recordConsent({
+      userUid: userUid || null,
+      email: email || null,
+      consentType: String(consentType),
+      policyVersion: String(policyVersion),
+      granted: granted !== false,
+      ip: recoveryIp(req),
+    });
+    res.status(201).json({ success: true });
+  });
+
+  app.get("/api/master/privacy-requests", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const sb = getSaasAdminClient();
+    if (!sb) return saasUnavailable(res);
+    const { data, error } = await sb
+      .from("data_subject_requests")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ requests: data || [] });
+  });
+
+  app.put("/api/master/privacy-requests/:id", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
+    if (!isSaasBackendConfigured()) return saasUnavailable(res);
+    const sb = getSaasAdminClient();
+    if (!sb) return saasUnavailable(res);
+    const status = req.body?.status;
+    if (!["open", "in_progress", "completed", "rejected"].includes(status)) {
+      return res.status(400).json({ error: "Status inválido." });
+    }
+    const { data, error } = await sb
+      .from("data_subject_requests")
+      .update({
+        status,
+        handled_by: (req.dbUser as any)?.email || null,
+        handled_at: new Date().toISOString(),
+        resolution_notes: req.body?.notes || null,
+      })
+      .eq("id", req.params.id)
+      .select()
+      .single();
+    if (error) return res.status(400).json({ error: error.message });
+
+    await logPlatformAudit({
+      actorEmail: (req.dbUser as any)?.email,
+      actorRole: "owner",
+      action: "privacy.request_updated",
+      targetType: "data_subject_request",
+      targetId: req.params.id,
+      metadata: { status },
+    });
+    res.json({ success: true, request: data });
+  });
+
+  // -----------------------------------------------------------------------
+  // Cobrança: webhook
+  // -----------------------------------------------------------------------
+  app.post("/api/billing/webhook", async (req, res) => {
+    const rawBody = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : JSON.stringify(req.body || {});
+    const provider =
+      (req.query.provider as string) ||
+      (req.headers["stripe-signature"] ? "stripe" : "generic");
+
+    // 1. Assinatura
+    let verification: { valid: boolean; reason?: string } = { valid: false, reason: "provedor desconhecido" };
+    if (provider === "stripe") {
+      verification = verifyStripeSignature(rawBody, req.headers["stripe-signature"] as string);
+    } else {
+      verification = verifyGenericSignature(rawBody, req.headers["x-webhook-signature"] as string);
+    }
+
+    let payload: any = {};
+    try {
+      payload = JSON.parse(rawBody || "{}");
+    } catch {
+      return res.status(400).json({ error: "Payload inválido." });
+    }
+
+    const normalized = normalizeWebhook(provider, payload);
+    const eventId =
+      normalized?.eventId || String(req.headers["x-event-id"] || `raw-${Date.now()}`);
+
+    // 2. Registro idempotente (mesmo com assinatura inválida, fica auditado)
+    const registered = await registerWebhookEvent({
+      provider,
+      eventId,
+      eventType: normalized?.eventType || null,
+      signatureValid: verification.valid,
+      payload,
+      status: verification.valid ? "received" : "failed",
+      errorMessage: verification.valid ? null : verification.reason || "assinatura inválida",
+    });
+
+    if (registered.duplicate) {
+      return res.status(200).json({ received: true, duplicate: true });
+    }
+
+    // 3. Assinatura inválida NUNCA altera dados de cobrança.
+    if (!verification.valid) {
+      console.warn(`[Billing] Webhook ${provider} rejeitado: ${verification.reason}`);
+      await logPlatformAudit({
+        actorEmail: null,
+        actorRole: "webhook",
+        action: "webhook.signature_invalid",
+        targetType: "webhook",
+        targetId: eventId,
+        metadata: { provider, reason: verification.reason },
+      });
+      return res.status(400).json({ error: "Assinatura do webhook inválida." });
+    }
+
+    if (!normalized || !normalized.transactionStatus) {
+      await markWebhookProcessed(provider, eventId, "ignored");
+      return res.status(200).json({ received: true, ignored: true });
+    }
+
+    try {
+      const metadata = payload?.data?.object?.metadata || payload.metadata || {};
+      const chargeId = normalized.providerRef;
+
+      let payment = null;
+      if (chargeId) {
+        const updated = await updatePaymentStatus({
+          providerChargeId: chargeId,
+          status: normalized.transactionStatus,
+        });
+        payment = updated.data;
+      }
+
+      // Se o pagamento foi confirmado e havia assinatura vinculada, regulariza.
+      if (normalized.transactionStatus === "paid") {
+        const subscriptionId = payment?.subscription_id || metadata.subscription_id;
+        if (subscriptionId) {
+          const sub = (await listAllSubscriptions()).data?.find((s) => s.id === subscriptionId);
+          if (sub) {
+            const start = new Date();
+            const end = nextPeriodEnd(start, sub.billing_cycle);
+            await updateSubscription(subscriptionId, {
+              status: "active",
+              current_period_start: start.toISOString(),
+              current_period_end: end.toISOString(),
+              next_due_at: end.toISOString(),
+              grace_until: null,
+              last_payment_at: new Date().toISOString(),
+            } as any);
+            await logSubscriptionEvent({
+              subscriptionId,
+              schoolId: sub.school_id,
+              eventType: "payment_confirmed_webhook",
+              fromStatus: sub.status,
+              toStatus: "active",
+              payload: { provider, eventId },
+              actorEmail: null,
+            });
+          }
+        }
+      }
+
+      await markWebhookProcessed(provider, eventId, "processed");
+      res.status(200).json({ received: true });
+    } catch (err: any) {
+      console.error("[Billing] Erro ao processar webhook:", err);
+      await markWebhookProcessed(provider, eventId, "failed", err?.message);
+      // 200 evita reentrega infinita; o registro fica como `failed` para análise.
+      res.status(200).json({ received: true, processed: false });
+    }
+  });
   // --- AI CHAT ENDPOINT (ASSISTENTE ELO) ---
   let aiInstance: any = null;
   function getGenAI() {
@@ -2433,11 +3779,66 @@ Precisa de orientações sobre horários, inscrições ou localização no mapa?
 Você pode me perguntar sobre qualquer uma das 6 escolas parceiras, conferir eventos gratuitos ou pesquisar atividades por data e localização. Como posso te auxiliar neste momento?`;
   }
 
-  app.post("/api/ai/chat", async (req, res) => {
+  app.post("/api/ai/chat", aiLimiter(), requireAuth, async (req: AuthRequest, res) => {
     try {
       const { message, history } = req.body;
       if (!message) {
         return res.status(400).json({ error: "Mensagem é obrigatória" });
+      }
+
+      // ---- Cotas por instituição (Parte 11 da auditoria) ----
+      // A IA custa dinheiro: sem autenticação, sem assinatura ativa ou com a
+      // cota esgotada, o endpoint não chama o provedor. Nenhuma instituição
+      // pode consumir a cota de outra porque o school_id vem do VÍNCULO do
+      // usuário, nunca do corpo da requisição.
+      let aiSchoolId: string | null = null;
+      if (isSaasBackendConfigured()) {
+        const authUser = req.user as any;
+        const dbUser = req.dbUser || (await getUserByUid(authUser?.uid).catch(() => null));
+        if (!dbUser) {
+          return res.status(403).json({ error: "Conta não encontrada para uso do assistente." });
+        }
+
+        const administered = await listAdministeredSchools(dbUser.uid);
+        const school = administered[0] || null;
+
+        if (!school) {
+          // Aluno/professor sem vínculo administrativo: a IA continua disponível
+          // em modo informativo, sem cota de instituição e sem gravar consumo.
+          aiSchoolId = null;
+        } else {
+          aiSchoolId = school.id;
+          const subscription = (await getSubscriptionBySchool(school.id)).data;
+          const access = resolveAccessState(subscription as any);
+          if (!access.canWrite) {
+            return res.status(402).json({
+              error: access.reason || "Assinatura inativa: o assistente está indisponível.",
+              code: "SUBSCRIPTION_INACTIVE",
+            });
+          }
+
+          const entitlements = (await listEntitlements(school.id)).data || [];
+          const aiEntitlement = entitlements.find((e: any) => e.feature_key === "ai_assistant");
+          if (!aiEntitlement || !aiEntitlement.enabled) {
+            return res.status(402).json({
+              error:
+                "O assistente Elo não está incluído no seu plano. Fale com a administração para contratar a IA.",
+              code: "FEATURE_NOT_ENTITLED",
+              feature: "ai_assistant",
+            });
+          }
+
+          const used = await countUsageInPeriod(school.id, "ai_assistant");
+          const quota = evaluateQuota(used, aiEntitlement.limit_value, "mensagens de IA");
+          if (quota.isExhausted) {
+            return res.status(429).json({
+              error: quota.message,
+              code: "AI_QUOTA_EXHAUSTED",
+              used: quota.used,
+              limit: quota.limit,
+            });
+          }
+        }
       }
 
       let eventsContext = "";
@@ -2510,13 +3911,23 @@ DIRETRIZES FUNDAMENTAIS:
         }
 
         if (responseText) {
-          return res.json({ reply: responseText });
+          if (aiSchoolId) {
+            await recordUsage({
+              schoolId: aiSchoolId,
+              featureKey: "ai_assistant",
+              userUid: (req.user as any)?.uid,
+              metadata: { source: "gemini", chars: responseText.length },
+            });
+          }
+          return res.json({ reply: responseText, source: "gemini" });
         } else {
           throw new Error("Resposta da IA vazia");
         }
       } catch (aiError: any) {
+        // Fallback local: NÃO consome cota da instituição porque não houve
+        // chamada paga ao provedor. A origem é informada para a UI ser honesta.
         const reply = getEloLocalFallback(message, eventsList);
-        return res.json({ reply });
+        return res.json({ reply, source: "local_fallback" });
       }
     } catch (error: any) {
       console.error("Erro no chat com Assistente Elo:", error);
