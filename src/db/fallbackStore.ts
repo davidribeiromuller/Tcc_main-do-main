@@ -851,6 +851,22 @@ export function recordParticipationFallback(
   return newPart;
 }
 
+/**
+ * Remove a presença/inscrição de um usuário em um evento.
+ * Devolve `true` só quando um registro foi realmente removido — assim a rota
+ * consegue responder 404 em vez de "sucesso" mentiroso.
+ */
+export function removeParticipationFallback(userId: string | number, eventId: number): boolean {
+  const strUserId = String(userId);
+  const index = fallbackParticipations.findIndex(
+    p => String(p.userId) === strUserId && Number(p.eventId) === Number(eventId)
+  );
+  if (index < 0) return false;
+  fallbackParticipations.splice(index, 1);
+  saveParticipations();
+  return true;
+}
+
 export function listUserParticipationsFallback(userId: string | number): EventParticipationHistory[] {
   const strUserId = String(userId);
   return fallbackParticipations.filter(p => String(p.userId) === strUserId);

@@ -74,6 +74,7 @@ import {
   logSchoolActionFallback,
   recordParticipationFallback,
   listUserParticipationsFallback,
+  removeParticipationFallback,
   listArchivedEventsFallback,
   listAllEventsFallback
 } from "./src/db/fallbackStore.ts";
@@ -1280,9 +1281,58 @@ async function startServer() {
       const allUsers = await listAllUsers();
       const adminRole = (req as any).adminRole || 'funcionario';
 
+      /**
+       * Paginação (§3.2).
+       *
+       * Antes a rota devolvia a tabela inteira. Com uma rede escolar grande isso
+       * vira uma resposta de megabytes e o painel trava no navegador.
+       *
+       * Compatibilidade: sem `?page`, o comportamento antigo é mantido
+       * (lista completa) — os componentes atuais e as suítes antigas continuam
+       * funcionando. Com `?page`, a resposta ganha `page`, `pageSize`,
+       * `total` e `totalPages`. A busca/filtro acontecem AQUI, antes de paginar,
+       * para não paginar sobre um subconjunto errado.
+       */
+      const pediuPagina = req.query.page !== undefined;
+      const busca = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
+      const filtroRole = typeof req.query.role === "string" ? req.query.role.trim() : "";
+      const filtroStatus = typeof req.query.status === "string" ? req.query.status.trim() : "";
+
+      let base: any[] = allUsers as any[];
+      if (busca) {
+        base = base.filter((u: any) =>
+          String(u.nome || "").toLowerCase().includes(busca) ||
+          String(u.email || "").toLowerCase().includes(busca)
+        );
+      }
+      if (filtroRole) {
+        base = base.filter((u: any) => String(u.role || "").toLowerCase() === filtroRole.toLowerCase());
+      }
+      if (filtroStatus === "ativos") base = base.filter((u: any) => u.ativo !== false);
+      if (filtroStatus === "bloqueados") base = base.filter((u: any) => u.ativo === false);
+
+      const pageSizeBruto = Number(req.query.pageSize);
+      const pageSize = Number.isFinite(pageSizeBruto)
+        ? Math.min(Math.max(Math.trunc(pageSizeBruto), 1), 500)
+        : 50;
+      const pageBruto = Number(req.query.page);
+      const page = Number.isFinite(pageBruto) && pageBruto > 0 ? Math.trunc(pageBruto) : 1;
+
+      const paginar = (lista: any[]) => {
+        const total = lista.length;
+        const totalPages = Math.max(Math.ceil(total / pageSize), 1);
+        const inicio = (page - 1) * pageSize;
+        return {
+          recorte: pediuPagina ? lista.slice(inicio, inicio + pageSize) : lista,
+          meta: pediuPagina
+            ? { page, pageSize, total, totalPages }
+            : { page: 1, pageSize: total || 1, total, totalPages: 1 },
+        };
+      };
+
       // 1. CHEFE ADMINISTRADOR: Acesso a todas as informações e colunas detalhadas
       if (adminRole === 'chefe') {
-        const chefeView = allUsers.map((u: any) => {
+        const chefeView = base.map((u: any) => {
           const { password, ...rest } = u;
           return {
             ...rest,
@@ -1290,12 +1340,13 @@ async function startServer() {
             isAdmin: rest.isAdmin || rest.role === 'Diretor'
           };
         });
-        return res.json({ users: chefeView, adminRole: 'chefe' });
+        const { recorte, meta } = paginar(chefeView);
+        return res.json({ users: recorte, adminRole: 'chefe', ...meta });
       }
 
       // 2. FUNCIONÁRIO ADMINISTRADOR: Acesso restrito às informações permitidas:
       // Nome, Email, Tipo/Função, Status da conta, Instituição, Data de Cadastro / Última atividade
-      const funcionarioView = allUsers.map(u => ({
+      const funcionarioView = base.map(u => ({
         id: u.id,
         uid: u.uid,
         nome: u.nome,
@@ -1310,7 +1361,8 @@ async function startServer() {
         isAdmin: u.isAdmin || u.role === 'Diretor'
       }));
 
-      return res.json({ users: funcionarioView, adminRole: 'funcionario' });
+      const { recorte: recorteFunc, meta: metaFunc } = paginar(funcionarioView);
+      return res.json({ users: recorteFunc, adminRole: 'funcionario', ...metaFunc });
     } catch (error: any) {
       console.error("Erro ao listar usuários:", error);
       res.status(500).json({ error: error.message || "Falha ao obter usuários" });
@@ -1333,7 +1385,18 @@ async function startServer() {
       if (role !== undefined) updateData.role = String(role).trim();
       if (isAdmin !== undefined) updateData.isAdmin = Boolean(isAdmin);
       if (ativo !== undefined) updateData.ativo = Boolean(ativo);
-      if (password !== undefined && String(password).trim()) updateData.password = String(password).trim();
+      if (password !== undefined && String(password).trim()) {
+        // Segurança: aqui a senha era gravada em TEXTO CLARO. Como esta rota é
+        // do Chefe, uma senha trocada pelo painel ficava legível no banco. Agora
+        // segue a mesma regra do cadastro: hash scrypt + força mínima.
+        const senhaCrua = String(password).trim();
+        const forcaSenha = validatePasswordStrength(senhaCrua);
+        if (forcaSenha) {
+          return res.status(400).json({ error: forcaSenha, fieldErrors: { password: forcaSenha } });
+        }
+        updateData.password = hashPassword(senhaCrua);
+        (updateData as any).must_change_password = true;
+      }
       if (institution !== undefined) updateData.institution = String(institution).trim();
       if (phone !== undefined) updateData.phone = String(phone).trim();
       if (cpf !== undefined) updateData.cpf = String(cpf).trim();
@@ -1359,6 +1422,17 @@ async function startServer() {
       }
 
       const updatedUser = await updateUserById(userId, updateData);
+      await logPlatformAudit({
+        actorEmail: (req as any).dbUser?.email || req.user?.email || null,
+        actorRole: (req as any).adminRole || "chefe",
+        action: "user.updated",
+        targetType: "user",
+        targetId: String(userId),
+        // Nunca registramos a senha — apenas QUAIS campos mudaram.
+        metadata: { campos: Object.keys(updateData).filter((k) => k !== "password"), senhaRedefinida: Boolean(updateData.password) },
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+      }).catch(() => {});
       res.json({ success: true, user: updatedUser });
     } catch (error: any) {
       console.error("Erro ao atualizar dados do usuário:", error);
@@ -1381,6 +1455,16 @@ async function startServer() {
       }
 
       const blockedUser = await blockUserById(userId, email ? String(email) : undefined);
+      await logPlatformAudit({
+        actorEmail: (req as any).dbUser?.email || req.user?.email || null,
+        actorRole: (req as any).adminRole || "chefe",
+        action: "user.blocked",
+        targetType: "user",
+        targetId: String(userId),
+        metadata: { email: email ? String(email) : null },
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+      }).catch(() => {});
       res.json({ success: true, user: blockedUser });
     } catch (error: any) {
       console.error("Erro ao bloquear usuário:", error);
@@ -1398,6 +1482,16 @@ async function startServer() {
 
       const email = req.body?.email || req.query?.email;
       const unblockedUser = await unblockUserById(userId, email ? String(email) : undefined);
+      await logPlatformAudit({
+        actorEmail: (req as any).dbUser?.email || req.user?.email || null,
+        actorRole: (req as any).adminRole || "chefe",
+        action: "user.unblocked",
+        targetType: "user",
+        targetId: String(userId),
+        metadata: { email: email ? String(email) : null },
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+      }).catch(() => {});
       res.json({ success: true, user: unblockedUser });
     } catch (error: any) {
       console.error("Erro ao desbloquear usuário:", error);
@@ -1421,6 +1515,16 @@ async function startServer() {
       }
 
       const deletedUser = await deleteUserPermanentlyById(userId, email ? String(email) : undefined);
+      await logPlatformAudit({
+        actorEmail: (req as any).dbUser?.email || req.user?.email || null,
+        actorRole: (req as any).adminRole || "chefe",
+        action: "user.deleted_permanently",
+        targetType: "user",
+        targetId: String(userId),
+        metadata: { email: email ? String(email) : null },
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+      }).catch(() => {});
       res.json({ success: true, user: deletedUser });
     } catch (error: any) {
       console.error("Erro ao excluir permanentemente usuário:", error);
@@ -1444,6 +1548,16 @@ async function startServer() {
       }
 
       const softDeletedUser = await blockUserById(userId, email ? String(email) : undefined);
+      await logPlatformAudit({
+        actorEmail: (req as any).dbUser?.email || req.user?.email || null,
+        actorRole: (req as any).adminRole || "chefe",
+        action: "user.soft_deleted",
+        targetType: "user",
+        targetId: String(userId),
+        metadata: { email: email ? String(email) : null },
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+      }).catch(() => {});
       res.json({ success: true, user: softDeletedUser });
     } catch (error: any) {
       console.error("Erro ao suspender usuário:", error);
@@ -2081,11 +2195,43 @@ async function startServer() {
   // --- HISTÓRICO DE PARTICIPAÇÕES EM EVENTOS (PRESERVAÇÃO PERMANENTE NO PERFIL) ---
 
   // Listar participações do usuário (ativas e arquivadas preservadas)
+  /**
+   * Um usuário só pode ler/escrever as PRÓPRIAS participações.
+   * Administração da instituição (Chefe/Funcionário) pode fazê-lo por qualquer
+   * usuário — é o que o painel usa para conferir presença.
+   *
+   * Antes desta checagem, qualquer pessoa autenticada podia confirmar presença
+   * em nome de outra (bastava trocar o `:userId` da URL) — falha de
+   * autorização, não só de UI.
+   */
+  const ehAdminDaInstituicao = (req: AuthRequest): boolean => {
+    // `adminRole` é preenchido pelos middlewares de administração. Quando a
+    // rota não usa esses middlewares (caso destas duas), o cargo é conferido
+    // aqui a partir do usuário resolvido e do token.
+    if ((req as any).adminRole) return true;
+    const dbUser = req.dbUser;
+    const tokenUser = req.user;
+    return checkIsChefe(dbUser, tokenUser) || checkIsFuncionario(dbUser, tokenUser);
+  };
+
+  const podeAgirSobreParticipacoes = async (req: AuthRequest, userId: number): Promise<boolean> => {
+    if (ehAdminDaInstituicao(req)) return true;
+    // Nem todo caminho preenche `req.dbUser`; quando ausente, resolvemos agora
+    // para não confundir "usuário comum" com "não consegui identificar".
+    const dbUser = req.dbUser || (await resolveDbUserForRequest(req));
+    if (!dbUser) return false;
+    if (checkIsChefe(dbUser, req.user) || checkIsFuncionario(dbUser, req.user)) return true;
+    return String((dbUser as any).id ?? "") === String(userId);
+  };
+
   app.get("/api/users/:userId/participations", requireAuth, async (req: AuthRequest, res) => {
     try {
       const userId = parseInt(req.params.userId);
       if (isNaN(userId)) {
         return res.status(400).json({ error: "ID de usuário inválido." });
+      }
+      if (!(await podeAgirSobreParticipacoes(req, userId))) {
+        return res.status(403).json({ error: "Você só pode consultar as suas próprias participações." });
       }
 
       const participations = listUserParticipationsFallback(userId);
@@ -2100,6 +2246,9 @@ async function startServer() {
     try {
       const userId = parseInt(req.params.userId);
       const { eventId, eventTitle, eventLocation, eventDate, eventTime } = req.body;
+      if (!(await podeAgirSobreParticipacoes(req, userId))) {
+        return res.status(403).json({ error: "Você só pode confirmar presença para você mesmo." });
+      }
       if (!eventId || !eventTitle) {
         return res.status(400).json({ error: "ID e título do evento são obrigatórios para registrar participação." });
       }
@@ -2117,6 +2266,30 @@ async function startServer() {
       res.status(201).json({ success: true, participation });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Erro ao confirmar participação no evento." });
+    }
+  });
+
+  // Cancelar presença/inscrição. Esta rota era chamada por
+  // `cancelarPresenca()` em `src/lib/participationsService.ts` mas NUNCA existiu
+  // no servidor: a chamada dava 404 e o serviço devolvia `false` em silêncio.
+  app.delete("/api/users/:userId/participations/:eventId", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const userId = parseInt(req.params.userId);
+      const eventId = parseInt(req.params.eventId);
+      if (isNaN(userId) || isNaN(eventId)) {
+        return res.status(400).json({ error: "Identificadores inválidos." });
+      }
+      if (!(await podeAgirSobreParticipacoes(req, userId))) {
+        return res.status(403).json({ error: "Você só pode cancelar as suas próprias participações." });
+      }
+
+      const removido = removeParticipationFallback(userId, eventId);
+      if (!removido) {
+        return res.status(404).json({ error: "Participação não encontrada." });
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: "Erro ao cancelar participação." });
     }
   });
 
@@ -2964,6 +3137,27 @@ async function startServer() {
         const dbUser = req.dbUser || (await resolveDbUserForRequest(req));
         const reviewedBy = String((req.user as any)?.email || dbUser?.email || "Administrador");
 
+        // Reivindica ANTES de publicar. Sem isso, duas aprovações simultâneas
+        // (duas abas, duplo clique, retry de rede) criavam DOIS eventos: o
+        // status só era gravado depois, quando as duas requisições já haviam
+        // passado pela verificação `status !== "pending"` acima.
+        // O update condicional em `status = pending` é a trava atômica.
+        const { data: reivindicada, error: erroClaim } = await sb
+          .from("event_suggestions")
+          .update({
+            status: "approved",
+            reviewed_at: new Date().toISOString(),
+            reviewed_by: reviewedBy,
+          })
+          .eq("id", id)
+          .eq("status", "pending")
+          .select("id");
+
+        if (erroClaim) return res.status(500).json({ error: "Não foi possível reservar a sugestão." });
+        if (!reivindicada || reivindicada.length === 0) {
+          return res.status(409).json({ error: "Esta sugestão já está sendo revisada por outro administrador." });
+        }
+
         const novoEvento = {
           title: sugestao.title,
           location: sugestao.location || sugestao.address || sugestao.city || "Local a confirmar",
@@ -3004,6 +3198,12 @@ async function startServer() {
             .maybeSingle();
           if (erro2) {
             console.warn("[Admin] Falha ao publicar sugestão:", erroCriar.message, erro2.message);
+            // Devolve para a fila: a sugestão foi reivindicada acima, então
+            // sem isto ela ficaria "aprovada" sem evento nenhum.
+            await sb
+              .from("event_suggestions")
+              .update({ status: "pending", reviewed_at: null, reviewed_by: null })
+              .eq("id", id);
             return res.status(500).json({ error: "Não foi possível publicar o evento a partir da sugestão." });
           }
           eventId = criado2?.id ?? null;
@@ -3012,19 +3212,18 @@ async function startServer() {
           eventId = criado?.id ?? null;
         }
 
+        // O status já foi gravado na reivindicação; aqui completamos com o
+        // vínculo ao evento publicado.
         const { error: erroMarcar } = await sb
           .from("event_suggestions")
           .update({
-            status: "approved",
-            reviewed_at: new Date().toISOString(),
-            reviewed_by: reviewedBy,
             approved_event_id: eventId,
             approved_table: tabelaUsada,
           })
           .eq("id", id);
 
         if (erroMarcar) {
-          console.warn("[Admin] Evento criado, mas a sugestão não foi marcada como aprovada:", erroMarcar.message);
+          console.warn("[Admin] Evento criado, mas o vínculo com a sugestão não foi gravado:", erroMarcar.message);
         }
 
         await logPlatformAudit({
@@ -4519,6 +4718,111 @@ async function startServer() {
     });
     res.status(201).json({ success: true, campaign: created.data });
   });
+
+  /**
+   * Histórico administrativo da INSTITUIÇÃO (aba "Auditoria" do painel /admin).
+   *
+   * Diferente de `/api/master/audit` (que é o log da plataforma inteira e exige
+   * proprietário): aqui qualquer Chefe/Funcionário vê o que foi feito, mas o
+   * Chefe é o único que enxerga e-mail completo do autor. O Funcionário recebe o
+   * e-mail mascarado — ele já não pode ver dados pessoais restritos (§3.3).
+   *
+   * Filtros: `?action=`, `?targetType=`, `?from=`, `?to=`, `?limit=`.
+   * A lista NUNCA volta "vazia por falha": erro do banco vira 503 tipado.
+   */
+  app.get(
+    "/api/admin/audit",
+    requireAuth,
+    requireAdminOrStaff,
+    async (req: AuthRequest, res) => {
+      const adminRole = (req as any).adminRole || "funcionario";
+      if (!isSaasBackendConfigured()) {
+        return res.status(503).json({
+          error: "O histórico de auditoria depende do banco (SUPABASE_SECRET_KEY ausente).",
+          code: "SAAS_NOT_CONFIGURED",
+        });
+      }
+
+      try {
+        const sb = getSaasAdminClient();
+        if (!sb) {
+          return res.status(503).json({
+            error: "O histórico de auditoria depende do banco (cliente indisponível).",
+            code: "SAAS_NOT_CONFIGURED",
+          });
+        }
+
+        const limitBruto = Number(req.query.limit);
+        const limit = Number.isFinite(limitBruto)
+          ? Math.min(Math.max(Math.trunc(limitBruto), 1), 500)
+          : 100;
+
+        let query = sb.from("platform_audit_logs").select("*");
+
+        if (typeof req.query.action === "string" && req.query.action.trim()) {
+          query = query.ilike("action", `${req.query.action.trim()}%`);
+        }
+        if (typeof req.query.targetType === "string" && req.query.targetType.trim()) {
+          query = query.eq("target_type", req.query.targetType.trim());
+        }
+        if (typeof req.query.from === "string" && req.query.from.trim()) {
+          query = query.gte("created_at", req.query.from.trim());
+        }
+        if (typeof req.query.to === "string" && req.query.to.trim()) {
+          query = query.lte("created_at", req.query.to.trim());
+        }
+
+        const { data, error } = await query
+          .order("created_at", { ascending: false })
+          .limit(limit);
+
+        if (error) {
+          console.warn("[Admin] Falha ao ler auditoria:", error.message);
+          if (isRedeIndisponivel(error)) {
+            return responderIndisponivel(res, "O banco não respondeu ao carregar a auditoria.");
+          }
+          return res.status(500).json({ error: "Não foi possível consultar o histórico de auditoria." });
+        }
+
+        const mascararEmail = (email: string | null) => {
+          if (!email) return null;
+          const [nome, dominio] = String(email).split("@");
+          if (!dominio) return "***";
+          const visivel = nome.slice(0, 2);
+          return `${visivel}${"*".repeat(Math.max(nome.length - 2, 1))}@${dominio}`;
+        };
+
+        const logs = (data || []).map((linha: any) => ({
+          id: linha.id,
+          actorEmail: adminRole === "chefe" ? linha.actor_email : mascararEmail(linha.actor_email),
+          actorRole: linha.actor_role,
+          action: linha.action,
+          targetType: linha.target_type,
+          targetId: linha.target_id,
+          // Nunca devolvemos senha/token: o metadata é gravado pelo servidor sem
+          // credenciais, e aqui filtramos por segurança em profundidade.
+          metadata: (() => {
+            const meta = linha.metadata || {};
+            const limpo: Record<string, any> = {};
+            for (const [k, v] of Object.entries(meta)) {
+              if (/senha|password|token|secret|signature|assinatura/i.test(k)) continue;
+              limpo[k] = v;
+            }
+            return limpo;
+          })(),
+          ip: adminRole === "chefe" ? linha.ip : null,
+          createdAt: linha.created_at,
+        }));
+
+        res.json({ logs, total: logs.length, adminRole });
+      } catch (error: any) {
+        if (isRedeIndisponivel(error)) {
+          return responderIndisponivel(res, "O banco não respondeu ao carregar a auditoria.");
+        }
+        res.status(500).json({ error: "Erro ao consultar o histórico de auditoria." });
+      }
+    }
+  );
 
   app.get("/api/master/audit", requireAuth, requirePlatformOwner, async (req: AuthRequest, res) => {
     if (!isSaasBackendConfigured()) return saasUnavailable(res);

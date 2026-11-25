@@ -2096,3 +2096,105 @@ com Chefe:  /api/users 200   /api/events/archived 200
   (45 — aprovação reivindica antes de aplicar, no servidor), `round26` (90 —
   upsert de perfil por slug no servidor), `round32` (121 — hash de conta escolar
   no servidor).
+
+---
+
+## 36. Rodada 36 — restauração integral (painel, banco, monetização, SaaS)
+
+**Pedido:** "restauração integral" do painel administrativo, banco, monetização e
+SaaS — com a premissa de que essas partes haviam sido **removidas** do projeto.
+
+### Investigação primeiro: a premissa não se confirmou
+
+O clone inicial era **raso** (9 commits). Sem `git fetch --unshallow` seria
+impossível falar de "arquivos excluídos". Com os **72 commits** completos:
+
+```bash
+git log --diff-filter=D --name-only --pretty=format:"" --all | sort -u
+```
+
+**Três arquivos** deletados em toda a história — e nenhum é painel, banco ou
+cobrança:
+
+| Arquivo | Commit | O que houve |
+|---|---|---|
+| `src/lib/eventVisuals.ts` | `3b1abb4` | refatoração de UI → `EventCardMural.tsx` |
+| `test-round15.mjs` | `3b1abb4` | substituído pela round16 |
+| `src/lib/institutionalAdminService.ts` | `7516fbb` | substituído por `schoolAccountsService.ts` |
+
+Todos os arquivos citados na ordem (`AdminPanel.tsx`, `server.ts`, `schema.ts`,
+`subscription.ts`, `billing.ts`, `MasterPanel.tsx`, `PlansAndPricing.tsx`,
+`SchoolSubscription.tsx`) **existem**, e maiores do que em qualquer ponto do
+passado. Não houve restauração de código antigo: teria sido o caminho errado.
+
+O que existia de verdade eram **funções desconectadas e duas falhas de
+segurança**. É o que segue.
+
+### Correções de segurança (não estavam na lista, mas apareceram)
+
+| # | Problema | Correção |
+|---|---|---|
+| 1 | 🔴 `PUT /api/users/:id` gravava **senha em texto claro** | `hashPassword()` + `validatePasswordStrength()` + `must_change_password` |
+| 2 | 🔴 participações sem checagem de dono: trocando o `:userId` da URL, um aluno confirmava presença por outro | `podeAgirSobreParticipacoes()` — cargo conferido **no banco** (`checkIsChefe`/`checkIsFuncionario`), nunca no token |
+| 3 | 🔴 aprovação de sugestão criava **evento duplicado** em corrida | reivindicação atômica (`update ... eq status='pending'`) **antes** de publicar; devolve à fila se a publicação falhar |
+| 4 | 🟡 `cancelarPresenca()` chamava rota inexistente → 404 silencioso | criada `DELETE /api/users/:userId/participations/:eventId`, com 404 honesto |
+| 5 | 🟡 `fetchUsersDirectFromSupabase` lia `users` do navegador → com RLS fechada, **1 usuário** em vez de 28 | server-first via `/api/users`; Supabase direto só no modo estático |
+| 6 | 🟡 `schema.ts` do Drizzle sem `must_change_password` e outras 3 colunas que o Postgres já tinha | colunas sincronizadas (no caminho Postgres o Drizzle **descartava** a troca obrigatória de senha) |
+
+### Funcionalidades implementadas
+
+**Aba Auditoria (§3.10)** — único item de painel que não existia em nenhuma
+forma. `platform_audit_logs` era gravado desde a rodada 34, mas nenhuma tela o
+exibia.
+
+- Rota `GET /api/admin/audit` com `requireAuth` + `requireAdminOrStaff`
+- Filtros `?action=`, `?targetType=`, `?from=`, `?to=`, `?limit=`
+- Chefe vê e-mail/IP completos; Funcionário recebe e-mail **mascarado** e sem IP
+- `metadata` varrido — chaves com `senha|password|token|secret|signature|assinatura` descartadas
+- UI com 3 estados distintos: carregando, **erro de leitura**, lista realmente vazia
+- Passaram a ser auditadas: `user.updated`, `user.blocked`, `user.unblocked`, `user.deleted_permanently`, `user.soft_deleted`
+
+**Paginação do diretório (§3.2)** — `GET /api/users` devolvia a tabela inteira.
+
+- `?page`, `?pageSize` (1–500, clamp), resposta com `total` e `totalPages`
+- Busca `?q=`, filtro `?role=` e `?status=ativos|bloqueados` **no servidor, antes de paginar**
+- **Compatibilidade**: sem `?page`, devolve a lista completa
+
+### Migrations versionadas
+
+`profile_change_requests` e `school_profiles` existiam em produção mas **não
+estavam versionadas** nem no histórico do Supabase. Um deploy limpo não as
+teria, e as abas "Alterações de perfil" e "Contas das Escolas" quebrariam.
+
+- `20261118_profile_change_requests.sql` e `20261119_school_profiles.sql`
+- Estrutura lida do banco real; idempotentes; **nenhum `drop table`**
+- 4 índices criados e verificados em `pg_indexes`
+
+### Verificação
+
+- `tsc` limpo, build OK, **29 de 29 suítes verdes**
+- Nova `test-round36-restauracao.mjs`: **98 asserções**, com servidor real,
+  login, cadastro de aluno e checagem de 401/403/200/400/404/503
+- Executada duas vezes seguidas: 98/98 nas duas
+- `round19` atualizada (4 → 5 tabelas: a nova tabela de auditoria)
+- Banco de produção: RLS verificada por `pg_policies` (14 policies, nenhuma
+  escrita pública fora `personal_events` de dono e `sales_leads` formulário)
+
+### Documentação
+
+`RELATORIO_RESTAURACAO_ADMIN.md`, `RELATORIO_CONEXAO_BANCO.md`,
+`RELATORIO_MONETIZACAO.md`, `RELATORIO_TESTES.md`, `PENDENCIAS_CONFIGURACAO.md`.
+
+### Bug de ORDEM nas migrations (encontrado no fechamento da rodada)
+
+As migrations `20261118` e `20261119` **já existiam**, mas criavam policies
+permissivas de escrita (`insert/update ... with check (true)`) em
+`profile_change_requests` e `school_profiles`. Como rodam **depois** da
+`20261113` (que fecha as policies públicas), um deploy limpo **desfazia** o
+fechamento da rodada 35: voltava a ser possível, com a chave publicável,
+escrever solicitações de perfil alheias e a ficha de qualquer escola.
+
+Produção estava correta (fechamento aplicado manualmente); o **repositório**
+não estava. Corrigido nas duas migrations (removem as policies por nome, não
+criam nenhuma de escrita, preservam a leitura pública da ficha) e travado por
+teste que percorre as migrations em ordem cronológica.
