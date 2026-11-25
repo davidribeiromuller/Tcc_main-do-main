@@ -29,7 +29,20 @@ console.log("\n1) Grade do mural do aluno");
 // Rodada 30: referência é o print do painel em tela cheia — 5 cards por linha
 // e o contêiner ocupando a largura toda do monitor.
 // Rodada 31: container de 94%/1720px e 5 colunas a partir de 1440px.
-check("grade com 5 colunas em tela grande", feed.includes("min-[1440px]:grid-cols-5"));
+/*
+  RODADA 43 — a classe literal saiu daqui.
+
+  O Tailwind v4 varre os arquivos do projeto atrás de nomes de classe, e este
+  `.mjs` na raiz entrava na varredura: a classe literal de 1440px fazia o
+  build gerar uma media query órfã MESMO depois de o mural passar a usar o
+  breakpoint nomeado. Agora a classe é montada em partes, que não casam com o
+  padrão do scanner.
+*/
+const CLASSE_CINCO_COLUNAS = ["min-", "[1440px]", ":grid-cols-5"].join("");
+check(
+  "grade com 5 colunas em tela grande",
+  feed.includes(CLASSE_CINCO_COLUNAS) || feed.includes("mural:grid-cols-5")
+);
 check("grade com 4 colunas no desktop", feed.includes("xl:grid-cols-4"));
 check("contêiner de 88% com teto de 1600px", feed.includes("w-[88%] max-w-[1600px] mx-auto pt-4 pb-bottom-nav grid"));
 check("grade não usa contêiner estreito", !feed.includes("max-w-5xl") && !feed.includes("max-w-6xl") && !feed.includes("max-w-[88rem]"));

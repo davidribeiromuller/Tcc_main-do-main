@@ -507,12 +507,17 @@ export default function Feed({
         - Contêiner: **88% da largura** com teto de **1600 px**. Em 1850 px de
           tela a área útil fica ~1600 px — ocupa a tela sem ficar colado nas
           bordas (ajuste de 2026-11-24: o card de ~330 px ficou grande demais).
-        - **5 cards** a partir de 1440 px (`min-[1440px]`), 4 no desktop
+        - **5 cards** a partir de 1440 px (`mural:`), 4 no desktop
           intermediário, 2 no tablet e 1 no celular. Com 1600 px úteis e 4 gaps
           de 20 px, cada card fica com ~304 px — proporção mais harmoniosa.
+
+          O breakpoint é nomeado (`--breakpoint-mural: 90rem` em index.css) e
+          não um breakpoint arbitrário solto: o valor avulso saía numa media query
+          FORA da escada sm/md/lg/xl e, conforme a ordem no CSS final, a regra
+          de 4 colunas vencia a de 5 — o mural nunca chegava a 5 por linha.
         - `items-stretch`: todos os cards da linha com a mesma altura.
       */}
-      <div className="w-[88%] max-w-[1600px] mx-auto pt-4 pb-bottom-nav grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 min-[1440px]:grid-cols-5 gap-4 sm:gap-5 items-stretch">
+      <div className="w-[88%] max-w-[1600px] mx-auto pt-4 pb-bottom-nav grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 mural:grid-cols-5 gap-4 sm:gap-5 items-stretch">
         {isLoading && filteredEvents.length === 0 ? (
           // Skeleton loading state
           Array.from({ length: 4 }).map((_, i) => (
