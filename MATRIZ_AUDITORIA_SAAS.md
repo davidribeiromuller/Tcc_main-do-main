@@ -97,9 +97,31 @@ com o **estado atual**, **onde está no código** e **como verificar**.
 
 | # | Pendência | Impacto | Próximo passo |
 |---|---|---|---|
+| ✅ 1a | `node:crypto` no bundle do navegador (`Du.randomBytes is not a function`) | **corrigido na rodada 39**: import nomeado + substituto no Vite | — |
+| ✅ 1b | painel lia o JSON de demonstração (id 9901) em vez do banco | **corrigido na rodada 39**: `src/db/supabaseUsers.ts` como fonte de verdade | — |
+| ✅ 1c | `school_accounts` autenticada com chave publicável (401) e fallback com senhas versionadas | **corrigido na rodada 39**: consulta com chave de serviço no servidor | — |
 | ⛔ 1 | `test-round25-integration.mjs` exige rede para `*.supabase.co` | não roda no sandbox | executar em ambiente com rede |
 | ⛔ 2 | Envio real de e-mail/SMS depende de `RESEND_API_KEY` / `TWILIO_*` | recuperação de senha fica `deliveryPending` | configurar antes de liberar usuários |
 | ⛔ 3 | Cobrança real depende de `STRIPE_SECRET_KEY`; Asaas/Mercado Pago só têm as variáveis | sem provedor, tudo é sandbox | escolher o provedor e implementar o adaptador |
 | ⛔ 4 | Política de privacidade precisa de revisão jurídica | texto é técnico, derivado do código | revisão por advogado |
 | ⛔ 5 | Contrato de tratamento de dados (DPA) com as escolas | exigência LGPD para operador | modelo jurídico |
 | ⛔ 6 | Verificação de assinatura de webhook por provedor | hoje o HMAC genérico é validado; Asaas/MP não implementados | junto com o item 3 |
+
+## Rodada 39 — o que o console do usuário provou
+
+Os oito erros do print viraram quatro causas. Duas delas são de **código**, não de
+configuração, e explicam o pedido original ("o ADM já cadastrado entrou e o painel
+não apareceu"):
+
+1. **criptografia do servidor empacotada para o navegador** → cadastro estourava
+   `randomBytes is not a function` e a tela culpava a conexão do usuário;
+2. **o servidor lia o JSON de demonstração** → o painel mostrava 5 contas fictícias
+   (id 9901) em vez das 27 do banco, e as edições sumiam no deploy.
+
+Verificação: **36 suítes, 0 falhas**; login do ADM real (`professor@gmail.com`,
+id 759) devolve **200** e o painel recebe os ids `[2, 117, 200, 759, 819]` — não
+mais o 9901. Detalhes em `CORRECOES_APLICADAS.md` §39.
+
+Continua dependendo do usuário: criar o serviço no Railway/Render (§38) e
+**desbloquear a conta que ele usa**, se for `diretoria@helenawysocki.com` — essa
+conta está `ativo = false` no banco desde 08/09/2026.

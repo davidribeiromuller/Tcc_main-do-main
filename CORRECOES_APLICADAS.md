@@ -2314,3 +2314,301 @@ em `503 SAAS_NOT_CONFIGURED`, porque o backend não descobre a URL sozinho. O
 Suíte nova: `test-round38-deploy.mjs` — **38 verificações** (mesma origem,
 artefatos, segurança do Dockerfile, nenhum segredo versionado, o par obrigatório,
 cobertura da documentação).
+
+---
+
+## §39 — Os erros do console e o ADM que não aparecia (25/11)
+
+O relato veio com dois prints do console do GitHub Pages e uma frase:
+
+> "entre com conta adm, e não apareceu [o painel]"
+
+Os prints tinham **oito** mensagens diferentes. Elas não eram oito bugs: eram
+sintomas de quatro causas, e uma delas explicava por que o ADM existente não
+entrava.
+
+### Causa 1 — `Du.randomBytes is not a function` (cadastro nunca funcionou no Pages)
+
+`src/lib/security.ts` importava `crypto` **default** de `node:crypto`:
+
+```js
+import crypto from "node:crypto";   // antes
+```
+
+No bundle do navegador esse módulo não existe, e o Vite **não avisa**: ele emite
+`const Du = {}`. O import "funcionava" e a primeira chamada estourava:
+
+```
+[usersService] Exceção ao registrar usuário:
+TypeError: Du.randomBytes is not a function
+```
+
+O `catch` genérico do cadastro traduzia isso para *"Não foi possível criar sua
+conta agora. Verifique sua conexão"* — ou seja, a tela culpava a internet do
+usuário por um erro de build, em **toda** tentativa de cadastro.
+
+Correção em duas camadas:
+
+| Camada | O que faz |
+|---|---|
+| `src/lib/security.ts` | passa a importar **funções nomeadas** (`randomBytes`, `scryptSync`…). Se faltar alguma, o erro é de build — não de execução disfarçado. |
+| `vite.config.ts` | `node:crypto` → `src/lib/nodeCryptoShim.ts`, que carrega normalmente e lança uma mensagem em português explicando por que a operação exige servidor. |
+
+O bundle antigo (`const Du={}` + `randomBytes`) provava o diagnóstico. O novo é
+verificado pelos testes: **0** ocorrências de `scryptSync` real no cliente, **1**
+do substituto, e `dist/server.cjs` continua usando o crypto do Node.
+
+### Causa 2 — O painel do ADM mostrava dados que não eram do banco
+
+Esta é a que explica o pedido principal. `src/db/users.ts` falava
+Postgres/Drizzle e, na falta de `DATABASE_URL` (exatamente o caso do deploy, que
+usa Supabase via REST), caía em `fallbackStore` — um JSON local de demonstração.
+
+Consequências, todas visíveis no banco real (projeto `jaoheenjltzzglfncgfq`):
+
+| Sintoma | Realidade do banco |
+|---|---|
+| diretório com 5 contas | `public.users` tem 27 |
+| "Diretoria" com id **9901** | id **2** |
+| edição do painel "salvava" | gravava no JSON do processo e sumia no deploy seguinte |
+| `/api/admin/audit` 503 | histórico vive só no Supabase |
+
+Novo módulo `src/db/supabaseUsers.ts`, e `users.ts` passa a decidir a fonte:
+**Supabase quando há `SUPABASE_SECRET_KEY`** (produção), Drizzle/JSON caso
+contrário (banco local). A regra fica em um só lugar (`usaSupabaseComoFonte()`),
+usada por leitura, busca, edição e criação.
+
+Regra que virou invariante: **falha de leitura nunca vira lista vazia.** Era isso
+que fazia o painel parecer vazio "de verdade".
+
+### Causa 3 — `401` em `school_accounts` e o fallback com senhas públicas
+
+O acesso institucional consultava `school_accounts` com a chave **publicável**.
+A tabela tem RLS ligado e **zero** políticas (de propósito: guarda senha), então
+a consulta voltava 401 — o erro do print. O servidor então caía em
+`fallback_institutional_accounts.json`, cujas senhas estão versionadas no
+repositório (`senhaInstitucional123`). Autenticação por credencial pública.
+
+Agora a validação acontece no servidor com a chave de serviço, e o fallback de
+demonstração **só vale quando não há banco configurado**.
+
+### Causa 4 — Ruído de console: `404 /api/db-status`, `/api/users`, `/api/saas/plans`
+
+Cinco pontos ainda chamavam `/api/*` com `fetch` cru, mesmo no Pages, onde a
+rota não existe. Passaram a usar `fetchJsonApi`/`fetchJsonApiWithAuth`, que
+devolvem `null` sem tocar na rede quando não há backend — e as telas mostram o
+motivo em vez de erro de rede.
+
+| Arquivo | Antes | Agora |
+|---|---|---|
+| `AdminPanel.tsx` (auditoria) | `fetch` → HTML 200 → `res.json()` estourava | `fetchJsonApiWithAuth` + mensagem honesta |
+| `AdminPanel.tsx` (sonda de planos) | `fetch` 404 | `fetchJsonApi` |
+| `App.tsx` (db-status no arranque) | `fetch` 404 a cada carga | `fetchJsonApi` |
+| `App.tsx` (heartbeat 2 min) | 404 recorrente | só com servidor disponível |
+| `Settings.tsx` | `res.json()` sobre HTML | `fetchJsonApi` |
+
+### Correções de comportamento que o relato expôs
+
+| Problema | Correção |
+|---|---|
+| conta `ativo = false` barrava sem dizer que era bloqueio | 403 com o motivo (já era o contrato; a suíte que exigia 200 estava errada) |
+| banco inalcançável virava **500** `TypeError: fetch failed` | **503 `SAAS_UNREACHABLE`** + "a conta não foi apagada: o servidor é que não alcança o banco" |
+| `isRedeIndisponivel` não via erro do PostgREST | lê `message`/`details`/`hint`; `UND_ERR`, `EAI_AGAIN`, `other side closed` incluídos |
+| `/admin` montava o painel para quem não é admin (cada aba 401/403) | guarda `canAccessAdminPanel` **antes** de montar, com explicação e botão de saída |
+| botão "Entrar na Conta" tentava 3 redes antes de explicar | pré-checagem `isServerAvailable()` no `handleLocalLogin` |
+| cadastro tentava gravar pelo navegador (RLS recusa INSERT) | guarda antes da criptografia, com a mensagem certa |
+| `getOrCreateUser` criava conta no JSON local | cria linha em `users` no Supabase (`criarUsuarioNoSupabase`) |
+| privilégio por e-mail fixo em `db/users.ts` | removido: cargo vem de `role`/`is_admin` |
+
+### Provas
+
+Não bastava afirmar: o sandbox **não tem rede** para `*.supabase.co`
+(`curl` → `000`), e sem isso o caminho feliz não rodaria. Criei
+`test-helpers/mockPostgrest.mjs`, que sobe um PostgREST simulado com as linhas
+**reais** do projeto e é usado pelas suítes de integração.
+
+`test-round39-login-adm-banco.mjs` sobe o `server.ts` de verdade contra ele:
+
+```
+[1] Login do ADM que JÁ EXISTE no banco
+  ✓ devolve 200 (antes o painel não aparecia)
+  ✓ usa a linha do BANCO (id 759), não o JSON de demonstração (9901)
+  ✓ reconhece o cargo administrativo
+  ✓ emite sessão assinada
+[2] O painel recebe o diretório REAL
+  ✓ lista os ids do banco          ✓ não há mais conta fictícia 9901
+  ✓ adminRole do chefe reconhecido ✓ nome vem do banco
+[3] Conta desativada no banco continua bloqueada (403)
+[4] Senha errada continua 401 (não vira 503)
+[5] Acesso institucional pela tabela real (200, papel Escola)
+[6] Banco fora de alcance → 503 explicativo, nunca 500
+16/16
+```
+
+Build de produção (`NODE_ENV=production`, `node dist/server.cjs`):
+
+```
+/  200 eloEscola    /admin 200    /login 200
+POST /api/auth/local-login-password → 200, id 759, role Diretor, isAdmin true
+```
+
+### Suítes antigas que estavam "verdes" sem provar nada
+
+Três suítes subiam o servidor com `SUPABASE_SECRET_KEY: "fake-para-teste"` e
+**nenhuma `SUPABASE_URL`**. O servidor não tinha como consultar banco algum,
+respondia pelo JSON de demonstração, e os testes passavam — foi assim que o bug
+do id 9901 sobreviveu a várias rodadas. Passaram a usar o banco simulado.
+
+Elas também revelaram dados do banco que contradiziam o teste:
+`diretoria@helenawysocki.com` e `funcionario@helenawysocki.com` estão
+`ativo = false` desde 08/09/2026. O login das duas é **403, e está certo**.
+
+### Suítes novas
+
+- `test-round39-erros-console.mjs` — **24 verificações** (uma por mensagem do print)
+- `test-round39-login-adm-banco.mjs` — **16 verificações** (integração real)
+
+**Bateria completa: 36 suítes, 0 falhas.** `tsc` limpo, `npm run build` OK.
+
+### O que continua dependendo do usuário
+
+O painel do ADM só fica utilizável no endereço público quando o servidor existir.
+O código está pronto e testado contra o banco; falta o serviço no Railway/Render
+com `SUPABASE_URL` + `SUPABASE_SECRET_KEY` + `SESSION_SECRET` (§38).
+
+E uma decisão que é dele: `diretoria@helenawysocki.com` está **bloqueada no
+banco**. Se essa é a conta que ele usa, é preciso desbloquear pelo painel (com um
+Chefe ativo, ex. `professor@gmail.com`) — o código não faz isso sozinho, e não
+deve.
+
+---
+
+## §40 — Contato comercial, máscaras reais e o "servidor do eloEscola"
+
+Pedido, em cinco partes:
+
+> "coloque essa função lá em cima" · "adicione parâmetros reais como no cpf:
+> 111.111.111… a mesma coisa para o número de telefone" · "ajuste o design para
+> ficar mais profissional, prioridade" · "crie uma tabela existente no banco de
+> dados para adicionar as informações, e faça com que a pessoa que entrou em
+> contato seja mandada uma mensagem no whatsapp do aplicativo (55 41995119914)"
+> · "tem um erro que fala do servidor do eloEscola, resolva isso também"
+
+### "Crie uma tabela existente" — não criei tabela nova
+
+A tabela **já existia**: `sales_leads`, com 13 colunas (`name`, `email`,
+`phone`, `school_name`, `city`, `state`, `plan_interest`, `source`, `status`,
+`notes`…). O formulário já escrevia nela — mas só pelo servidor, e a página no
+GitHub Pages não tem servidor.
+
+Verificado no projeto: `sales_leads` tem a política `sales_leads_public_insert`
+(WITH CHECK true) para `anon`. Ou seja, o próprio esquema já permite o contato
+ser gravado direto pela página publicada. Confirmei com um INSERT real e apaguei
+o registro de teste depois (a tabela voltou a 0 linhas).
+
+CNPJ e mensagem livre não têm coluna própria; criar coluna exigiria migration.
+Vão para `notes`, rotulados (`CNPJ: … | Mensagem: …`), que é o campo que o painel
+Master já exibe.
+
+### O WhatsApp: o limite que não dá para fingir
+
+**Não existe "mandar mensagem de WhatsApp" por link.** `wa.me` abre a conversa;
+quem aperta enviar é a pessoa. Envio automático exige a API oficial (WhatsApp
+Business / Cloud API da Meta ou Twilio): número verificado, token permanente e
+template aprovado. Nada disso existe neste projeto.
+
+Então a entrega é em duas camadas, e a tela diz qual delas aconteceu:
+
+| Camada | Estado | O que o usuário vê |
+|---|---|---|
+| Lead gravado em `sales_leads` | **automático e verificado** | "Contato registrado com sucesso" |
+| Aviso no WhatsApp | automático **só** com `WHATSAPP_TOKEN` + `WHATSAPP_PHONE_ID` | botão "Avisar a equipe no WhatsApp" com a mensagem pronta |
+
+O número (41) 99511-9914 está em `WHATSAPP_COMERCIAL` (`5541995119914`),
+sobrescrevível por `VITE_WHATSAPP_COMERCIAL`. O link é montado com
+`encodeURIComponent` — sem isso, um `&` no nome cortava a mensagem no meio.
+
+Se você configurar a Cloud API depois, `whatsappNotify.ts` já sabe enviar e
+reportar a falha real; a tela não muda.
+
+### Máscaras: CPF, CNPJ e telefone no mesmo lugar
+
+O cadastro formatava o CPF à mão e o telefone com ~40 linhas de `if` que
+produziam `(41) 9 9999-9999` e aceitavam `+55` sem normalizar — o que fazia o
+**mesmo número existir em dois formatos**, quebrando a checagem de duplicidade.
+
+`src/lib/formMasks.ts` centraliza. Regra: a tela mostra máscara, o banco recebe
+só dígitos.
+
+```
+11111111111        → 111.111.111-11        (progressivo: 111.1 → 111.111.1 → …)
+41999999999        → (41) 99999-9999
+4133334444         → (41) 3333-4444
++55 41 99999-9999  → (41) 99999-9999       → envio: 41999999999
+12345678000199     → 12.345.678/0001-99
+```
+
+### Design: o formulário subiu para o topo
+
+Antes o contato ficava **depois** dos preços, dos add-ons e do bloco de
+cobrança — quem quer falar com a equipe desiste de rolar antes de chegar nele.
+Agora:
+
+- bloco de contato **acima dos planos**, com cabeçalho, ícone e atalho de WhatsApp;
+- cada campo com `label` (não só placeholder), ícone e mensagem de erro própria;
+- 9 campos com máscara/validação: nome, e-mail, telefone, CNPJ, escola, cidade,
+  UF, plano e mensagem;
+- preços com valor mensal em destaque e total anual como texto secundário;
+- estados de erro legíveis ("O catálogo de preços não pôde ser carregado agora" em
+  vez de `TypeError: fetch failed`);
+- botão "Quero uma proposta" com estado de envio.
+
+### O erro "Catálogo indisponível · HTTP 404"
+
+Era o mesmo padrão de sempre: a tela só sabia falar com `/api/saas/plans`, rota
+que não existe no GitHub Pages. O catálogo **é público no banco**
+(`plans_public_read`: `is_public AND is_active`). Agora
+`carregarCatalogoDePlanos` tenta o servidor e cai para a leitura direta.
+
+Dois cuidados que entraram junto:
+
+1. **timeout** — sem `signal`, um servidor que aceita a conexão e não responde
+   deixava a promessa pendurada. No teste com jsdom isso apareceu como
+   "Carregando planos…" eterno. Agora 8 s e erro claro.
+2. **sem inventar número** — as vagas de "Escola Fundadora" dependem de quantas
+   escolas aderiram, dado que a RLS não abre. O caminho público devolve 0 e a UI
+   simplesmente não mostra o selo, em vez de anunciar "3 vagas" sem saber.
+
+### O "erro que fala do servidor do eloEscola"
+
+Duas mensagens culpavam "o servidor do eloEscola" — jargão de quem construiu, não
+de quem usa. Para o usuário, isso parece "o sistema caiu".
+
+| Onde | Antes | Agora |
+|---|---|---|
+| `Login.tsx` (acesso institucional) | "precisa do servidor do eloEscola. Esta versão é a demonstração estática" | explica que a senha só funciona na versão com servidor **e por que** (o banco não aceita leitura de senha pelo navegador) + a saída (visitante ou secretaria) |
+
+### Provas
+
+| Suíte | Verificações |
+|---|---|
+| `test-round40-contato-e-mascaras.mjs` | **33** — máscaras executadas com entradas reais, link do WhatsApp conferido como URL, campos com `label`, contato antes dos planos, timeout, mensagem de login |
+| `test-round40-lead-integracao.mjs` | **14** — `server.ts` real contra PostgREST simulado: grava `sales_leads`, telefone só com dígitos, e-mail em minúsculas, CNPJ/mensagem em `notes`, e-mail inválido não grava |
+
+Tela renderizada com jsdom (URL `davidribeiromuller.github.io`, sem rede), o que
+prova os estados reais: contato antes dos planos, 9 rótulos, aviso de erro
+exibido, **nenhuma** mensagem técnica vazando, "Carregando" resolvido.
+
+Banco real: INSERT em `sales_leads` aceito com a política pública, registro de
+teste removido em seguida (tabela de volta a 0).
+
+**Bateria: 38 suítes, 0 falhas.** `tsc` limpo, `npm run build` OK, sem chave
+secreta no bundle (número do WhatsApp aparece 1×, como esperado).
+
+### Ainda depende de você
+
+- **deploy**: o que está publicado é o merge do PR #41. O commit da rodada 39
+  (`f5e5874`) e este ficam na branch até você mandar abrir/mergear o PR. **É por
+  isso que o painel do ADM ainda não aparece** na conta publicada: as correções
+  do login ainda não estão no ar.
+- **WhatsApp automático**: só com `WHATSAPP_TOKEN` + `WHATSAPP_PHONE_ID`.

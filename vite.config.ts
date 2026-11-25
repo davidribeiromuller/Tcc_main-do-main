@@ -22,6 +22,19 @@ export default defineConfig(({command}) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './'),
+        /*
+          `src/lib/security.ts` usa `node:crypto` (scrypt, HMAC, JWT). No
+          servidor isso é o módulo real do Node. No bundle do navegador o
+          Vite não tem esse módulo e emitia `const Du = {}` silenciosamente —
+          o import "funcionava" e a primeira chamada estourava
+          `Du.randomBytes is not a function`, quebrando o cadastro no GitHub
+          Pages com a mensagem enganosa "verifique sua conexão".
+
+          Apontamos para um substituto que carrega normalmente e lança um
+          erro explicativo. O esbuild do servidor usa `--packages=external`,
+          então `dist/server.cjs` continua importando o crypto real.
+        */
+        'node:crypto': path.resolve(__dirname, './src/lib/nodeCryptoShim.ts'),
       },
     },
     server: {

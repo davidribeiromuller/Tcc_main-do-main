@@ -8,6 +8,7 @@
  */
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { subirBancoSimulado } from "./test-helpers/mockPostgrest.mjs";
 
 let ok = 0, fail = 0;
 const falhas = [];
@@ -17,12 +18,27 @@ const check = (n, c, d = "") => {
 };
 
 const PORT = 3997;
+const PORTA_BANCO = 3998;
+
+/*
+  RODADA 39 — esta suíte antes usava `SUPABASE_SECRET_KEY: "fake-para-teste"`
+  e nenhuma `SUPABASE_URL`: o servidor não tinha como consultar banco algum e
+  caía no JSON de demonstração. O teste passava sem provar nada, e foi por isso
+  que o bug real ("o painel mostra id 9901, não o do banco") sobreviveu.
+
+  Agora aponta para o PostgREST simulado, com as linhas reais de `users`.
+  O servidor e a suíte precisam ser assíncronos para esperar o banco subir.
+*/
 const env = {
   ...process.env,
   PORT: String(PORT),
   SESSION_SECRET: "0123456789abcdef0123456789abcdef0123456789abcdef",
-  SUPABASE_SECRET_KEY: "fake-para-teste",
+  SUPABASE_URL: `http://127.0.0.1:${PORTA_BANCO}`,
+  SUPABASE_SECRET_KEY: "chave-de-teste-nao-e-segredo",
 };
+// Banco simulado primeiro: o servidor já faz probe de conexão no arranque.
+const banco = await subirBancoSimulado(PORTA_BANCO);
+
 const proc = spawn("npx", ["tsx", "server.ts"], { env, stdio: ["ignore", "pipe", "pipe"], detached: true });
 let log = "";
 proc.stdout.on("data", (d) => (log += d.toString()));
@@ -44,8 +60,27 @@ try {
 
   // As contas administrativas que JÁ existiam no app (seed do fallback).
   const contas = [
-    { email: "diretoria@helenawysocki.com", senha: "senha123", cargo: "chefe", rotulo: "Diretoria (Chefe)" },
-    { email: "funcionario@helenawysocki.com", senha: "senha123", cargo: "funcionario", rotulo: "Funcionário ADM" },
+    /*
+      RODADA 39 — `diretoria@helenawysocki.com` está com `ativo = false` no
+      banco real desde 08/09/2026 (verificado no projeto). O login dela é
+      recusado com 403 e ISSO É O CERTO — a suíte antiga exigia 200 e por isso
+      "quebrava" ao passar a consultar o banco de verdade.
+
+      O Chefe usado aqui é `professor@gmail.com` (id 759): admin ativo, com
+      senha em texto (legado), que é o caso da migração no login.
+    */
+    { email: "professor@gmail.com", senha: "1234", cargo: "chefe", rotulo: "Chefe existente (id 759)" },
+    /*
+      RODADA 39 — `funcionario@helenawysocki.com` também está `ativo = false`
+      no banco real (mesmo seed antigo da Diretoria). A suíte exigia 200 e
+      falhava assim que o servidor passou a consultar o banco.
+
+      Quem exercita o caminho de "Funcionário Administrador" agora é uma conta
+      ATIVA do próprio banco (`davidribeiromuller@gmail.com`, id 117), com o
+      cargo ajustado no simulador — o que testa de verdade a regra de que o
+      cargo vem da coluna `role`, e não de e-mail fixo.
+    */
+    { email: "davidribeiromuller@gmail.com", senha: "123456", cargo: "funcionario", rotulo: "Funcionário ADM (id 117)" },
   ];
 
   for (const conta of contas) {
@@ -121,6 +156,7 @@ try {
   try { if (proc.pid) process.kill(-proc.pid, "SIGTERM"); } catch {}
   await dormir(600);
   try { if (proc.pid) process.kill(-proc.pid, "SIGKILL"); } catch {}
+  await banco.fechar();
 }
 
 console.log(`\n${fail === 0 ? "✅" : "❌"} ${ok} passaram, ${fail} falharam`);

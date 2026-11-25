@@ -933,6 +933,9 @@ export async function createSalesLead(input: {
   state?: string;
   planInterest?: string;
   source?: string;
+  /* RODADA 40 — campos novos do formulário de contato. */
+  cnpj?: string;
+  message?: string;
 }) {
   const sb = getSaasAdminClient();
   if (!sb) return { data: null, error: "Backend SaaS não configurado." };
@@ -948,6 +951,19 @@ export async function createSalesLead(input: {
         state: input.state || "PR",
         plan_interest: input.planInterest || null,
         source: input.source || "site",
+        /*
+          A tabela `sales_leads` não tem coluna para CNPJ nem para mensagem
+          livre, e criar coluna exigiria migration. `notes` (text) já existe e
+          é exibido no painel Master — então o conteúdo estruturado vai para
+          lá, rotulado, em vez de se perder.
+        */
+        notes:
+          [
+            input.cnpj ? `CNPJ: ${input.cnpj}` : null,
+            input.message ? `Mensagem: ${input.message}` : null,
+          ]
+            .filter(Boolean)
+            .join(" | ") || null,
       },
     ])
     .select()

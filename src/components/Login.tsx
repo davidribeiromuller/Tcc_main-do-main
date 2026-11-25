@@ -107,9 +107,22 @@ export default function Login({
           body: JSON.stringify({ identificador: cleanId, password: instPassword })
         });
         if (!res) {
+          /*
+            RODADA 40 — a mensagem culpava "o servidor do eloEscola" mesmo
+            quando o problema era o endereço publicado não ter backend. Para
+            quem está usando o app, "servidor do eloEscola" não significa nada:
+            parece que o sistema está fora do ar.
+
+            Agora diz o que é verdade e o que fazer: o login institucional com
+            senha só funciona na versão com servidor. Enquanto isso, a saída é
+            o acesso por visitante — e o motivo real é que a tabela de contas
+            escolares guarda senha e não aceita leitura pelo navegador.
+          */
           throw new Error(
-            "O acesso institucional precisa do servidor do eloEscola. " +
-            "Esta versão publicada é a demonstração estática."
+            "O acesso institucional com senha só funciona na versão com servidor ativo. " +
+            "Neste endereço (versão publicada) o banco não aceita leitura de senhas pelo " +
+            "navegador. Use \"Entrar como visitante\" para conhecer o app ou fale com a " +
+            "secretaria da escola."
           );
         }
         const data = await res.json();

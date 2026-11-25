@@ -253,7 +253,19 @@ console.log("\n=== 10. Painel da escola e vitrine ===");
   ok("vitrine mostra teste e desconto anual", plansUi.includes("dias de teste") && plansUi.includes("annualDiscountPercent"));
   ok("vitrine mostra escolas fundadoras", plansUi.includes("Fundadora"));
   ok("vitrine exibe estado quando catálogo indisponível", /Catálogo indisponível/.test(plansUi));
-  ok("formulário comercial grava lead", plansUi.includes("/api/saas/leads"));
+  /*
+    RODADA 40 — a rota saiu do componente e foi para `lib/salesContact.ts`,
+    junto com o caminho alternativo de gravação direta em `sales_leads` e o
+    link do WhatsApp. A intenção do teste continua: o formulário precisa
+    registrar o lead (e não só mostrar um botão bonito).
+  */
+  const contatoSvc = readFileSync("src/lib/salesContact.ts", "utf8");
+  ok(
+    "formulário comercial grava lead",
+    plansUi.includes("registrarContatoComercial") &&
+      contatoSvc.includes("/api/saas/leads") &&
+      contatoSvc.includes('from("sales_leads")')
+  );
   ok("telas novas ligadas ao App", app.includes("<MasterPanel") && app.includes("<SchoolSubscription") && app.includes("<PlansAndPricing"));
 }
 

@@ -180,6 +180,7 @@ import {
   updateSalesLeadStatus,
   getPlatformOverview
 } from "./src/lib/saasStore.ts";
+import { avisarEquipeNoWhatsApp, whatsappAutomaticoConfigurado } from "./src/lib/whatsappNotify.ts";
 
 /**
  * Carrega a linha de `users` correspondente ao token, do jeito que o resto do
@@ -231,8 +232,25 @@ const AUTHORIZATION_FORBIDDEN = "Você não tem permissão para acessar esta aut
  * aconteceu (banco fora do ar / rede bloqueada) em vez de sugerir bug.
  */
 function isRedeIndisponivel(error: any): boolean {
-  const msg = String(error?.message || error || "");
-  return /fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|network|socket hang up/i.test(msg);
+  /*
+    RODADA 39 — o `supabase-js` não rejeita a promise quando o `fetch` falha:
+    ele resolve com `{ error }`. Aqui o argumento também pode ser esse objeto
+    de erro do PostgREST (`{ message, details, hint, code }`), por isso lemos
+    `message`/`details`/`hint` antes de decidir. Sem isso, uma queda de rede
+    virava 500 genérico em vez de 503 `SAAS_UNREACHABLE`.
+  */
+  const msg = [
+    error?.message,
+    error?.details,
+    error?.hint,
+    typeof error === "string" ? error : "",
+    String(error ?? ""),
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return /fetch failed|failed to fetch|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|UND_ERR|network|socket hang up|other side closed/i.test(
+    msg
+  );
 }
 
 function responderIndisponivel(res: any, mensagem: string) {
@@ -947,7 +965,27 @@ async function startServer() {
       }
 
       const cleanEmail = email.trim().toLowerCase();
-      const user = await getUserByEmail(cleanEmail);
+
+      let user: any;
+      try {
+        user = await getUserByEmail(cleanEmail);
+      } catch (dbErr: any) {
+        /*
+          RODADA 39 — antes isto virava `500 {"error":"Falha ao consultar
+          usuário no Supabase: TypeError: fetch failed"}`. O administrador
+          legítimo via uma falha de infraestrutura e concluía que a conta dele
+          tinha sido apagada. Separar 503 de 401 é o que torna o diagnóstico
+          possível: aqui NÃO é senha errada, é o banco inalcançável.
+        */
+        if (dbErr?.code === "SAAS_UNREACHABLE") {
+          return res.status(503).json({
+            error: dbErr.message,
+            code: "SAAS_UNREACHABLE",
+            hint: "A conta não foi apagada: o servidor é que não alcança o banco agora.",
+          });
+        }
+        throw dbErr;
+      }
 
       if (!user) {
         // Antes: contas "conhecidas" eram criadas automaticamente com senha
@@ -1104,8 +1142,63 @@ async function startServer() {
         return res.status(400).json({ error: "Identificador institucional e senha são obrigatórios." });
       }
 
-      // 1) Contas escolares na tabela dedicada (senha com hash).
-      const schoolAccount = await autenticarContaEscolar(identificador, password).catch(() => null);
+      /*
+        RODADA 39 — a tabela `school_accounts` não tem política de RLS para
+        `anon` (0 policies, de propósito: guarda senha). A autenticação feita
+        pelo cliente, com a chave publicável, sempre falhava — e o servidor
+        caía no JSON de demonstração (`fallback_institutional_accounts.json`),
+        cujas senhas são públicas no repositório. Aqui a consulta é feita com
+        a chave de serviço, que é a única que enxerga a tabela.
+      */
+      let schoolAccount: { user: any } | null = null;
+      const adminClient = getSaasAdminClient();
+      if (adminClient) {
+        const termo = String(identificador).trim().toLowerCase();
+        const { data: contas } = await adminClient
+          .from("school_accounts")
+          .select("*")
+          .or(`login_identifier.eq.${termo},institutional_email.eq.${termo}`)
+          .limit(1);
+        const conta = (contas || [])[0];
+        if (conta) {
+          if (conta.account_status === "suspended" || conta.account_status === "revoked") {
+            return res.status(403).json({
+              error: "Sua conta escolar está desativada ou bloqueada pela diretoria.",
+            });
+          }
+          const senhaCheck = verifyPassword(password, conta.password);
+          if (!senhaCheck.ok) {
+            return res.status(401).json({ error: "Identificador institucional ou senha incorretos." });
+          }
+          if (senhaCheck.needsUpgrade) {
+            await adminClient
+              .from("school_accounts")
+              .update({ password: hashPassword(password), updated_at: new Date().toISOString() })
+              .eq("id", conta.id);
+          }
+          schoolAccount = {
+            user: {
+              id: Number(conta.id),
+              uid: `school-account-${conta.id}`,
+              nome: `${conta.responsible_name} — ${conta.school_name}`,
+              email: conta.institutional_email,
+              role: "Escola",
+              ativo: true,
+              isAdmin: false,
+              escolaId: Number(conta.school_id),
+              escolaNome: conta.school_name,
+              identificador: conta.login_identifier,
+              institution: conta.school_name,
+              phone: conta.institutional_contact || undefined,
+              mustChangePassword: conta.must_change_password === true,
+              createdAt: conta.created_at || new Date().toISOString(),
+              lastLogin: new Date().toISOString(),
+            },
+          };
+        }
+      } else {
+        schoolAccount = await autenticarContaEscolar(identificador, password).catch(() => null);
+      }
       if (schoolAccount?.user) {
         const token = await issueSession(
           req,
@@ -1115,8 +1208,12 @@ async function startServer() {
         return res.json({ user: schoolAccount.user, token });
       }
 
-      // 2) Fallback da loja institucional local (apenas quando o banco não está
-      //    disponível). A senha é comparada com hash quando já migrada.
+      // 2) Fallback da loja institucional local. Só quando NÃO existe banco
+      //    configurado: em produção, aceitar estas credenciais de demonstração
+      //    (senhas visíveis no repositório) seria uma porta de entrada aberta.
+      if (isSaasBackendConfigured()) {
+        return res.status(401).json({ error: "Identificador institucional ou senha incorretos." });
+      }
       const account = authenticateInstitutionalAccountFallback(identificador, password);
       if (!account) {
         return res.status(401).json({ error: "Identificador institucional ou senha incorretos." });
@@ -1278,7 +1375,19 @@ async function startServer() {
   // Administrativo / Diretório Escolar: Listar todos os usuários com controle de permissão por nível
   app.get("/api/users", requireAuth, requireAdminOrStaff, async (req: AuthRequest, res) => {
     try {
-      const allUsers = await listAllUsers();
+      let allUsers: any[];
+      try {
+        allUsers = await listAllUsers();
+      } catch (dbErr: any) {
+        /*
+          Nunca devolver `[]` quando a leitura falhou: o painel mostraria
+          "nenhum usuário" e o Chefe acharia que o banco foi zerado.
+        */
+        return res.status(503).json({
+          error: dbErr?.message || "Não foi possível ler o diretório de usuários.",
+          code: dbErr?.code || "SAAS_UNREACHABLE",
+        });
+      }
       const adminRole = (req as any).adminRole || 'funcionario';
 
       /**
@@ -4092,24 +4201,69 @@ async function startServer() {
     res.json({ partners: publicPartners });
   });
 
+  /*
+    RODADA 40 — contato comercial: grava o lead e avisa a equipe.
+
+    O formulário passou a coletar CNPJ, cidade e mensagem livre, e o autor
+    pediu que a equipe seja avisada no WhatsApp (41) 99511-9914.
+
+    Duas coisas precisam ficar claras na resposta, porque são diferentes:
+      - `saved`: o lead está na tabela `sales_leads` (isso o app faz sozinho);
+      - `whatsapp`: se o aviso saiu automaticamente. Só sai com
+        `WHATSAPP_TOKEN` + `WHATSAPP_PHONE_ID` (Cloud API oficial). Sem eles,
+        devolvemos `link` com a mensagem pronta — e a tela pede o clique, em
+        vez de dizer "enviado" sem ter enviado.
+  */
   app.post("/api/saas/leads", publicWriteLimiter(), async (req, res) => {
     if (!isSaasBackendConfigured()) return saasUnavailable(res);
-    const { name, email, phone, schoolName, city, state, planInterest, source } = req.body || {};
+    const { name, email, phone, schoolName, city, state, planInterest, source, cnpj, message } =
+      req.body || {};
     if (!name || !email) {
       return res.status(400).json({ error: "Informe nome e e-mail para que possamos entrar em contato." });
     }
+    const emailLimpo = String(email).trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailLimpo)) {
+      return res.status(400).json({ error: "E-mail inválido. Confira o endereço digitado." });
+    }
+
     const result = await createSalesLead({
       name: String(name).trim(),
-      email: String(email).trim().toLowerCase(),
-      phone: phone ? String(phone).trim() : undefined,
+      email: emailLimpo,
+      phone: phone ? String(phone).replace(/\D/g, "") : undefined,
       schoolName: schoolName ? String(schoolName).trim() : undefined,
       city: city ? String(city).trim() : undefined,
       state: state ? String(state).trim() : undefined,
       planInterest: planInterest ? String(planInterest).trim() : undefined,
       source: source ? String(source).trim() : "site",
+      cnpj: cnpj ? String(cnpj).trim() : undefined,
+      message: message ? String(message).trim() : undefined,
     });
     if (result.error) return res.status(500).json({ error: result.error });
-    res.status(201).json({ success: true, message: "Recebemos seu contato. Nossa equipe responde em até 1 dia útil." });
+
+    const aviso = await avisarEquipeNoWhatsApp({
+      nome: String(name).trim(),
+      email: emailLimpo,
+      telefone: phone ? String(phone).replace(/\D/g, "") : undefined,
+      escola: schoolName ? String(schoolName).trim() : undefined,
+      cnpj: cnpj ? String(cnpj).trim() : undefined,
+      cidade: city ? String(city).trim() : undefined,
+      uf: state ? String(state).trim() : undefined,
+      plano: planInterest ? String(planInterest).trim() : undefined,
+      mensagem: message ? String(message).trim() : undefined,
+    });
+
+    res.status(201).json({
+      success: true,
+      saved: true,
+      message: "Recebemos seu contato. Nossa equipe responde em até 1 dia útil.",
+      whatsapp: {
+        entregue: aviso.entregue,
+        automatico: whatsappAutomaticoConfigurado(),
+        canal: aviso.canal,
+        link: aviso.link,
+        motivo: aviso.motivo || null,
+      },
+    });
   });
 
   // -----------------------------------------------------------------------

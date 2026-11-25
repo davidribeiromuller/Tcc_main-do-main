@@ -49,7 +49,7 @@ import {
 } from "lucide-react";
 import logoImg from "./assets/images/logo.jpg";
 import { resilientFetch, setupNetworkAutoRecovery, safeAppReload, safeParseJsonResponse } from "./lib/apiResilience.ts";
-import { fetchJsonApi } from "./lib/staticHosting.ts";
+import { fetchJsonApi, isServerAvailable } from "./lib/staticHosting.ts";
 import { readSavedCoords } from "./lib/geolocation.ts";
 import { registerSchoolAccount } from "./lib/schoolAccountService.ts";
 import { getSupabaseClient, isSupabaseConfigured, getEffectiveSupabaseUrl } from "./lib/supabase.ts";
@@ -66,6 +66,7 @@ import {
   unblockUserDirectInSupabase,
   permanentDeleteUserDirectInSupabase,
   authenticateUserDirectInSupabase,
+  MENSAGEM_LOGIN_EXIGE_SERVIDOR,
   registerUserDirectInSupabase,
   syncOAuthUserDirectInSupabase,
   heartbeatUserDirectInSupabase,
@@ -800,8 +801,14 @@ export default function App() {
 
     // 2. Proactively connect to backend and sync database events & users on app startup
     const syncDatabaseOnEntry = async () => {
+      /*
+        RODADA 39 — `fetchJsonApi` em vez de `fetch` cru. Esta chamada batia em
+        `/api/db-status` mesmo no GitHub Pages, onde a rota não existe: o host
+        devolvia 404 e o console registrava "Failed to load resource: 404
+        api/db-status" em TODO carregamento do app.
+      */
       try {
-        fetch("/api/db-status").catch(() => {});
+        void fetchJsonApi("/api/db-status").catch(() => {});
       } catch {}
       const eventsOk = await loadEvents();
       if (!eventsOk) {
@@ -973,10 +980,16 @@ export default function App() {
         const headers: Record<string, string> = { "Content-Type": "application/json" };
         if (token) headers.Authorization = `Bearer ${token}`;
 
-        await fetch("/api/users/heartbeat", {
-          method: "POST",
-          headers
-        });
+        /*
+          Sem backend a rota não existe: o `fetch` cru devolvia 404 e sujava o
+          console a cada 2 minutos. `fetchJsonApi` devolve `null` na hora.
+        */
+        if (await isServerAvailable()) {
+          await fetch("/api/users/heartbeat", {
+            method: "POST",
+            headers
+          });
+        }
       } catch (err) {
         // silent fail in offline mode
       }
@@ -1287,7 +1300,24 @@ export default function App() {
     try {
       setIsLoadingAuth(true);
       setLoginError(null);
-      
+
+      /*
+        RODADA 39 — pré-checagem do servidor.
+
+        Sem backend (GitHub Pages) não existe como validar senha: `users` é
+        fechada para a chave publicável de propósito (RLS). Antes o app tentava
+        de todo jeito — POST em rota inexistente, consulta `users` com 401,
+        sonda do diretório — e só no fim mostrava o motivo. O console enchia de
+        `Failed to load resource` e o botão parecia travado.
+
+        Aqui a resposta é imediata e o usuário lê o que pode fazer.
+      */
+      if (password && !(await isServerAvailable())) {
+        setLoginError(MENSAGEM_LOGIN_EXIGE_SERVIDOR);
+        showToast(MENSAGEM_LOGIN_EXIGE_SERVIDOR, "error");
+        return;
+      }
+
       let res: Response | null = null;
       try {
         res = await fetchJsonApi("/api/auth/local-login-password", {
@@ -2435,6 +2465,41 @@ export default function App() {
                     exit={{ opacity: 0, y: -10 }}
                     className="app-screen"
                   >
+                    {/*
+                      RODADA 39 — guarda de entrada do painel.
+
+                      Antes, um usuário sem cargo administrativo que chegasse em
+                      `/admin` (link antigo, histórico, URL digitada) via a tela
+                      montada e cada aba respondendo 401/403: parecia que o
+                      painel "não abria" ou "não carregava". A tela também
+                      prometia funções que o cargo não tem.
+
+                      A regra é a mesma do servidor (`canAccessAdminPanel`), mas
+                      aqui ela precisa vir ANTES de montar o painel, para o
+                      usuário ler o motivo em vez de ver erro de rede.
+                    */}
+                    {!canAccessAdminPanel(currentUser) && (
+                      <div className="min-h-[60vh] flex items-center justify-center p-6">
+                        <div className="max-w-md w-full text-center rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#19261d] p-8">
+                          <ShieldAlert className="w-12 h-12 mx-auto text-amber-500" />
+                          <h2 className="mt-4 text-lg font-bold text-slate-800 dark:text-slate-100">
+                            {currentUser ? "Acesso restrito" : "Entre na sua conta"}
+                          </h2>
+                          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                            {currentUser
+                              ? `O painel administrativo é para Chefes e Funcionários Administradores. Sua conta está como "${currentUser.role || "Aluno"}". Peça a promoção a um Chefe Administrador.`
+                              : "O painel administrativo exige uma conta com cargo administrativo. Entre com seu e-mail institucional."}
+                          </p>
+                          <button
+                            onClick={() => navigateTo(currentUser ? "feed" : "login")}
+                            className="mt-5 px-5 py-2.5 rounded-xl bg-[#1c4d2a] text-white text-sm font-semibold hover:bg-[#163f22] transition-colors"
+                          >
+                            {currentUser ? "Voltar ao mural" : "Ir para o login"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {canAccessAdminPanel(currentUser) && (
                     <AdminPanel
                       usersList={usersList}
                       events={events}
@@ -2456,6 +2521,7 @@ export default function App() {
                       onConsumirPreRascunho={() => setEventoPreRascunho(null)}
                       recarregarPessoais={recarregarPessoais}
                     />
+                    )}
                   </motion.div>
                 )}
 

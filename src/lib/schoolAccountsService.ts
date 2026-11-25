@@ -21,7 +21,7 @@
  */
 
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase.ts";
-import { fetchJsonApiWithAuth } from "./staticHosting.ts";
+import { fetchJsonApiWithAuth, isServerAvailable } from "./staticHosting.ts";
 import { hashPassword, verifyPassword, validatePasswordStrength } from "./security.ts";
 import { ARAUCARIA_SCHOOLS } from "./schoolsData.ts";
 import type { User } from "../types.ts";
@@ -383,6 +383,27 @@ export async function autenticarContaEscolar(
   identificadorOuEmail: string,
   password: string
 ): Promise<{ user: User | null; error: string | null }> {
+  /*
+    RODADA 39 — esta função é chamada pelo App (navegador) e fazia a consulta
+    com a chave PUBLICÁVEL. `school_accounts` tem RLS ligado e ZERO políticas
+    (de propósito: guarda senha), então a consulta voltava 401 e o console
+    mostrava:
+
+      Failed to load resource: the server responded with a status of 401
+      jaoheenjltzzglfncgfq.supabase.co/rest/v1/school_accounts
+
+    Sem servidor, não há como validar esta senha: a tabela é fechada para o
+    navegador. Dizemos isso em vez de tentar de novo e falhar.
+  */
+  if (!(await isServerAvailable())) {
+    return {
+      user: null,
+      error:
+        "O acesso institucional exige o servidor do eloEscola em execução. " +
+        "Esta versão publicada é apenas a demonstração estática.",
+    };
+  }
+
   if (!isSupabaseConfigured()) {
     return { user: null, error: "Acesso institucional indisponível: Supabase não configurado." };
   }
