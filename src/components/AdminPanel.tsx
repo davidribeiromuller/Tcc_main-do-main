@@ -47,7 +47,8 @@ import {
   UserCheck,
   GraduationCap,
   Moon,
-  Sun
+  Sun,
+  History
 } from "lucide-react";
 import { User, Event } from "../types";
 import {
@@ -89,7 +90,7 @@ import {
   getAdminRoleType
 } from "../lib/permissions";
 import { getEventYearOptions, validateEventDate } from "../lib/dateGuards.ts";
-import { fetchJsonApi } from "../lib/staticHosting.ts";
+import { fetchJsonApi, mensagemDeErroDaApi } from "../lib/staticHosting.ts";
 
 interface AdminPanelProps {
   usersList: User[];
@@ -196,7 +197,30 @@ export default function AdminPanel({
     }
   };
 
-  const [activeTab, setActiveTab] = useState<"users" | "blocked" | "events" | "schools" | "suggestions" | "personal" | "profileChanges">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "blocked" | "events" | "schools" | "suggestions" | "personal" | "profileChanges" | "audit">("users");
+
+  /**
+   * Aba Auditoria (§3.10).
+   *
+   * O `platform_audit_logs` já era gravado desde a rodada 34, mas NENHUMA tela
+   * o exibia — o Chefe não tinha como saber quem bloqueou um aluno ou aprovou
+   * uma sugestão. A leitura é feita por `/api/admin/audit`, que mascara o
+   * e-mail do autor para o Funcionário.
+   */
+  const [auditLogs, setAuditLogs] = useState<Array<{
+    id: number;
+    actorEmail: string | null;
+    actorRole: string | null;
+    action: string;
+    targetType: string | null;
+    targetId: string | null;
+    metadata: Record<string, any>;
+    ip: string | null;
+    createdAt: string;
+  }>>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const [auditFilter, setAuditFilter] = useState("");
   const [viewMode, setViewMode] = useState<"table" | "cards">(() => {
     if (typeof window !== "undefined" && window.innerWidth < 768) {
       return "cards";
@@ -552,6 +576,49 @@ export default function AdminPanel({
   const [pessoais, setPessoais] = useState<PersonalEvent[]>([]);
   const [carregandoPessoais, setCarregandoPessoais] = useState(false);
   const [buscaPessoal, setBuscaPessoal] = useState("");
+
+  /**
+   * Carrega o histórico de auditoria ao abrir a aba.
+   *
+   * O erro é MOSTRADO (`auditError`), nunca convertido em lista vazia: "sem
+   * registros" e "não consegui consultar o banco" são estados diferentes e o
+   * Chefe precisa saber qual dos dois está vendo.
+   */
+  useEffect(() => {
+    if (activeTab !== "audit") return;
+    let cancelado = false;
+
+    const carregar = async () => {
+      setAuditLoading(true);
+      setAuditError(null);
+      try {
+        const token = typeof window !== "undefined" ? localStorage.getItem("elo_session_token") || "" : "";
+        const res = await fetch("/api/admin/audit?limit=200", {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
+        const corpo = await res.json().catch(() => ({} as any));
+        if (!res.ok) {
+          throw new Error(await mensagemDeErroDaApi(res, corpo?.error || "Não foi possível consultar o histórico de auditoria."));
+        }
+        if (!Array.isArray(corpo?.logs)) {
+          throw new Error("Resposta inesperada do servidor ao carregar a auditoria.");
+        }
+        if (!cancelado) setAuditLogs(corpo.logs);
+      } catch (erro: any) {
+        if (!cancelado) {
+          setAuditLogs([]);
+          setAuditError(erro?.message || "Não foi possível consultar o histórico de auditoria.");
+        }
+      } finally {
+        if (!cancelado) setAuditLoading(false);
+      }
+    };
+
+    void carregar();
+    return () => {
+      cancelado = true;
+    };
+  }, [activeTab]);
 
   useEffect(() => {
     if (activeTab !== "personal") return;
@@ -1280,6 +1347,24 @@ export default function AdminPanel({
                   <span>Contas das Escolas</span>
                 </button>
               )}
+
+              {/*
+                Auditoria (§3.10): quem fez o quê, em qual registro e quando.
+                Disponível para Chefe E Funcionário — mas o Funcionário recebe o
+                e-mail do autor mascarado pelo servidor.
+              */}
+              <button
+                type="button"
+                onClick={() => setActiveTab("audit")}
+                className={`px-3 py-2 md:py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all cursor-pointer ${
+                  activeTab === "audit"
+                    ? "bg-emerald-800 text-white shadow-xs font-bold"
+                    : "text-emerald-800 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
+                }`}
+              >
+                <History size={14} />
+                <span>Auditoria</span>
+              </button>
             </div>
           </div>
 
@@ -2711,6 +2796,146 @@ export default function AdminPanel({
         {/* TAB 4: CONTAS ESCOLARES — lista SEPARADA dos usuários (exclusivo Chefe).
             Alunos e servidores ficam na aba "Contas"; a gestão das escolas fica
             aqui, com escola, cargo, senha visível e verificação próprios. */}
+        {/*
+          ABA AUDITORIA (§3.10)
+
+          Três estados explícitos e distintos — carregando, erro de leitura e
+          lista vazia. A regra do projeto (rodada 35) é nunca deixar uma falha
+          de banco parecer "não há registros".
+        */}
+        {activeTab === "audit" && (
+          <div className="mt-4 space-y-4">
+            <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-white/10 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-serif font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <History size={16} className="text-emerald-700 dark:text-emerald-400" />
+                  Histórico administrativo
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5 leading-relaxed">
+                  Quem executou, qual operação, em qual registro e quando.
+                  {!isChefe && " Como Funcionário Administrador, você vê o autor com o e-mail parcialmente oculto."}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="relative">
+                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={auditFilter}
+                    onChange={(e) => setAuditFilter(e.target.value)}
+                    placeholder="Filtrar por ação ou autor…"
+                    className="pl-7 pr-2 py-1.5 w-48 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {auditLoading && (
+              <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/40 p-8 text-center">
+                <RefreshCw size={20} className="mx-auto mb-2 animate-spin text-emerald-600" />
+                <p className="text-xs text-slate-500 dark:text-slate-400">Carregando o histórico…</p>
+              </div>
+            )}
+
+            {!auditLoading && auditError && (
+              <div className="rounded-2xl border border-red-300 bg-red-50 dark:border-red-900/60 dark:bg-red-950/30 p-4 flex items-start gap-2.5">
+                <AlertTriangle size={16} className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs font-bold text-red-800 dark:text-red-200">Não foi possível consultar o histórico</p>
+                  <p className="text-[11px] text-red-700 dark:text-red-300 mt-0.5 leading-snug">{auditError}</p>
+                  <p className="text-[11px] text-red-600/80 dark:text-red-400/70 mt-1">
+                    Isto é uma falha de leitura, não &quot;nenhum registro&quot;.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {!auditLoading && !auditError && auditLogs.length === 0 && (
+              <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/40 p-8 text-center">
+                <History size={22} className="mx-auto mb-2 text-slate-300 dark:text-slate-600" />
+                <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Nenhuma ação registrada ainda</p>
+                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
+                  O banco respondeu normalmente e a tabela está vazia.
+                </p>
+              </div>
+            )}
+
+            {!auditLoading && !auditError && auditLogs.length > 0 && (() => {
+              const termo = auditFilter.trim().toLowerCase();
+              const filtrados = termo
+                ? auditLogs.filter((l) =>
+                    `${l.action} ${l.actorEmail || ""} ${l.targetType || ""} ${l.targetId || ""}`
+                      .toLowerCase()
+                      .includes(termo)
+                  )
+                : auditLogs;
+
+              return (
+                <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/40 overflow-hidden">
+                  {/*
+                    `admin-table-scroll` em vez de `overflow-x-auto` solto: no
+                    celular o gesto vertical precisa continuar rolando a página
+                    (rodada 19). Um wrapper com overflow-x puro "engole" o gesto.
+                  */}
+                  <div className="admin-table-scroll">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 dark:bg-white/5 text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        <tr>
+                          <th className="px-3 py-2 font-semibold">Quando</th>
+                          <th className="px-3 py-2 font-semibold">Autor</th>
+                          <th className="px-3 py-2 font-semibold">Ação</th>
+                          <th className="px-3 py-2 font-semibold">Registro</th>
+                          <th className="px-3 py-2 font-semibold">Detalhes</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                        {filtrados.slice(0, 200).map((log) => (
+                          <tr key={log.id} className="hover:bg-slate-50/70 dark:hover:bg-white/5">
+                            <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-400">
+                              {log.createdAt ? new Date(log.createdAt).toLocaleString("pt-BR") : "—"}
+                            </td>
+                            <td className="px-3 py-2 whitespace-nowrap text-slate-800 dark:text-slate-200">
+                              {log.actorEmail || "—"}
+                              {log.actorRole && (
+                                <span className="ml-1.5 text-[9px] uppercase px-1 py-0.5 rounded bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400">
+                                  {log.actorRole}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300">
+                                {log.action}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-400">
+                              {log.targetType ? `${log.targetType}${log.targetId ? ` #${log.targetId}` : ""}` : "—"}
+                            </td>
+                            <td className="px-3 py-2 text-slate-500 dark:text-slate-400 max-w-[18rem] truncate" title={JSON.stringify(log.metadata)}>
+                              {log.metadata && Object.keys(log.metadata).length > 0
+                                ? Object.entries(log.metadata)
+                                    .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : String(v)}`)
+                                    .join(" · ")
+                                : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {filtrados.length === 0 && (
+                    <p className="px-3 py-6 text-center text-[11px] text-slate-400 dark:text-slate-500">
+                      Nenhum registro corresponde ao filtro &quot;{auditFilter}&quot;.
+                    </p>
+                  )}
+                  <div className="px-3 py-2 border-t border-slate-100 dark:border-white/5 text-[10px] text-slate-400 dark:text-slate-500">
+                    {filtrados.length} de {auditLogs.length} registro(s) · exibindo no máximo 200
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
         {activeTab === "schools" && isChefe && (
           <div className="mt-4 space-y-4">
             <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">

@@ -54,14 +54,21 @@ drop policy if exists allow_read_school_profiles on public.school_profiles;
 create policy allow_read_school_profiles
   on public.school_profiles for select using (true);
 
+-- ---------------------------------------------------------------------------
+-- ESCRITA — REVISADO NA RODADA 36
+--
+-- Originalmente existiam `allow_insert_school_profiles` e
+-- `allow_update_school_profiles` com `with check (true)`: escrita pública na
+-- ficha institucional. Isso foi um furo real — qualquer portador da chave
+-- publicável podia alterar telefone, endereço e histórico de qualquer escola.
+--
+-- Essas policies são removidas aqui por nome (limpa bancos que já as tenham).
+-- A escrita passa a ser exclusiva do backend (`PUT /api/school-profiles/:slug`,
+-- com requireChefeAdmin + auditoria em `updated_by`), que usa a service role e
+-- por isso não precisa de policy.
+--
+-- A LEITURA continua pública de propósito: diretório e ficha da escola são
+-- conteúdo do mural, visível sem login.
+-- ---------------------------------------------------------------------------
 drop policy if exists allow_insert_school_profiles on public.school_profiles;
-create policy allow_insert_school_profiles
-  on public.school_profiles for insert with check (true);
-
 drop policy if exists allow_update_school_profiles on public.school_profiles;
-create policy allow_update_school_profiles
-  on public.school_profiles for update using (true) with check (true);
-
--- Observação de segurança: a escrita é feita só pela interface do painel
--- (Chefe Administrador). Como o app não usa Supabase Auth, a RLS é permissiva
--- aqui — mesma situação já registrada para `users` e `profile_change_requests`.

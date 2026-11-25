@@ -3,10 +3,11 @@
 Documento de rastreabilidade: cada item da auditoria de segurança/comercialização
 com o **estado atual**, **onde está no código** e **como verificar**.
 
-- Versão: **2026-11-11** (Rodadas 32, 33 e 35)
+- Versão: **2026-11-11** (Rodadas 32, 33, 35 e 36)
 - Suítes: `test-round32-security.mjs` (121 verificações) e
-  `test-round33-saas.mjs` (135) e `test-round35-admin.mjs` (90) — executam as
-  regras de verdade, não só procuram strings.
+  `test-round33-saas.mjs` (135), `test-round35-admin.mjs` (90) e
+  `test-round36-restauracao.mjs` (98) — executam as regras de verdade, não só
+  procuram strings.
 - Legenda: ✅ resolvido · 🟡 parcial / depende de configuração · ⛔ pendência conhecida
 
 ---
@@ -30,6 +31,14 @@ com o **estado atual**, **onde está no código** e **como verificar**.
 | 1.13 | Agenda pessoal sem policy de dono | ✅ | `personal_events_owner_select/insert/update/delete` (`owner_id` do JWT) + rotas `/api/personal-events` | `round35` |
 | 1.14 | Sem administrador em modo fallback (painel inalcançável) | ✅ | `src/db/fallbackStore.ts` cria/promove com `BOOTSTRAP_ADMIN_*` | `round35` |
 | 1.15 | Falha de rede confundida com "sem registros" | ✅ | `isRedeIndisponivel`/`responderIndisponivel` → `503 SAAS_UNREACHABLE` + `hint`; `mensagemDeErroDaApi` no cliente | `round35` |
+| 1.16 | `PUT /api/users/:id` gravava senha em **texto claro** | ✅ | `hashPassword()` + `validatePasswordStrength()` + `must_change_password` | `round36` §2 |
+| 1.17 | Participações sem checagem de dono (aluno agia por outro trocando a URL) | ✅ | `podeAgirSobreParticipacoes()` — cargo conferido no banco | `round36` §4 |
+| 1.18 | Aprovação de sugestão duplicava evento em corrida | ✅ | reivindicação atômica `eq status='pending'` antes de publicar | `round36` §3 |
+| 1.19 | Diretório lia `users` do navegador → 1 registro com RLS fechada | ✅ | `fetchUsersDirectFromSupabase` server-first via `/api/users` | `round36` §5 |
+| 1.20 | Aba de auditoria inexistente (log gravado, nunca exibido) | ✅ | `GET /api/admin/audit` + aba no `AdminPanel` com mascaramento por cargo | `round36` §1 |
+| 1.21 | Sem paginação: `/api/users` devolvia a tabela inteira | ✅ | `?page`/`?pageSize` + busca/filtros no servidor, com compatibilidade | `round36` §6 |
+| 1.22 | `schema.ts` sem `must_change_password` (Drizzle descartava a troca obrigatória) | ✅ | 4 colunas sincronizadas com o Postgres | `round36` §7 |
+| 1.23 | 2 tabelas usadas em produção sem migration versionada | ✅ | `20261118_profile_change_requests.sql`, `20261119_school_profiles.sql` | `round36` §12 |
 
 ## Parte 2 — Autenticação e sessão
 

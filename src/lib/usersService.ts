@@ -1,6 +1,6 @@
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase.ts";
 import { hashPassword, verifyPassword } from "./security.ts";
-import { isStaticHosting } from "./staticHosting.ts";
+import { isStaticHosting, getStoredSessionToken } from "./staticHosting.ts";
 import { User } from "../types.ts";
 
 /**
@@ -45,6 +45,47 @@ export function mapSupabaseUserToUser(row: any): User {
  * Nunca utiliza usuários fictícios/mockados quando o banco estiver conectado.
  */
 export async function fetchUsersDirectFromSupabase(): Promise<{ users: User[]; error: any }> {
+  /*
+    RODADA 36 — diretório de usuários lido pelo SERVIDOR.
+
+    Esta função ainda consultava `users` direto do navegador com a chave
+    publicável. Desde que a RLS foi fechada (só `users_self_read`), essa consulta
+    devolve APENAS a linha do próprio administrador — o painel mostrava
+    "1 usuário" num banco com dezenas, sem nenhum erro. Era um falso negativo
+    silencioso, pior que uma falha explícita.
+
+    Agora usa `/api/users`, que roda com a chave secreta no servidor e aplica o
+    recorte de colunas por cargo (Chefe vê tudo; Funcionário vê o permitido).
+    O caminho Supabase fica só para o modo estático (GitHub Pages), onde não há
+    servidor — e ali a falha é reportada como erro, nunca como lista vazia.
+  */
+  if (!isStaticHosting()) {
+    try {
+      const token = getStoredSessionToken();
+      const res = await fetch("/api/users", {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      const corpo: any = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return {
+          users: [],
+          error: new Error(corpo?.error || `Falha ao carregar o diretório (HTTP ${res.status}).`),
+        };
+      }
+      if (!Array.isArray(corpo?.users)) {
+        return { users: [], error: new Error("Resposta inesperada do servidor ao carregar usuários.") };
+      }
+      return {
+        users: corpo.users.filter(
+          (row: any) => String(row.role || "").toLowerCase() !== "escola"
+        ) as User[],
+        error: null,
+      };
+    } catch (err: any) {
+      return { users: [], error: err };
+    }
+  }
+
   if (!isSupabaseConfigured()) {
     return {
       users: [],

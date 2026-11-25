@@ -36,18 +36,26 @@ create index if not exists idx_profile_change_requests_user
 
 alter table public.profile_change_requests enable row level security;
 
--- Mesma política permissiva já usada em `users` e `event_suggestions`:
--- o app não usa Supabase Auth, então a checagem de quem aprova acontece na
--- camada de aplicação (apenas administradores veem os botões).
+-- ---------------------------------------------------------------------------
+-- RLS — REVISADO NA RODADA 36
+--
+-- A versão original deste arquivo criava três policies PERMISSIVAS
+-- (`select using (true)`, `insert with check (true)`, `update using (true)`).
+-- Isso contrariava o fechamento feito na 20261113: como esta migração (18/11)
+-- roda DEPOIS dela (13/11), um ambiente novo recriava o buraco que a rodada 35
+-- havia fechado — qualquer visitante com a chave publicável voltaria a poder
+-- ler e ESCREVER solicitações de perfil alheias.
+--
+-- A justificativa antiga ("o app não usa Supabase Auth") não se aplica: quem
+-- lê e escreve nesta tabela é o backend Express com a service role, que ignora
+-- RLS. O navegador não precisa de acesso nenhum aqui.
+--
+-- Portanto: nenhuma policy de leitura/escrita pública. As policies antigas são
+-- removidas por nome (idempotente) para limpar bancos que já as tenham.
+-- ---------------------------------------------------------------------------
 drop policy if exists allow_read_profile_requests   on public.profile_change_requests;
 drop policy if exists allow_insert_profile_requests on public.profile_change_requests;
 drop policy if exists allow_update_profile_requests on public.profile_change_requests;
 
-create policy allow_read_profile_requests
-  on public.profile_change_requests for select using (true);
-
-create policy allow_insert_profile_requests
-  on public.profile_change_requests for insert with check (true);
-
-create policy allow_update_profile_requests
-  on public.profile_change_requests for update using (true) with check (true);
+-- Sem policies + RLS ligada = acesso anon/authenticated negado por padrão.
+-- Leitura e escrita acontecem em server.ts, com requireChefeAdmin.
