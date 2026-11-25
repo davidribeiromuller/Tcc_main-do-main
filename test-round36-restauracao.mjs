@@ -232,8 +232,19 @@ console.log("\n=== 9. Monetização: preços vêm do banco ===");
 
   const plansPricing = ler("src/components/PlansAndPricing.tsx");
   check(
-    "página pública lê os planos da API (não de constante local)",
-    /fetchPlansCatalog/.test(plansPricing) && /\/api\/saas\/plans/.test(ler("src/lib/plansService.ts"))
+    /*
+      RODADA 40 — antes esta verificação exigia `fetchPlansCatalog` dentro do
+      componente. A rodada 40 moveu o carregamento para
+      `carregarCatalogoDePlanos`, que tenta o servidor e cai para a leitura
+      pública de `plans` quando não há backend (era o que deixava a página
+      vazia no GitHub Pages com "Catálogo indisponível · HTTP 404").
+
+      A intenção permanece: preço não é constante no código, vem do banco.
+    */
+    "página pública lê os planos do banco (não de constante local)",
+    /carregarCatalogoDePlanos/.test(plansPricing) &&
+      /\/api\/saas\/plans/.test(ler("src/lib/plansService.ts")) &&
+      /from\("plans"\)/.test(ler("src/lib/plansService.ts"))
   );
 
   check("Master permite editar preço do plano", /"\/api\/master\/plans\/:id"/.test(server));

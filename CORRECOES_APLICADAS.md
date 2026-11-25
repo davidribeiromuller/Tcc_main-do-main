@@ -2480,3 +2480,135 @@ E uma decisão que é dele: `diretoria@helenawysocki.com` está **bloqueada no
 banco**. Se essa é a conta que ele usa, é preciso desbloquear pelo painel (com um
 Chefe ativo, ex. `professor@gmail.com`) — o código não faz isso sozinho, e não
 deve.
+
+---
+
+## §40 — Contato comercial, máscaras reais e o "servidor do eloEscola"
+
+Pedido, em cinco partes:
+
+> "coloque essa função lá em cima" · "adicione parâmetros reais como no cpf:
+> 111.111.111… a mesma coisa para o número de telefone" · "ajuste o design para
+> ficar mais profissional, prioridade" · "crie uma tabela existente no banco de
+> dados para adicionar as informações, e faça com que a pessoa que entrou em
+> contato seja mandada uma mensagem no whatsapp do aplicativo (55 41995119914)"
+> · "tem um erro que fala do servidor do eloEscola, resolva isso também"
+
+### "Crie uma tabela existente" — não criei tabela nova
+
+A tabela **já existia**: `sales_leads`, com 13 colunas (`name`, `email`,
+`phone`, `school_name`, `city`, `state`, `plan_interest`, `source`, `status`,
+`notes`…). O formulário já escrevia nela — mas só pelo servidor, e a página no
+GitHub Pages não tem servidor.
+
+Verificado no projeto: `sales_leads` tem a política `sales_leads_public_insert`
+(WITH CHECK true) para `anon`. Ou seja, o próprio esquema já permite o contato
+ser gravado direto pela página publicada. Confirmei com um INSERT real e apaguei
+o registro de teste depois (a tabela voltou a 0 linhas).
+
+CNPJ e mensagem livre não têm coluna própria; criar coluna exigiria migration.
+Vão para `notes`, rotulados (`CNPJ: … | Mensagem: …`), que é o campo que o painel
+Master já exibe.
+
+### O WhatsApp: o limite que não dá para fingir
+
+**Não existe "mandar mensagem de WhatsApp" por link.** `wa.me` abre a conversa;
+quem aperta enviar é a pessoa. Envio automático exige a API oficial (WhatsApp
+Business / Cloud API da Meta ou Twilio): número verificado, token permanente e
+template aprovado. Nada disso existe neste projeto.
+
+Então a entrega é em duas camadas, e a tela diz qual delas aconteceu:
+
+| Camada | Estado | O que o usuário vê |
+|---|---|---|
+| Lead gravado em `sales_leads` | **automático e verificado** | "Contato registrado com sucesso" |
+| Aviso no WhatsApp | automático **só** com `WHATSAPP_TOKEN` + `WHATSAPP_PHONE_ID` | botão "Avisar a equipe no WhatsApp" com a mensagem pronta |
+
+O número (41) 99511-9914 está em `WHATSAPP_COMERCIAL` (`5541995119914`),
+sobrescrevível por `VITE_WHATSAPP_COMERCIAL`. O link é montado com
+`encodeURIComponent` — sem isso, um `&` no nome cortava a mensagem no meio.
+
+Se você configurar a Cloud API depois, `whatsappNotify.ts` já sabe enviar e
+reportar a falha real; a tela não muda.
+
+### Máscaras: CPF, CNPJ e telefone no mesmo lugar
+
+O cadastro formatava o CPF à mão e o telefone com ~40 linhas de `if` que
+produziam `(41) 9 9999-9999` e aceitavam `+55` sem normalizar — o que fazia o
+**mesmo número existir em dois formatos**, quebrando a checagem de duplicidade.
+
+`src/lib/formMasks.ts` centraliza. Regra: a tela mostra máscara, o banco recebe
+só dígitos.
+
+```
+11111111111        → 111.111.111-11        (progressivo: 111.1 → 111.111.1 → …)
+41999999999        → (41) 99999-9999
+4133334444         → (41) 3333-4444
++55 41 99999-9999  → (41) 99999-9999       → envio: 41999999999
+12345678000199     → 12.345.678/0001-99
+```
+
+### Design: o formulário subiu para o topo
+
+Antes o contato ficava **depois** dos preços, dos add-ons e do bloco de
+cobrança — quem quer falar com a equipe desiste de rolar antes de chegar nele.
+Agora:
+
+- bloco de contato **acima dos planos**, com cabeçalho, ícone e atalho de WhatsApp;
+- cada campo com `label` (não só placeholder), ícone e mensagem de erro própria;
+- 9 campos com máscara/validação: nome, e-mail, telefone, CNPJ, escola, cidade,
+  UF, plano e mensagem;
+- preços com valor mensal em destaque e total anual como texto secundário;
+- estados de erro legíveis ("O catálogo de preços não pôde ser carregado agora" em
+  vez de `TypeError: fetch failed`);
+- botão "Quero uma proposta" com estado de envio.
+
+### O erro "Catálogo indisponível · HTTP 404"
+
+Era o mesmo padrão de sempre: a tela só sabia falar com `/api/saas/plans`, rota
+que não existe no GitHub Pages. O catálogo **é público no banco**
+(`plans_public_read`: `is_public AND is_active`). Agora
+`carregarCatalogoDePlanos` tenta o servidor e cai para a leitura direta.
+
+Dois cuidados que entraram junto:
+
+1. **timeout** — sem `signal`, um servidor que aceita a conexão e não responde
+   deixava a promessa pendurada. No teste com jsdom isso apareceu como
+   "Carregando planos…" eterno. Agora 8 s e erro claro.
+2. **sem inventar número** — as vagas de "Escola Fundadora" dependem de quantas
+   escolas aderiram, dado que a RLS não abre. O caminho público devolve 0 e a UI
+   simplesmente não mostra o selo, em vez de anunciar "3 vagas" sem saber.
+
+### O "erro que fala do servidor do eloEscola"
+
+Duas mensagens culpavam "o servidor do eloEscola" — jargão de quem construiu, não
+de quem usa. Para o usuário, isso parece "o sistema caiu".
+
+| Onde | Antes | Agora |
+|---|---|---|
+| `Login.tsx` (acesso institucional) | "precisa do servidor do eloEscola. Esta versão é a demonstração estática" | explica que a senha só funciona na versão com servidor **e por que** (o banco não aceita leitura de senha pelo navegador) + a saída (visitante ou secretaria) |
+
+### Provas
+
+| Suíte | Verificações |
+|---|---|
+| `test-round40-contato-e-mascaras.mjs` | **33** — máscaras executadas com entradas reais, link do WhatsApp conferido como URL, campos com `label`, contato antes dos planos, timeout, mensagem de login |
+| `test-round40-lead-integracao.mjs` | **14** — `server.ts` real contra PostgREST simulado: grava `sales_leads`, telefone só com dígitos, e-mail em minúsculas, CNPJ/mensagem em `notes`, e-mail inválido não grava |
+
+Tela renderizada com jsdom (URL `davidribeiromuller.github.io`, sem rede), o que
+prova os estados reais: contato antes dos planos, 9 rótulos, aviso de erro
+exibido, **nenhuma** mensagem técnica vazando, "Carregando" resolvido.
+
+Banco real: INSERT em `sales_leads` aceito com a política pública, registro de
+teste removido em seguida (tabela de volta a 0).
+
+**Bateria: 38 suítes, 0 falhas.** `tsc` limpo, `npm run build` OK, sem chave
+secreta no bundle (número do WhatsApp aparece 1×, como esperado).
+
+### Ainda depende de você
+
+- **deploy**: o que está publicado é o merge do PR #41. O commit da rodada 39
+  (`f5e5874`) e este ficam na branch até você mandar abrir/mergear o PR. **É por
+  isso que o painel do ADM ainda não aparece** na conta publicada: as correções
+  do login ainda não estão no ar.
+- **WhatsApp automático**: só com `WHATSAPP_TOKEN` + `WHATSAPP_PHONE_ID`.

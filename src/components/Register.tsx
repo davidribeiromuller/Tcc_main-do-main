@@ -3,7 +3,13 @@ import { motion } from "motion/react";
 import { User2, Mail, Lock, CreditCard, Calendar, Users, Building, ArrowLeft, Phone, AtSign } from "lucide-react";
 import { SCHOOLS_LIST } from "../lib/schools.ts";
 import { fetchJsonApi } from "../lib/staticHosting.ts";
-import { formatCPF, validateSchoolRegistration } from "../lib/schoolAccountValidation.ts";
+import { validateSchoolRegistration } from "../lib/schoolAccountValidation.ts";
+import {
+  formatarCPF,
+  formatarTelefone,
+  telefoneParaEnvio,
+  telefoneValido,
+} from "../lib/formMasks.ts";
 
 interface RegisterProps {
   onRegister: (data: {
@@ -61,73 +67,23 @@ export default function Register({
     if (error) setError("");
   };
 
-  // Apply CPF Mask
+  /*
+    RODADA 40 — máscaras vindas de `lib/formMasks.ts`.
+
+    Antes, o CPF era formatado aqui à mão e o telefone com ~40 linhas de `if`
+    que produziam `(41) 9 9999-9999` e aceitavam `+55` sem normalizar. O
+    resultado: o MESMO número gravado em dois formatos, quebrando a checagem de
+    telefone duplicado, e um CPF que o usuário não conseguia conferir.
+
+    Agora o campo guarda o valor mascarado e o envio usa `telefoneParaEnvio`
+    (só dígitos). O usuário vê `(41) 99999-9999`; o banco recebe `41999999999`.
+  */
   const handleCpfChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let value = e.target.value.replace(/\D/g, "");
-    if (value.length > 11) value = value.slice(0, 11);
-    
-    if (value.length > 9) {
-      value = value.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
-    } else if (value.length > 6) {
-      value = value.replace(/(\d{3})(\d{3})(\d{1,3})/, "$1.$2.$3");
-    } else if (value.length > 3) {
-      value = value.replace(/(\d{3})(\d{1,3})/, "$1.$2");
-    }
-    setCpf(value);
+    setCpf(formatarCPF(e.target.value));
   };
 
-  // Smart Phone Formatting (+XX XX X XXXX-XXXX or (XX) XXXXX-XXXX)
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    const isInternational = val.startsWith("+");
-    let clean = val.replace(/\D/g, "");
-    
-    if (isInternational || clean.length > 11) {
-      if (clean.length > 13) clean = clean.slice(0, 13);
-      let res = "+";
-      if (clean.length > 0) {
-        res += clean.substring(0, 2);
-      }
-      if (clean.length > 2) {
-        res += " " + clean.substring(2, 4);
-      }
-      if (clean.length > 4) {
-        res += " " + clean.substring(4, 5);
-      }
-      if (clean.length > 5) {
-        res += " " + clean.substring(5, 9);
-      }
-      if (clean.length > 9) {
-        res += "-" + clean.substring(9, 13);
-      }
-      setPhone(res);
-    } else {
-      if (clean.length > 11) clean = clean.slice(0, 11);
-      let res = "";
-      if (clean.length > 0) {
-        res += "(" + clean.substring(0, 2);
-      }
-      if (clean.length > 2) {
-        res += ") " + clean.substring(2, 7);
-      }
-      if (clean.length > 7) {
-        res += "-" + clean.substring(7, 11);
-      }
-      setPhone(res);
-    }
-  };
-
-  // Apply date mask
-  const handleBirthdateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let value = e.target.value.replace(/\D/g, "");
-    if (value.length > 8) value = value.slice(0, 8);
-    
-    if (value.length > 4) {
-      value = value.replace(/(\d{2})(\d{2})(\d{4})/, "$1/$2/$3");
-    } else if (value.length > 2) {
-      value = value.replace(/(\d{2})(\d{1,2})/, "$1/$2");
-    }
-    setBirthdate(value);
+    setPhone(formatarTelefone(e.target.value));
   };
 
   const handleNext = async () => {
@@ -159,8 +115,10 @@ export default function Register({
       return;
     }
 
-    const cleanPhoneDigits = phone.replace(/\D/g, "");
-    if (cleanPhoneDigits.length > 0 && cleanPhoneDigits.length < 8) {
+    // Só dígitos, sem o +55: é o formato que o banco guarda e que a checagem
+    // de duplicidade compara.
+    const cleanPhoneDigits = telefoneParaEnvio(phone);
+    if (cleanPhoneDigits.length > 0 && !telefoneValido(cleanPhoneDigits)) {
       setError("Por favor, informe um telefone válido com DDD!");
       return;
     }
@@ -252,8 +210,10 @@ export default function Register({
         nome: nome.trim(),
         email: email.trim().toLowerCase(),
         password,
-        cpf: cpf.trim(),
-        phone: phone.trim(),
+        // CPF formatado é aceito pelo banco (é text), mas normalizamos para
+        // dígitos: o vínculo escolar compara por dígitos.
+        cpf: cpf.replace(/\D/g, ""),
+        phone: telefoneParaEnvio(phone),
         birthdate: birthdate.trim(),
         gender: gender || "Não informado",
         role: "Aluno",

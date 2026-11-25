@@ -180,6 +180,7 @@ import {
   updateSalesLeadStatus,
   getPlatformOverview
 } from "./src/lib/saasStore.ts";
+import { avisarEquipeNoWhatsApp, whatsappAutomaticoConfigurado } from "./src/lib/whatsappNotify.ts";
 
 /**
  * Carrega a linha de `users` correspondente ao token, do jeito que o resto do
@@ -4200,24 +4201,69 @@ async function startServer() {
     res.json({ partners: publicPartners });
   });
 
+  /*
+    RODADA 40 — contato comercial: grava o lead e avisa a equipe.
+
+    O formulário passou a coletar CNPJ, cidade e mensagem livre, e o autor
+    pediu que a equipe seja avisada no WhatsApp (41) 99511-9914.
+
+    Duas coisas precisam ficar claras na resposta, porque são diferentes:
+      - `saved`: o lead está na tabela `sales_leads` (isso o app faz sozinho);
+      - `whatsapp`: se o aviso saiu automaticamente. Só sai com
+        `WHATSAPP_TOKEN` + `WHATSAPP_PHONE_ID` (Cloud API oficial). Sem eles,
+        devolvemos `link` com a mensagem pronta — e a tela pede o clique, em
+        vez de dizer "enviado" sem ter enviado.
+  */
   app.post("/api/saas/leads", publicWriteLimiter(), async (req, res) => {
     if (!isSaasBackendConfigured()) return saasUnavailable(res);
-    const { name, email, phone, schoolName, city, state, planInterest, source } = req.body || {};
+    const { name, email, phone, schoolName, city, state, planInterest, source, cnpj, message } =
+      req.body || {};
     if (!name || !email) {
       return res.status(400).json({ error: "Informe nome e e-mail para que possamos entrar em contato." });
     }
+    const emailLimpo = String(email).trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailLimpo)) {
+      return res.status(400).json({ error: "E-mail inválido. Confira o endereço digitado." });
+    }
+
     const result = await createSalesLead({
       name: String(name).trim(),
-      email: String(email).trim().toLowerCase(),
-      phone: phone ? String(phone).trim() : undefined,
+      email: emailLimpo,
+      phone: phone ? String(phone).replace(/\D/g, "") : undefined,
       schoolName: schoolName ? String(schoolName).trim() : undefined,
       city: city ? String(city).trim() : undefined,
       state: state ? String(state).trim() : undefined,
       planInterest: planInterest ? String(planInterest).trim() : undefined,
       source: source ? String(source).trim() : "site",
+      cnpj: cnpj ? String(cnpj).trim() : undefined,
+      message: message ? String(message).trim() : undefined,
     });
     if (result.error) return res.status(500).json({ error: result.error });
-    res.status(201).json({ success: true, message: "Recebemos seu contato. Nossa equipe responde em até 1 dia útil." });
+
+    const aviso = await avisarEquipeNoWhatsApp({
+      nome: String(name).trim(),
+      email: emailLimpo,
+      telefone: phone ? String(phone).replace(/\D/g, "") : undefined,
+      escola: schoolName ? String(schoolName).trim() : undefined,
+      cnpj: cnpj ? String(cnpj).trim() : undefined,
+      cidade: city ? String(city).trim() : undefined,
+      uf: state ? String(state).trim() : undefined,
+      plano: planInterest ? String(planInterest).trim() : undefined,
+      mensagem: message ? String(message).trim() : undefined,
+    });
+
+    res.status(201).json({
+      success: true,
+      saved: true,
+      message: "Recebemos seu contato. Nossa equipe responde em até 1 dia útil.",
+      whatsapp: {
+        entregue: aviso.entregue,
+        automatico: whatsappAutomaticoConfigurado(),
+        canal: aviso.canal,
+        link: aviso.link,
+        motivo: aviso.motivo || null,
+      },
+    });
   });
 
   // -----------------------------------------------------------------------

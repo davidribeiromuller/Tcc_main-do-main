@@ -205,3 +205,36 @@ SESSION_SECRET=<openssl rand -hex 32>
 Sem os três, o painel no endereço público responde `503 SAAS_NOT_CONFIGURED`
 (mensagem na tela, não lista vazia). O passo a passo está em
 `DEPLOY_SERVIDOR.md`.
+
+---
+
+## WhatsApp automático (rodada 40) — o que falta e o que já funciona
+
+| Item | Estado |
+|---|---|
+| Lead gravado em `sales_leads` | ✅ automático (política `sales_leads_public_insert`) |
+| Link `wa.me/5541995119914` com mensagem pronta | ✅ automático |
+| **Envio automático da mensagem** | ⛔ exige API oficial |
+
+Para o envio automático, configure no servidor:
+
+```bash
+WHATSAPP_TOKEN=...        # token permanente do WhatsApp Business (Meta)
+WHATSAPP_PHONE_ID=...     # ID do número remetente (Cloud API)
+WHATSAPP_EQUIPE=5541995119914   # opcional: destinatário dos avisos
+```
+
+Sem esses valores, `POST /api/saas/leads` responde:
+
+```json
+{ "saved": true,
+  "whatsapp": { "entregue": false, "automatico": false, "canal": "link",
+                "link": "https://wa.me/5541995119914?text=..." } }
+```
+
+Ou seja: o contato **não se perde** (está no banco), e a tela oferece o clique
+em vez de dizer "enviado" sem ter enviado.
+
+> Twilio aceita WhatsApp (`whatsapp:+55...`) com `TWILIO_*`, mas exige que o
+> número seja habilitado no console da Twilio. O código já trata o caso de
+> provedor recusar: registra a falha e devolve o link.
