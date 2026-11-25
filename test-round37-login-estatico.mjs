@@ -54,7 +54,16 @@ const { user, error } = await authenticateUserDirectInSupabase("diretoria@helena
 check("login NÃO devolve usuário", user === null);
 check("NÃO mostra 'Erro de conexão ao consultar banco de dados'",
   !String(error).includes("Erro de conexão ao consultar banco"));
-check("mensagem é honesta (cita o servidor)", /servidor do eloEscola/.test(String(error)), String(error));
+/*
+  RODADA 41 — a intenção nunca foi exigir a palavra "servidor do eloEscola"
+  (que aliás virou o jargão reclamado pelo usuário). É: a mensagem precisa
+  dizer que aquele endereço não faz login por senha e apontar a saída.
+*/
+check(
+  "mensagem é honesta (explica o limite e aponta a saída)",
+  /servidor ativo/.test(String(error)) && /visitante/i.test(String(error)),
+  String(error)
+);
 check("mensagem orienta o visitante", /visitante/.test(String(error)));
 console.log(`\n  mensagem exibida ao usuário:\n  "${error}"`);
 

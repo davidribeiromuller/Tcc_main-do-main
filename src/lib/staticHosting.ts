@@ -13,6 +13,8 @@
  * novos e nunca chegava no fallback direto do Supabase.
  */
 
+import { mensagemPrecisaServidor } from "./mensagensServidor.ts";
+
 /**
  * Detecta se estamos servidos por um host estático sem backend Express.
  *
@@ -173,7 +175,10 @@ export async function mensagemDeErroDaApi(
   padrao: string
 ): Promise<string> {
   if (!res) {
-    return "O servidor do eloEscola não respondeu. Esta função exige backend (na versão estática ela não existe).";
+    return (
+      "Esta função não está disponível na versão publicada do eloEscola. " +
+      "Ela grava dados, e o site publicado só consegue ler."
+    );
   }
 
   let corpo: any = null;

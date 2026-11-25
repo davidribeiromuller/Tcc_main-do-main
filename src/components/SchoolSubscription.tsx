@@ -22,6 +22,7 @@ import {
   type AccessState,
 } from "../lib/subscription.ts";
 import { fetchPlansCatalog, type PlansCatalog, type PlanView } from "../lib/plansService.ts";
+import { mensagemPrecisaServidor, avisoCurtoPrecisaServidor } from "../lib/mensagensServidor.ts";
 
 interface SchoolMeResponse {
   school: { id: string; slug: string; name: string; city?: string | null; status: string };
@@ -117,7 +118,10 @@ export default function SchoolSubscription({ onNavigate, onShowToast }: Props) {
 
       if (!res) {
         setError(
-          "A área \"Minha assinatura\" precisa do servidor do eloEscola. Esta é uma hospedagem estática de demonstração."
+          mensagemPrecisaServidor(
+            "A área Minha assinatura",
+            "Você continua podendo consultar os planos."
+          )
         );
         return;
       }
@@ -166,7 +170,7 @@ export default function SchoolSubscription({ onNavigate, onShowToast }: Props) {
         body: JSON.stringify({ planId, billingCycle: cycle }),
       });
       if (!res) {
-        onShowToast?.("Alteração de plano exige o servidor do eloEscola.", "error");
+        onShowToast?.(avisoCurtoPrecisaServidor("Alteração de plano"), "error");
         return;
       }
       const body = await res.json().catch(() => ({}));

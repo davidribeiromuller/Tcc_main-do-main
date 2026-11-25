@@ -12,6 +12,7 @@ import {
   ANNUAL_DISCOUNT_PERCENT,
   FOUNDER_DISCOUNT_PERCENT,
 } from "./subscription.ts";
+import { mensagemPrecisaServidor } from "./mensagensServidor.ts";
 
 export interface PlanView {
   id: string;
@@ -87,7 +88,10 @@ export async function fetchPlansCatalog(): Promise<CatalogResult> {
         error:
           data.error ||
           (res.status === 503
-            ? "O catálogo comercial precisa do servidor do eloEscola (não está disponível nesta hospedagem estática)."
+            ? mensagemPrecisaServidor(
+                "O catálogo de preços",
+                "Use o formulário de contato para receber a proposta."
+              )
             : `Não foi possível carregar os planos (HTTP ${res.status}).`),
       };
     }

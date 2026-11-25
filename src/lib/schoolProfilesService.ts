@@ -1,6 +1,7 @@
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase.ts";
 import { fetchJsonApi, fetchJsonApiWithAuth } from "./staticHosting.ts";
 import { ARAUCARIA_SCHOOLS, type SchoolProfile } from "./schoolsData.ts";
+import { mensagemPrecisaServidor } from "./mensagensServidor.ts";
 
 /**
  * Perfis institucionais editáveis (rodada 26).
@@ -255,7 +256,7 @@ export async function salvarPerfilEscola(
       return {
         perfil: null,
         error: new Error(
-          "A edição das informações da escola exige o servidor do eloEscola (não funciona na versão estática)."
+          mensagemPrecisaServidor("A edição das informações da escola")
         ),
       };
     }
