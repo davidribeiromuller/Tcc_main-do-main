@@ -1281,6 +1281,35 @@ export default function App() {
           showToast(message, "error");
           return;
         }
+      } else if (res && res.status >= 500) {
+        /*
+          RODADA 42 — 503 do servidor NÃO pode cair no cache local.
+
+          Antes, uma resposta 503 ("o servidor não alcança o banco") não
+          entrava em nenhum dos ramos: o código seguia para o caminho 2
+          (consulta direta, bloqueada pela RLS) e depois para o caminho 3 — o
+          cache JSON com usuários de demonstração. Resultado: com o banco fora,
+          o login "funcionava" com dados que não existem, e o painel do ADM
+          abria vazio ou com gente fictícia.
+
+          Agora paramos aqui e mostramos o motivo real, que o servidor já
+          mandou pronto (inclui a dica de que a conta não foi apagada).
+        */
+        const corpo = (await res.json().catch(() => ({}))) as any;
+        const message =
+          corpo?.error ||
+          "O servidor está no ar, mas não conseguiu falar com o banco de dados. Tente novamente em instantes.";
+        setLoginError(message);
+        showToast(message, "error");
+        return;
+      } else if (res && res.status === 400) {
+        // 400 = pedido inválido (e-mail/senha ausentes). Também não é caso de
+        // tentar outro caminho: insistir só esconde o problema.
+        const corpo = (await res.json().catch(() => ({}))) as any;
+        const message = corpo?.error || "Preencha e-mail e senha para entrar.";
+        setLoginError(message);
+        showToast(message, "error");
+        return;
       }
 
       // 2. Autenticação direta no banco Supabase (Ambiente GitHub Pages / Produção)

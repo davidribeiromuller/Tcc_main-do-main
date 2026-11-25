@@ -53,7 +53,27 @@ export async function fetchJsonApi(
   input: string,
   init?: RequestInit
 ): Promise<Response | null> {
-  if (isStaticHosting()) return null;
+  /*
+    RODADA 42 — não rejeitar pelo NOME do host.
+
+    Antes: `if (isStaticHosting()) return null;` em primeira linha. Isso
+    derrubava TODA chamada de API só porque o domínio era github.io/netlify/
+    vercel — inclusive quando havia um servidor real servindo `/api` ali. O
+    resultado prático era o app inteiro em "somente leitura" mesmo com backend
+    funcionando, que é exatamente a queixa do autor do TCC.
+
+    Agora medimos: a requisição é feita e:
+      · JSON          → é servidor de verdade, devolve a resposta;
+      · HTML/404/erro → não há backend, devolve `null` (o chamador segue o
+                        caminho alternativo, sem quebrar).
+    A checagem de conteúdo já existia logo abaixo e é suficiente — ela reprova
+    o HTML-200 do fallback de SPA sem depender do domínio.
+  */
+    if (isStaticHosting() && window.localStorage?.getItem("ELOESCOLA_FORCE_STATIC") === "1") {
+      // Override manual preservado: serve para reproduzir o modo estático em
+      // qualquer host durante testes.
+      return null;
+    }
 
   let res: Response;
   try {
