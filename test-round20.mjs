@@ -56,14 +56,7 @@ console.log("\n=== 1. Rolagem é do documento, não da tela (rodada 21) ===\n");
 
 console.log("=== 2. O painel é conteúdo comum, não `absolute` ===\n");
 {
-  /*
-    RODADA 39 — o limite de 700 caracteres entre a condição e `<AdminPanel` foi
-    para 4000. A rodada 39 inseriu uma guarda de permissão ANTES do painel
-    (quem não é Chefe/Funcionário vê o motivo em vez de uma tela que responde
-    403 em tudo). A intenção do teste — o wrapper ser `app-screen` e não
-    `absolute inset-0` — continua a mesma; só a distância textual mudou.
-  */
-  const blocoPainel = app.match(/activeScreen === "admin" && \(([\s\S]{0,4000}?)<AdminPanel/);
+  const blocoPainel = app.match(/activeScreen === "admin" && \(([\s\S]{0,700}?)<AdminPanel/);
   ok("wrapper do painel encontrado", blocoPainel !== null);
   const cls = blocoPainel?.[1] || "";
   ok("wrapper não usa `absolute inset-0`", !/absolute inset-0/.test(cls));

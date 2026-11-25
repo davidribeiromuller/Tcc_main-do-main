@@ -15,7 +15,6 @@ import {
 import { Event, User, EventAttendanceAuthorization } from "../types.ts";
 import SignatureCanvas from "./SignatureCanvas.tsx";
 import { safeParseJsonResponse } from "../lib/apiResilience.ts";
-import { getStoredSessionToken } from "../lib/staticHosting.ts";
 
 interface ParentalAuthorizationModalProps {
   isOpen: boolean;
@@ -111,24 +110,13 @@ export const ParentalAuthorizationModal: React.FC<ParentalAuthorizationModalProp
         },
       };
 
-      // A rota passou a exigir sessão (Parte 2 da auditoria): sem o Bearer ela
-      // responde 401 e o responsável veria apenas "erro ao registrar".
-      const token = getStoredSessionToken();
       const response = await fetch(`/api/events/${event.id}/authorizations`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(payload),
       });
-
-      if (response.status === 401) {
-        throw new Error("Sua sessão expirou. Entre novamente para registrar a autorização.");
-      }
-      if (response.status === 403) {
-        throw new Error("Somente o próprio estudante ou a equipe da escola pode registrar esta autorização.");
-      }
 
       const parsed = await safeParseJsonResponse<{
         success: boolean;

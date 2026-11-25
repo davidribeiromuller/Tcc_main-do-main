@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import { isChefeAdmin } from "../lib/permissions.ts";
 import { SchoolProfile, SchoolNewsItem, SchoolEventItem } from "../lib/schoolsData";
 import { mergeNews, saveNews } from "../lib/schoolNewsStore.ts";
 import { safeParseJsonResponse } from "../lib/apiResilience.ts";
@@ -60,7 +59,7 @@ export const SchoolDetail: React.FC<SchoolDetailProps> = ({
   const [submittingEvent, setSubmittingEvent] = useState(false);
 
   // Permission checks
-  const isChefe = isChefeAdmin(currentUser);
+  const isChefe = currentUser?.email === "davidribeiromuller2009@gmail.com" || currentUser?.email === "diretoria@helenawysocki.com";
   const isThisSchool = currentUser?.role === "Escola" && (
     (currentUser as any).escolaId === school.id ||
     currentUser?.uid === `inst-${school.slug.replace(/-/g, "")}`

@@ -440,21 +440,7 @@ export default function WelcomeScreen({
           <p className="font-medium tracking-wide">
             eloEscola • Portal Integrado de Oportunidades Escolares e Culturais • Araucária & Curitiba / PR
           </p>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-[#55805f] dark:text-[#7ba884]">
-            <button
-              onClick={() => onNavigate("plans")}
-              className="hover:underline cursor-pointer font-semibold"
-            >
-              Planos para escolas
-            </button>
-            <span aria-hidden="true">•</span>
-            <button
-              onClick={() => onNavigate("privacy")}
-              className="hover:underline cursor-pointer"
-            >
-              Privacidade e dados (LGPD)
-            </button>
-            <span aria-hidden="true">•</span>
+          <div className="flex items-center gap-4 text-[10px] text-[#55805f] dark:text-[#7ba884]">
             <button
               onClick={() => onNavigate("contact")}
               className="hover:underline cursor-pointer"

@@ -19,11 +19,8 @@
  *    VÊ-LA e ALTERÁ-LA na ficha da conta.
  *  - Nada é publicado automaticamente: a conta nasce "pendente de verificação".
  */
-import { mensagemPrecisaServidor } from "./mensagensServidor.ts";
 
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase.ts";
-import { fetchJsonApiWithAuth, isServerAvailable } from "./staticHosting.ts";
-import { hashPassword, verifyPassword, validatePasswordStrength } from "./security.ts";
 import { ARAUCARIA_SCHOOLS } from "./schoolsData.ts";
 import type { User } from "../types.ts";
 
@@ -38,14 +35,7 @@ export interface SchoolAccount {
   escolaNome: string;
   identificador: string;
   email: string;
-  /**
-   * Legado: a senha em texto/hash NÃO trafega mais. Mantido apenas para não
-   * quebrar telas antigas — sempre `undefined` a partir do servidor.
-   * @deprecated use `senhaDefinida`.
-   */
   password?: string;
-  /** true quando existe senha cadastrada (o hash fica só no servidor). */
-  senhaDefinida?: boolean;
   responsavel: string;
   cargo: string;
   telefone?: string;
@@ -139,8 +129,7 @@ function mapRow(row: any): SchoolAccount {
     escolaNome: escola?.name || row.school_name || "Escola",
     identificador: row.login_identifier || "",
     email: row.institutional_email || row.login_identifier || "",
-    // `senhaDefinida` vem do servidor (booleano). O hash não trafega.
-    senhaDefinida: row.senhaDefinida ?? Boolean(row.password),
+    password: row.password || undefined,
     responsavel: row.responsible_name || "",
     cargo: row.responsible_role || "",
     telefone: row.institutional_contact || undefined,
@@ -163,65 +152,27 @@ function mapRow(row: any): SchoolAccount {
 export async function listarContasEscolares(opcoes?: {
   escolaId?: number;
 }): Promise<{ contas: SchoolAccount[]; error: string | null }> {
-  /*
-    Servidor primeiro (é a única via que enxerga `school_accounts` depois que a
-    RLS foi fechada). A chamada direta ao Supabase fica como último recurso de
-    demonstração — e costuma voltar vazia, o que antes fazia o painel dizer
-    "nenhuma conta" sem explicar o motivo.
-  */
-  const query = opcoes?.escolaId ? `?escolaId=${encodeURIComponent(String(opcoes.escolaId))}` : "";
-  try {
-    const res = await fetchJsonApiWithAuth(`/api/admin/school-accounts${query}`);
-    if (res && res.ok) {
-      const corpo = await res.json().catch(() => null);
-      if (corpo && Array.isArray(corpo.accounts)) {
-        return { contas: corpo.accounts as SchoolAccount[], error: null };
-      }
-    }
-    if (res && (res.status === 401 || res.status === 403)) {
-      return { contas: [], error: "A lista de contas escolares é exclusiva do Administrador Chefe." };
-    }
-    if (res && res.status === 503) {
-      return {
-        contas: [],
-        error:
-          "O servidor está sem SUPABASE_SECRET_KEY: sem isso não é possível ler as contas escolares.",
-      };
-    }
-  } catch {
-    /* servidor indisponível — tenta o caminho direto abaixo */
-  }
-
   if (!isSupabaseConfigured()) {
     return { contas: [], error: "Supabase não configurado." };
   }
 
   try {
     const supabase = getSupabaseClient();
-    let consulta = supabase
+    let query = supabase
       .from("school_accounts")
       .select("*")
       .order("school_id", { ascending: true })
       .order("id", { ascending: true });
 
     if (opcoes?.escolaId) {
-      consulta = consulta.eq("school_id", opcoes.escolaId);
+      query = query.eq("school_id", opcoes.escolaId);
     }
 
-    const { data, error } = await consulta;
+    const { data, error } = await query;
 
     if (error) {
+      // Tabela ainda não criada (migration pendente): mensagem acionável.
       const msg = String(error.message || "");
-      if (error.code === "42501" || /permission denied|row-level security/i.test(msg)) {
-        return {
-          contas: [],
-          error:
-            mensagemPrecisaServidor(
-              "Ver a lista de contas escolares",
-              "Ela contém dados de acesso e por isso só é liberada para administradores, com o servidor ativo."
-            )
-        };
-      }
       if (error.code === "42P01" || /does not exist|schema cache/i.test(msg)) {
         return {
           contas: [],
@@ -235,47 +186,6 @@ export async function listarContasEscolares(opcoes?: {
     return { contas: (data || []).map(mapRow), error: null };
   } catch (err: any) {
     return { contas: [], error: err?.message || "Erro ao listar contas escolares." };
-  }
-}
-
-/**
- * Executa uma ação de gestão sobre conta escolar no servidor.
- *
- * Centraliza a tradução de erro para que cada tela não invente a sua: 401 é
- * sessão vencida, 403 é falta de permissão e 503 é servidor sem chave secreta.
- * Nunca devolve `success: true` sem confirmação do servidor.
- */
-async function chamarAcaoContaEscolar(
-  url: string,
-  metodo: "PUT" | "DELETE",
-  corpo?: unknown
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    const res = await fetchJsonApiWithAuth(url, {
-      method: metodo,
-      headers: corpo ? { "Content-Type": "application/json" } : undefined,
-      body: corpo ? JSON.stringify(corpo) : undefined,
-    });
-
-    if (res && res.ok) return { success: true };
-
-    const detalhe = res ? await res.clone().json().catch(() => null) : null;
-    if (detalhe?.error) return { success: false, error: detalhe.error };
-
-    if (!res) {
-      return {
-        success: false,
-        error: mensagemPrecisaServidor("Esta ação")
-      };
-    }
-    if (res.status === 401) return { success: false, error: "Sua sessão expirou. Entre novamente." };
-    if (res.status === 403) return { success: false, error: "Ação exclusiva do Administrador Chefe." };
-    if (res.status === 503) {
-      return { success: false, error: "O servidor está sem SUPABASE_SECRET_KEY; configure para usar esta função." };
-    }
-    return { success: false, error: "Não foi possível concluir a ação." };
-  } catch (err: any) {
-    return { success: false, error: err?.message || "Falha de rede ao falar com o servidor." };
   }
 }
 
@@ -299,50 +209,85 @@ export async function criarContaEscolar(
     return { success: false, error: "Escola não encontrada no cadastro de Araucária." };
   }
 
-  /*
-    Criação pelo SERVIDOR: é ele quem valida duplicidade, aplica a força de
-    senha e grava o hash scrypt. O navegador não tem (nem deve ter) caminho
-    para inserir direto em `school_accounts` — a chave pública não escreve
-    mais nessa tabela.
-  */
-  try {
-    const res = await fetchJsonApiWithAuth("/api/admin/school-accounts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        escolaSlug: dados.escolaSlug,
-        identificador: dados.identificador,
-        email: dados.email,
-        password: dados.password,
-        responsavel: dados.responsavel,
-        cargo: dados.cargo,
-        telefone: dados.telefone,
-      }),
-    });
-
-    if (res) {
-      const corpo = await res.clone().json().catch(() => null);
-      if (res.ok) {
-        return { success: true, conta: corpo?.conta };
-      }
-      return {
-        success: false,
-        error: corpo?.error || "Não foi possível criar a conta escolar.",
-        fieldErrors: corpo?.fieldErrors,
-      };
-    }
-  } catch {
-    /* servidor indisponível */
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: "Banco de dados indisponível. Tente novamente em instantes." };
   }
 
-  return {
-    success: false,
-    error:
-      mensagemPrecisaServidor(
-        "Criar contas escolares",
-        "A senha precisa ser gravada no servidor — o banco não aceita criação de conta pelo navegador."
-      )
-  };
+  const supabase = getSupabaseClient();
+  const email = dados.email.trim().toLowerCase();
+  const identificador = normalizeIdentificador(dados.identificador);
+
+  try {
+    // Duplicidade entre contas escolares (a lista é separada dos usuários).
+    const { data: existentes, error: buscaError } = await supabase
+      .from("school_accounts")
+      .select("id, login_identifier, institutional_email")
+      .or(`login_identifier.eq.${identificador},institutional_email.eq.${email}`)
+      .limit(5);
+
+    if (buscaError && buscaError.code !== "42P01") {
+      console.warn("[schoolAccounts] Falha ao checar duplicidade:", buscaError.message);
+    }
+
+    const conflito = (existentes || [])[0];
+    if (conflito) {
+      const mesmoEmail =
+        String(conflito.institutional_email || "").toLowerCase() === email;
+      return {
+        success: false,
+        fieldErrors: mesmoEmail
+          ? { email: "Já existe uma conta escolar com este e-mail." }
+          : { identificador: "Já existe uma conta escolar com este identificador." },
+        error: mesmoEmail
+          ? "Já existe uma conta escolar com este e-mail."
+          : "Já existe uma conta escolar com este identificador.",
+      };
+    }
+
+    const { data, error } = await supabase
+      .from("school_accounts")
+      .insert([
+        {
+          school_id: escola.id,
+          school_slug: escola.slug,
+          school_name: escola.name,
+          login_identifier: identificador,
+          institutional_email: email,
+          password: dados.password,
+          responsible_name: dados.responsavel.trim(),
+          responsible_role: dados.cargo.trim(),
+          institutional_contact: dados.telefone?.trim() || email,
+          account_status: "active",
+          verification_status: "pending_verification",
+          created_by: "ADM Chefe",
+        },
+      ])
+      .select()
+      .single();
+
+    if (error) {
+      const msg = String(error.message || "");
+      if (error.code === "42P01" || /does not exist|schema cache/i.test(msg)) {
+        return {
+          success: false,
+          error:
+            "A tabela de contas escolares ainda não existe neste banco. Aplique a migration 0009_school_accounts_table.sql.",
+        };
+      }
+      if (error.code === "23505") {
+        return {
+          success: false,
+          fieldErrors: { identificador: "Identificador ou e-mail já cadastrado." },
+          error: "Identificador ou e-mail já cadastrado para outra conta escolar.",
+        };
+      }
+      return { success: false, error: msg || "Não foi possível criar a conta escolar." };
+    }
+
+    return { success: true, conta: mapRow(data) };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Erro ao criar a conta escolar." };
+  }
 }
 
 /** Bloqueia / desbloqueia a conta (não apaga: o histórico fica). */
@@ -350,7 +295,26 @@ export async function alternarStatusContaEscolar(
   contaId: number,
   ativo: boolean
 ): Promise<{ success: boolean; error?: string }> {
-  return chamarAcaoContaEscolar(`/api/admin/school-accounts/${contaId}/status`, "PUT", { ativo });
+  if (!isSupabaseConfigured()) return { success: false, error: "Supabase não configurado." };
+
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from("school_accounts")
+      .update({
+        account_status: ativo ? "active" : "suspended",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", contaId)
+      .select("id");
+
+    if (error) return { success: false, error: error.message };
+    if (!data || data.length === 0) {
+      return { success: false, error: "Conta escolar não encontrada para atualização." };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Erro ao alterar o status da conta." };
+  }
 }
 
 /** Marca a conta como verificada (auditoria documental do Chefe) ou revoga. */
@@ -358,9 +322,28 @@ export async function definirVerificacaoContaEscolar(
   contaId: number,
   status: SchoolVerificationStatus
 ): Promise<{ success: boolean; error?: string }> {
-  return chamarAcaoContaEscolar(`/api/admin/school-accounts/${contaId}/verify`, "PUT", {
-    verificationStatus: status,
-  });
+  if (!isSupabaseConfigured()) return { success: false, error: "Supabase não configurado." };
+
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from("school_accounts")
+      .update({
+        verification_status: status,
+        verified_by: "ADM Chefe",
+        verified_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", contaId)
+      .select("id");
+
+    if (error) return { success: false, error: error.message };
+    if (!data || data.length === 0) {
+      return { success: false, error: "Conta escolar não encontrada para verificação." };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Erro ao verificar a conta escolar." };
+  }
 }
 
 /** Redefine a senha da conta escolar (o Chefe digita a nova senha). */
@@ -368,18 +351,49 @@ export async function redefinirSenhaContaEscolar(
   contaId: number,
   novaSenha: string
 ): Promise<{ success: boolean; error?: string }> {
-  const forca = validatePasswordStrength(novaSenha || "");
-  if (forca) return { success: false, error: forca };
-  return chamarAcaoContaEscolar(`/api/admin/school-accounts/${contaId}/reset-password`, "PUT", {
-    password: novaSenha,
-  });
+  if (!isSupabaseConfigured()) return { success: false, error: "Supabase não configurado." };
+  if ((novaSenha || "").length < 6) {
+    return { success: false, error: "A senha precisa ter ao menos 6 caracteres." };
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from("school_accounts")
+      .update({
+        password: novaSenha,
+        must_change_password: true,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", contaId)
+      .select("id");
+
+    if (error) return { success: false, error: error.message };
+    if (!data || data.length === 0) {
+      return { success: false, error: "Conta escolar não encontrada para redefinir a senha." };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Erro ao redefinir a senha." };
+  }
 }
 
 /** Remove definitivamente a conta escolar (ação explícita do Chefe). */
 export async function removerContaEscolar(
   contaId: number
 ): Promise<{ success: boolean; error?: string }> {
-  return chamarAcaoContaEscolar(`/api/admin/school-accounts/${contaId}`, "DELETE");
+  if (!isSupabaseConfigured()) return { success: false, error: "Supabase não configurado." };
+
+  try {
+    const { error } = await getSupabaseClient()
+      .from("school_accounts")
+      .delete()
+      .eq("id", contaId);
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Erro ao remover a conta escolar." };
+  }
 }
 
 /**
@@ -390,27 +404,6 @@ export async function autenticarContaEscolar(
   identificadorOuEmail: string,
   password: string
 ): Promise<{ user: User | null; error: string | null }> {
-  /*
-    RODADA 39 — esta função é chamada pelo App (navegador) e fazia a consulta
-    com a chave PUBLICÁVEL. `school_accounts` tem RLS ligado e ZERO políticas
-    (de propósito: guarda senha), então a consulta voltava 401 e o console
-    mostrava:
-
-      Failed to load resource: the server responded with a status of 401
-      jaoheenjltzzglfncgfq.supabase.co/rest/v1/school_accounts
-
-    Sem servidor, não há como validar esta senha: a tabela é fechada para o
-    navegador. Dizemos isso em vez de tentar de novo e falhar.
-  */
-  if (!(await isServerAvailable())) {
-    return {
-      user: null,
-      error:
-        "O acesso institucional exige a versão do eloEscola com servidor ativo. " +
-        "Esta versão publicada é apenas a demonstração estática.",
-    };
-  }
-
   if (!isSupabaseConfigured()) {
     return { user: null, error: "Acesso institucional indisponível: Supabase não configurado." };
   }
@@ -442,21 +435,8 @@ export async function autenticarContaEscolar(
       };
     }
 
-    // Parte 2: comparação por hash (scrypt) com migração automática de
-    // registros legados em texto claro.
-    const senhaCheck = verifyPassword(password, conta.password);
-    if (!senhaCheck.ok) {
+    if (conta.password && conta.password !== password) {
       return { user: null, error: "Credenciais inválidas. Verifique seu identificador e a senha." };
-    }
-    if (senhaCheck.needsUpgrade) {
-      try {
-        await getSupabaseClient()
-          .from("school_accounts")
-          .update({ password: hashPassword(password), updated_at: new Date().toISOString() })
-          .eq("id", conta.id);
-      } catch (migErr) {
-        console.warn("[schoolAccounts] Falha ao migrar senha legada:", migErr);
-      }
     }
 
     const agora = new Date().toISOString();

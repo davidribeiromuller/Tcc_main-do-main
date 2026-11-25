@@ -14,7 +14,7 @@ import {
 import { EventAttendanceAuthorization } from "../types.ts";
 import AuthorizationReceiptModal from "./AuthorizationReceiptModal.tsx";
 import { safeParseJsonResponse } from "../lib/apiResilience.ts";
-import { fetchJsonApiWithAuth } from "../lib/staticHosting.ts";
+import { fetchJsonApi } from "../lib/staticHosting.ts";
 
 interface EventAuthorizationsModalProps {
   isOpen: boolean;
@@ -38,7 +38,7 @@ export const EventAuthorizationsModal: React.FC<EventAuthorizationsModalProps> =
     if (isOpen && eventId) {
       setIsLoading(true);
       // `fetchJsonApi` evita o 404 no GitHub Pages (rota só existe no Express).
-      fetchJsonApiWithAuth(`/api/events/${eventId}/authorizations`)
+      fetchJsonApi(`/api/events/${eventId}/authorizations`)
         .then((res) => (res ? safeParseJsonResponse<EventAttendanceAuthorization[]>(res) : { data: [] }))
         .then((parsed) => {
           if (parsed.data && Array.isArray(parsed.data)) {

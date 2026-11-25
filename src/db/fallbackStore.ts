@@ -8,15 +8,6 @@ import {
   EventArchiveLog
 } from '../types.ts';
 import { EVENT_RETENTION_DAYS } from '../lib/eventLifecycle.ts';
-import { verifyPassword, hashPassword } from '../lib/security.ts';
-
-/**
- * Parte 2 da auditoria: as contas de demonstração da loja em memória tinham
- * senha fixa em texto claro (`senha123`, `senhaInstitucional123`) versionada no
- * código. Agora elas nascem SEM senha utilizável: ninguém autentica com elas
- * até um administrador definir uma senha pelo painel (que grava hash scrypt).
- */
-const LEGACY_PLACEHOLDER_HASH: string | undefined = undefined;
 import fs from 'fs';
 import path from 'path';
 
@@ -216,7 +207,7 @@ const defaultInstitutionalAccounts: InstitutionalAccount[] = [
     escolaNome: "Colégio Estadual Professor Júlio Szymanski",
     identificador: "escola.szymanski",
     email: "aucjulio@seed.pr.gov.br",
-    password: LEGACY_PLACEHOLDER_HASH,
+    password: "senhaInstitucional123",
     status: "ativo",
     criadoPor: "ADM Chefe",
     createdAt: new Date().toISOString(),
@@ -228,7 +219,7 @@ const defaultInstitutionalAccounts: InstitutionalAccount[] = [
     escolaNome: "Colégio Estadual Professora Helena Wysocki",
     identificador: "escola.wysocki",
     email: "auchelena@seed.pr.gov.br",
-    password: LEGACY_PLACEHOLDER_HASH,
+    password: "senhaInstitucional123",
     status: "ativo",
     criadoPor: "ADM Chefe",
     createdAt: new Date().toISOString(),
@@ -240,7 +231,7 @@ const defaultInstitutionalAccounts: InstitutionalAccount[] = [
     escolaNome: "Colégio Estadual Professora Maria da Graça Siqueira Silva e Lima",
     identificador: "escola.mariadagraca",
     email: "aucmariagssilva@seed.pr.gov.br",
-    password: LEGACY_PLACEHOLDER_HASH,
+    password: "senhaInstitucional123",
     status: "ativo",
     criadoPor: "ADM Chefe",
     createdAt: new Date().toISOString()
@@ -251,7 +242,7 @@ const defaultInstitutionalAccounts: InstitutionalAccount[] = [
     escolaNome: "Colégio Estadual do Campo Guajuvira",
     identificador: "escola.guajuvira",
     email: "aucguajuvira@seed.pr.gov.br",
-    password: LEGACY_PLACEHOLDER_HASH,
+    password: "senhaInstitucional123",
     status: "ativo",
     criadoPor: "ADM Chefe",
     createdAt: new Date().toISOString()
@@ -262,7 +253,7 @@ const defaultInstitutionalAccounts: InstitutionalAccount[] = [
     escolaNome: "Colégio Estadual Professora Marilze da Luz Brand",
     identificador: "escola.marilze",
     email: "aucmarilzeluzbrand@seed.pr.gov.br",
-    password: LEGACY_PLACEHOLDER_HASH,
+    password: "senhaInstitucional123",
     status: "ativo",
     criadoPor: "ADM Chefe",
     createdAt: new Date().toISOString()
@@ -273,7 +264,7 @@ const defaultInstitutionalAccounts: InstitutionalAccount[] = [
     escolaNome: "Colégio Estadual Cecília Meireles",
     identificador: "escola.cecilia",
     email: "aucceciliameireles@seed.pr.gov.br",
-    password: LEGACY_PLACEHOLDER_HASH,
+    password: "senhaInstitucional123",
     status: "ativo",
     criadoPor: "ADM Chefe",
     createdAt: new Date().toISOString()
@@ -287,7 +278,7 @@ const defaultUsers: User[] = [
     uid: "fallback-admin-uid",
     nome: "Administração eloEscola",
     email: "diretoria@helenawysocki.com",
-    password: LEGACY_PLACEHOLDER_HASH,
+    password: "senha123",
     foto_perfil: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
     provider: "local",
     role: "Diretor",
@@ -302,7 +293,7 @@ const defaultUsers: User[] = [
     uid: "fallback-funcionario-uid",
     nome: "Coordenação Pedagógica",
     email: "funcionario@helenawysocki.com",
-    password: LEGACY_PLACEHOLDER_HASH,
+    password: "senha123",
     foto_perfil: "https://images.unsplash.com/photo-1537368910025-700350fe46c7?w=150",
     provider: "local",
     role: "Funcionário",
@@ -394,49 +385,20 @@ try {
       }
     }
 
-    // Parte 2: privilégio não é concedido por e-mail fixo. A promoção passa
-    // pelo painel administrativo (com auditoria) ou BOOTSTRAP_ADMIN_*.
-    //
-    // RODADA 35: o BOOTSTRAP_ADMIN_* só era lido no caminho Postgres. Quem
-    // rodava no modo fallback (sem DATABASE_URL) ficava SEM nenhuma conta de
-    // administrador — e, como o painel ADM exige Chefe, ele era inalcançável.
-    // Agora o mesmo par de variáveis cria o administrador inicial também aqui.
-    const bootstrapEmail = (process.env.BOOTSTRAP_ADMIN_EMAIL || '').trim().toLowerCase();
-    const bootstrapPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD || '';
-
-    if (bootstrapEmail && bootstrapPassword.length >= 8) {
-      const existente = fallbackUsers.find(
-        (u) => (u.email || '').trim().toLowerCase() === bootstrapEmail
-      );
-
-      if (!existente) {
-        fallbackUsers.unshift({
-          id: 1,
-          uid: 'bootstrap-admin-uid',
-          nome: 'Administrador inicial',
-          email: bootstrapEmail,
-          password: hashPassword(bootstrapPassword),
-          foto_perfil: '',
-          provider: 'local',
-          role: 'Diretor',
-          ativo: true,
-          isAdmin: true,
-          institution: process.env.BOOTSTRAP_ADMIN_INSTITUTION || 'eloEscola',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        } as any);
-        updated = true;
-        console.info('[Database] Administrador inicial criado (modo fallback) a partir de BOOTSTRAP_ADMIN_*.');
-      } else if (!existente.password) {
-        // Conta já existia sem senha utilizável (era o caso dos dados demo).
-        existente.password = hashPassword(bootstrapPassword);
-        existente.role = 'Diretor';
-        existente.isAdmin = true;
-        updated = true;
-        console.info('[Database] Senha do administrador inicial definida (modo fallback).');
+    // Safety: ensure director emails have admin privileges enabled
+    for (const u of fallbackUsers) {
+      const cleanEmail = (u.email || '').toLowerCase().trim();
+      if (cleanEmail === 'diretoria@helenawysocki.com' || cleanEmail === 'davidribeiromuller2009@gmail.com') {
+        if (!u.isAdmin) {
+          u.isAdmin = true;
+          updated = true;
+        }
+        if (u.role !== 'Diretor') {
+          u.role = 'Diretor';
+          updated = true;
+        }
       }
     }
-
 
     if (updated) {
       fs.writeFileSync(USERS_FILE, JSON.stringify(fallbackUsers, null, 2), 'utf-8');
@@ -851,22 +813,6 @@ export function recordParticipationFallback(
   return newPart;
 }
 
-/**
- * Remove a presença/inscrição de um usuário em um evento.
- * Devolve `true` só quando um registro foi realmente removido — assim a rota
- * consegue responder 404 em vez de "sucesso" mentiroso.
- */
-export function removeParticipationFallback(userId: string | number, eventId: number): boolean {
-  const strUserId = String(userId);
-  const index = fallbackParticipations.findIndex(
-    p => String(p.userId) === strUserId && Number(p.eventId) === Number(eventId)
-  );
-  if (index < 0) return false;
-  fallbackParticipations.splice(index, 1);
-  saveParticipations();
-  return true;
-}
-
 export function listUserParticipationsFallback(userId: string | number): EventParticipationHistory[] {
   const strUserId = String(userId);
   return fallbackParticipations.filter(p => String(p.userId) === strUserId);
@@ -1086,9 +1032,7 @@ export function authenticateInstitutionalAccountFallback(identificadorOrEmail: s
     throw new Error("A verificação desta instituição foi recusada pelo Chefe ADM.");
   }
 
-  // Hash scrypt quando já migrado; texto claro legado continua aceito e é
-  // convertido na próxima redefinição (ver redefinirSenhaContaEscolar).
-  if (account.password && verifyPassword(password, account.password).ok) {
+  if (account.password === password) {
     account.lastLogin = new Date().toISOString();
     account.lastLoginAt = account.lastLogin;
     saveInstitutionalAccounts();
@@ -1170,8 +1114,7 @@ export function getOrCreateUserFallback(
   }
 
   const cleanEmail = (email || '').toLowerCase().trim();
-  // Parte 2: nenhum privilégio inferido de e-mail no cadastro.
-  const isDirector = false;
+  const isDirector = cleanEmail === 'diretoria@helenawysocki.com' || cleanEmail === 'davidribeiromuller2009@gmail.com';
 
   const newUser: User = {
     id: Math.floor(Math.random() * 10000) + 1000,

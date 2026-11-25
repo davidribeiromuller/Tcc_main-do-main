@@ -1,27 +1,4 @@
-/**
- * Eventos excluídos / retenção — via SERVIDOR.
- *
- * ## Por que este arquivo mudou
- *
- * A versão anterior falava direto com o Supabase usando a chave publicável.
- * Depois da Parte 2 da auditoria, `deleted_events` continua com políticas
- * públicas (`qual: true`), só que `users` e `school_accounts` passaram a ser
- * fechadas — e a consequência prática era pior do que parece: **qualquer
- * visitante, sem login, podia ler, restaurar e apagar definitivamente o
- * histórico de eventos excluídos da rede inteira** (inclusive descarregar o
- * `payload` completo de cada evento).
- *
- * A regra correta é a que o painel já declara na interface: exclusão
- * definitiva é ação do Administrador Chefe. Então a escrita (restaurar,
- * expurgar, rodar a rotina) passou a exigir sessão de administrador **no
- * servidor**, que é quem decide o papel — não o navegador.
- *
- * O Supabase segue como caminho de LEITURA quando o servidor não responde
- * (hospedagem estática / demonstração), porque `deleted_events` é uma tabela
- * sem dado pessoal — só snapshot de evento público.
- */
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase.ts";
-import { fetchJsonApiWithAuth, mensagemDeErroDaApi } from "./staticHosting.ts";
 
 /**
  * Item da lista de eventos excluídos (`deleted_events`).
@@ -57,110 +34,142 @@ function mapDeletedEvent(row: any): DeletedEvent {
   };
 }
 
-
 /**
  * Lista os eventos excluídos (ainda não restaurados), mais recentes primeiro.
- *
- * Ordem de tentativa: servidor (com sessão) → Supabase público → vazio.
  */
 export async function fetchDeletedEvents(options?: {
   includeRestored?: boolean;
   limit?: number;
 }): Promise<{ events: DeletedEvent[]; error: any }> {
-  const query = new URLSearchParams();
-  if (options?.includeRestored) query.set("includeRestored", "1");
-  if (options?.limit) query.set("limit", String(options.limit));
-
-  try {
-    const res = await fetchJsonApiWithAuth(`/api/events/deleted?${query.toString()}`);
-    if (res && res.ok) {
-      const corpo = await res.json().catch(() => null);
-      if (corpo && Array.isArray(corpo.events)) {
-        return { events: corpo.events.map(mapDeletedEvent), error: null };
-      }
-    }
-    if (res && !res.ok) {
-      return { events: [], error: new Error(await mensagemDeErroDaApi(res, "Acesso restrito.")) };
-    }
-  } catch {
-    /* servidor indisponível — tenta o caminho público abaixo */
-  }
-
-  // Caminho de leitura pública (somente leitura; não permite escrever).
   if (!isSupabaseConfigured()) {
-    return { events: [], error: new Error("Servidor e Supabase indisponíveis.") };
+    return { events: [], error: new Error("Supabase não configurado no cliente") };
   }
 
   try {
     const supabase = getSupabaseClient();
-    let consulta = supabase
+    let query = supabase
       .from("deleted_events")
       .select("*")
       .order("deleted_at", { ascending: false })
       .limit(options?.limit ?? 200);
 
     if (!options?.includeRestored) {
-      consulta = consulta.is("restored_at", null);
+      query = query.is("restored_at", null);
     }
 
-    const { data, error } = await consulta;
+    const { data, error } = await query;
     if (error) return { events: [], error };
 
-    return { events: (data ?? []).map(mapDeletedEvent), error: null };
+    return {
+      events: (data ?? []).map(mapDeletedEvent),
+      error: null,
+    };
   } catch (err) {
     return { events: [], error: err };
   }
 }
 
 /**
- * Restaura um evento excluído: o servidor recria o registro na tabela de
- * origem a partir do snapshot e marca `restored_at`.
+ * Restaura um evento excluído: recria o registro na tabela de origem
+ * a partir do snapshot salvo e marca `restored_at`.
  *
- * Não há fallback no navegador de propósito: escrever no histórico sem
- * autorização verificada seria justamente o furo que esta mudança fecha.
+ * A restauração é sempre recuperável e reversível pelo próprio histórico.
  */
 export async function restoreDeletedEvent(
   deletedEventId: number
 ): Promise<{ success: boolean; restoredEventId?: number; error: any }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: new Error("Supabase não configurado") };
+  }
+
+  const supabase = getSupabaseClient();
+
   try {
-    const res = await fetchJsonApiWithAuth(`/api/events/deleted/${deletedEventId}/restore`, {
-      method: "POST",
-    });
-    if (res && res.ok) {
-      const corpo = await res.json().catch(() => ({}));
-      return {
-        success: true,
-        restoredEventId: corpo?.restoredEventId ?? undefined,
-        error: null,
-      };
+    // 1. Buscar o snapshot
+    const { data: rows, error: fetchError } = await supabase
+      .from("deleted_events")
+      .select("*")
+      .eq("id", deletedEventId)
+      .limit(1);
+
+    if (fetchError) return { success: false, error: fetchError };
+    if (!rows || rows.length === 0) {
+      return { success: false, error: new Error("Evento excluído não encontrado") };
     }
-    return { success: false, error: new Error(await mensagemDeErroDaApi(res, "Não foi possível restaurar o evento.")) };
-  } catch (err: any) {
-    return { success: false, error: new Error(err?.message || "Servidor indisponível para restaurar o evento.") };
+
+    const registro = rows[0] as any;
+    if (registro.restored_at) {
+      return { success: false, error: new Error("Este evento já foi restaurado") };
+    }
+
+    const payload: Record<string, any> = registro.payload ?? {};
+
+    // 2. Reinserir na tabela de origem, removendo o id original e
+    //    limpando as flags de arquivamento para que volte a aparecer no app.
+    const novoRegistro: Record<string, any> = { ...payload };
+    delete novoRegistro.id;
+    delete novoRegistro.archived_at;
+    delete novoRegistro.ends_at;
+    if ("is_archived" in novoRegistro) novoRegistro.is_archived = false;
+    if ("status" in novoRegistro) novoRegistro.status = "ativo";
+
+    const { data: inserted, error: insertError } = await supabase
+      .from(registro.source_table)
+      .insert(novoRegistro)
+      .select("id")
+      .limit(1);
+
+    if (insertError) return { success: false, error: insertError };
+
+    const restoredEventId = inserted?.[0]?.id ?? null;
+
+    // 3. Marcar como restaurado na lista de excluídos
+    const { error: updateError } = await supabase
+      .from("deleted_events")
+      .update({
+        restored_at: new Date().toISOString(),
+        restored_event_id: restoredEventId,
+      })
+      .eq("id", deletedEventId);
+
+    if (updateError) {
+      // O evento já foi recriado; registramos o problema mas não desfazemos.
+      console.warn("[deletedEvents] Falha ao marcar restored_at:", updateError);
+    }
+
+    return { success: true, restoredEventId: restoredEventId ?? undefined, error: null };
+  } catch (err) {
+    return { success: false, error: err };
   }
 }
 
 /**
  * Exclusão definitiva: remove o item da lista de eventos excluídos.
- * Ação irreversível, sempre manual e exclusiva do Chefe.
+ * Ação irreversível e sempre manual.
  */
 export async function purgeDeletedEvent(
   deletedEventId: number
 ): Promise<{ success: boolean; error: any }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: new Error("Supabase não configurado") };
+  }
+
   try {
-    const res = await fetchJsonApiWithAuth(`/api/events/deleted/${deletedEventId}`, {
-      method: "DELETE",
-    });
-    if (res && res.ok) return { success: true, error: null };
-    return { success: false, error: new Error(await mensagemDeErroDaApi(res, "Não foi possível excluir definitivamente.")) };
-  } catch (err: any) {
-    return { success: false, error: new Error(err?.message || "Servidor indisponível.") };
+    const supabase = getSupabaseClient();
+    const { error } = await supabase
+      .from("deleted_events")
+      .delete()
+      .eq("id", deletedEventId);
+
+    return { success: !error, error: error ?? null };
+  } catch (err) {
+    return { success: false, error: err };
   }
 }
 
 /**
- * Executa a rotina de retenção manualmente (arquiva eventos encerrados há
- * mais de 3 dias e move para o histórico de excluídos).
+ * Executa a rotina de retenção manualmente (útil para a carga inicial única
+ * e para testes no painel admin). Depende da função SQL da migration 0004.
  */
 export async function runRetentionRoutine(): Promise<{
   success: boolean;
@@ -168,19 +177,24 @@ export async function runRetentionRoutine(): Promise<{
   message?: string;
   error: any;
 }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: new Error("Supabase não configurado") };
+  }
+
   try {
-    const res = await fetchJsonApiWithAuth("/api/events/cleanup-expired", { method: "POST" });
-    if (res && res.ok) {
-      const corpo = await res.json().catch(() => ({}));
-      return {
-        success: true,
-        total: corpo?.prunedCount ?? 0,
-        message: corpo?.message,
-        error: null,
-      };
-    }
-    return { success: false, error: new Error(await mensagemDeErroDaApi(res, "Não foi possível executar a rotina de retenção.")) };
-  } catch (err: any) {
-    return { success: false, error: new Error(err?.message || "Servidor indisponível.") };
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase.rpc("archive_expired_events_routine");
+
+    if (error) return { success: false, error };
+
+    const resultado = (data ?? {}) as any;
+    return {
+      success: resultado.success === true,
+      total: resultado.total ?? 0,
+      message: resultado.message,
+      error: resultado.success === true ? null : new Error(resultado.error ?? "Falha na rotina"),
+    };
+  } catch (err) {
+    return { success: false, error: err };
   }
 }

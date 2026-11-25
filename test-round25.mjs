@@ -108,15 +108,9 @@ console.log("=== 6. Aprovação é atômica e segura ===\n");
 {
   ok("reivindica a solicitação com status condicionado",
     /\.eq\("status", "pending"\)/.test(servico));
-  // Rodada 35: a aprovação migrou para o servidor. O requisito continua o
-  // mesmo — reivindicar ANTES de aplicar e reverter se a aplicação falhar.
-  const servidor = readFileSync("./server.ts", "utf8");
-  ok("aplica só depois de reivindicar",
-    /\.update\(\{ status: "approved"[\s\S]{0,1200}from\("users"\)[\s\S]{0,200}\.update\(/.test(servidor));
+  ok("aplica só depois de reivindicar", /updateUserDirectInSupabase\(solicitacao\.userId/.test(servico));
   ok("reverte para pending se a aplicação falhar",
-    /status: "pending", reviewed_at: null, reviewed_by: null/.test(servidor));
-  ok("cliente delega a aprovação ao servidor",
-    /\/api\/admin\/profile-requests\/\$\{solicitacao\.id\}\/approve/.test(servico));
+    /status: "pending", reviewed_at: null, reviewed_by: null/.test(servico));
   ok("rejeição não toca no perfil",
     !/updateUserDirectInSupabase[\s\S]{0,200}rejeitarSolicitacaoDePerfil/.test(servico));
   ok("impede aprovar duas vezes",
