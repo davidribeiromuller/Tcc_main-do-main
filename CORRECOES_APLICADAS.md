@@ -2711,3 +2711,125 @@ de usabilidade por uma falha de segurança.
 - `test-round37` e `test-round40` tiveram asserções ajustadas: elas exigiam a
   frase antiga literal — a intenção era "explicar o limite e apontar a saída",
   não "citar o jargão".
+
+---
+
+## §42 — ADM de volta, sem o "somente leitura", e a aba de preços
+
+Pedidos:
+
+> "remova essa 'estática' ASAP, QUERO MEU ADM DE VOLTA JUNTO COM AS
+> FUNCIONALIDADES QUE TIROU AO EXECUTAR O PROMPT DA MONETIZAÇÃO."
+> "volte com o servidor antigo onde funcionava, sem esse servidor ativo só para
+> leitura, quero que funcione de verdade que nem estava."
+> "crie uma página para essa opção no dashboard com a tabela de preços
+> pré-estabelecidas anteriormente."
+
+### O bloqueio que eu mesmo coloquei — e que estava errado
+
+Duas linhas minhas impediam o app de tentar falar com o servidor:
+
+```ts
+// src/lib/staticHosting.ts — ANTES
+if (isStaticHosting()) return null;   // derrubava TODA chamada /api
+
+// src/lib/usersService.ts — ANTES
+if (isStaticHosting() || !(await isServerAvailable())) { ... }
+```
+
+`isStaticHosting()` decide pelo **nome do domínio** (`github.io`, `netlify.app`,
+`vercel.app`). A intenção era evitar o HTML-200 do fallback de SPA, mas o efeito
+colateral foi grande: **um servidor real no mesmo domínio também era ignorado**.
+O app inteiro virava "somente leitura" — inclusive o ADM, mesmo com o Express no
+ar. Foi o que o autor do TCC relatou.
+
+Agora a decisão é **empírica**, não por palpite de domínio:
+
+| Antes | Agora |
+|---|---|
+| domínio `github.io` → nem tenta | pergunta a `/api/health`; se responde JSON, usa |
+| HTML de SPA → quebra o parse | HTML → trata como "sem backend" e segue o plano B |
+| ADM bloqueado no domínio estático | ADM funciona em qualquer host com servidor |
+
+O override manual `ELOESCOLA_FORCE_STATIC=1` foi preservado — é ele que permite
+reproduzir o modo estático em teste, sem depender do domínio.
+
+### Bug sério encontrado no caminho
+
+Quando o servidor respondia **503** ("não alcanço o banco"), `App.tsx` não tinha
+ramo para esse status: a execução seguia para o caminho de consulta direta e
+depois para o **cache JSON com usuários de demonstração**. Resultado: com o banco
+fora, o login "funcionava" com dados fictícios e o painel abria vazio ou com
+gente que não existe. Agora 5xx e 400 param e mostram o motivo real que o
+servidor mandou — que já inclui a dica de que a conta **não** foi apagada.
+
+### Aba "Planos e preços" no painel Master
+
+Nova aba em `src/components/PlansManagementTab.tsx`, ao lado de Assinaturas.
+
+- Lê de `GET /api/master/plans`, grava em `PUT /api/master/plans/:id`.
+- **Zero preço no código do frontend.** O teste falha se `14900`, `29900` ou
+  `69900` aparecerem no arquivo: são valores do banco, e uma cópia local faria o
+  painel e a página pública divergirem em silêncio.
+- Tabela com mensal, anual, taxa de implantação, limites (alunos/unidades/admins)
+  e situação (ativo/público).
+- O desconto anual é **calculado** a partir dos dois preços, e fica vermelho se a
+  anuidade sair mais cara que 12 mensalidades.
+- Grade de recursos por plano e lista de add-ons, ambos vindos do banco.
+- Edição inline com máscara de moeda (`149,00` ↔ `14900`).
+- Sem servidor, explica o que fazer em vez de mostrar tabela vazia.
+
+### Provas (servidor real, PostgREST simulado)
+
+`test-round42-servidor-e-planos.mjs` — **23/23**:
+
+| Verificação | Resultado |
+|---|---|
+| login `professor@gmail.com` / `1234` | 200, usuário id 759 (Diretor) |
+| token de sessão assinado, != senha | ok |
+| senha errada | 401 |
+| conta `ativo=false` | 403 com "desativada" |
+| `/api/master/plans` sem token | 401 |
+| token inventado | 401/403 |
+| preços do banco | 14900 / 29900 / 69900 |
+| anuidade Escola | 322920 (299×12 −10%) |
+| `PUT` grava | PATCH em `plans`, sem `id`/`features` |
+
+Manual, contra o servidor de pé:
+
+```
+POST /api/auth/local-login-password  → 200 {"user":{"nome":"professor","id":759},"token":"elo1.…"}
+GET  /api/master/plans               → comunidade R$ 149,00 · escola R$ 299,00 · rede R$ 699,00
+PUT  /api/master/plans/escola {34900}→ success
+GET  /api/saas/plans (público)       → escola R$ 349,00   ← a página pública acompanhou
+```
+
+**40 suítes verdes, tsc limpo, build OK.**
+
+### O que continua verdade, sem rodeio
+
+O site publicado em `davidribeiromuller.github.io` **não tem servidor**: é o
+GitHub Pages servindo HTML estático. Nenhuma mudança de código cria um processo
+Node lá. O que consertei foi o app **não se autobloquear** quando houver servidor.
+
+Para o ADM abrir no endereço público, é preciso uma hospedagem que rode
+`server.ts` — Railway/Render/Fly (Dockerfile e `railway.json` já prontos) ou
+qualquer VPS. Enquanto isso, `npm run dev` / `npm start` na máquina local roda o
+ADM completo: o `.env` já está configurado com as credenciais do projeto.
+
+Configuração necessária no ambiente do servidor (além de `SUPABASE_*`):
+
+```bash
+PLATFORM_OWNER_EMAILS=professor@gmail.com   # sem isto o Master responde 503
+SESSION_SECRET=<32+ caracteres aleatórios>  # assina a sessão; trocar desloga todos
+```
+
+### O pedido de "funcionalidades que a monetização tirou"
+
+Auditei o que a rodada de monetização restringiu. Nada foi removido do código:
+as telas do ADM (usuários, eventos, contas escolares, perfis, auditoria,
+participações) seguem inteiras em `AdminPanel.tsx` (5002 linhas) e nas rotas
+`/api/*`. O que existe é **autorização** — `canAccessAdminPanel` exige papel de
+Chefe/Funcionário e as rotas exigem sessão válida. Se alguma tela específica
+estiver sumindo para a sua conta, me diga qual e com qual login: é recorte de
+permissão, não remoção, e o ajuste é pontual.

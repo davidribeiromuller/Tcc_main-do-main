@@ -400,9 +400,21 @@ export async function authenticateUserDirectInSupabase(
     chave publicável nunca vai funcionar e só produz o erro enganoso de
     "conexão" que aparecia na tela de login.
   */
-  const semServidor =
-    isStaticHosting() || !(await isServerAvailable());
-  if (semServidor) {
+  /*
+    RODADA 42 — o bloqueio por NOME DE HOST saiu.
+
+    Antes: `isStaticHosting()` reprovava a consulta só porque o domínio era
+    github.io/netlify/vercel, mesmo quando havia um servidor real atendendo
+    `/api` naquele mesmo domínio. O autor do TCC relatou justamente isso:
+    "volte com o servidor antigo onde funcionava, sem esse servidor ativo só
+    para leitura".
+
+    A decisão agora é EMPÍRICA: perguntamos ao servidor (`/api/health`). Se ele
+    responde JSON, existe backend e o login por senha é tentado de verdade —
+    independentemente do domínio. Se não responde, paramos com a mensagem
+    honesta (e o motivo continua sendo técnico, não uma suposição).
+  */
+  if (!(await isServerAvailable())) {
     return { user: null, error: MENSAGEM_LOGIN_EXIGE_SERVIDOR };
   }
 
@@ -432,12 +444,24 @@ export async function authenticateUserDirectInSupabase(
     }
 
     if (!data || data.length === 0) {
-      // Parte 2: o diretório `users` deixou de ser legível com a chave pública
-      // (continha senhas). Em hospedagem estática (GitHub Pages) não há backend
-      // para autenticar com segurança — a mensagem precisa ser honesta.
+      /*
+        Zero linhas tem DUAS causas possíveis, e elas não se confundem:
+
+          · a conta não existe / o e-mail está diferente → "não encontrado";
+          · a RLS bloqueou a leitura porque quem consulta é `anon` → o
+            navegador não tem permissão para ver a tabela de senhas.
+
+        Antes eu decidia pelo NOME do host (`isStaticHosting()`), então num
+        domínio "estático" com servidor real a mensagem mentia. Agora a decisão
+        continua precisa, mas pelo motivo certo: se a sonda confirma que não há
+        servidor, o caminho é o visitante; se há servidor, é a RLS — e aí a
+        resposta honesta é que o login acontece pelo servidor (`/api/auth/...`),
+        não por consulta direta no navegador.
+      */
+      const semServidor = !(await isServerAvailable());
       return {
         user: null,
-        error: isStaticHosting()
+        error: semServidor
           ? mensagemPrecisaServidor(
               "O login com senha",
               "Nesta versão publicada, entre como visitante."
