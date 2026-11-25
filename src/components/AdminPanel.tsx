@@ -33,9 +33,7 @@ import {
   AlertTriangle,
   Crown,
   Eye,
-  EyeOff,
   KeyRound,
-  Copy,
   Pencil,
   CalendarPlus,
   Table as TableIcon,
@@ -216,10 +214,6 @@ export default function AdminPanel({
   const [eventViewMode, setEventViewMode] = useState<"table" | "cards">("cards");
   const [filterRole, setFilterRole] = useState<"all" | "aluno" | "funcionario" | "chefe" | "ativos" | "bloqueados">("all");
   const [userToViewDetails, setUserToViewDetails] = useState<User | null>(null);
-  /** Senha visível na ficha do usuário (admin decide revelar). */
-  const [showUserPassword, setShowUserPassword] = useState(false);
-  /** Confirmação visual do botão "copiar senha". */
-  const [passwordCopied, setPasswordCopied] = useState(false);
   /** Nova senha digitada pelo Chefe Admin ao editar a ficha. */
   const [novaSenha, setNovaSenha] = useState("");
   /** Mostra o campo de edição de senha. */
@@ -246,6 +240,72 @@ export default function AdminPanel({
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   /** Erro de leitura das contas escolares (ex.: tabela ainda não criada). */
   const [erroContasEscolares, setErroContasEscolares] = useState<string | null>(null);
+  /**
+   * Diagnóstico do painel.
+   *
+   * O sintoma que originou esta rodada foi "o painel abre sem nenhum dado".
+   * Havia três causas possíveis, e a tela não distinguia nenhuma delas:
+   *  (a) não existe nenhum usuário cadastrado — estado vazio legítimo;
+   *  (b) o servidor respondeu 401/403 — sessão vencida ou sem permissão;
+   *  (c) o servidor respondeu 503 — sem `SUPABASE_SECRET_KEY`, ou seja, não
+   *      há como ler o banco a partir daqui.
+   * Mostrar isso na cara evita horas de "parece que perdeu os dados".
+   */
+  const [diagnosticoPainel, setDiagnosticoPainel] = useState<{
+    gravidade: "erro" | "aviso";
+    titulo: string;
+    detalhe: string;
+  } | null>(null);
+
+  React.useEffect(() => {
+    let cancelado = false;
+
+    const checar = async () => {
+      try {
+        const res = await fetchJsonApi("/api/db-status");
+        if (cancelado) return;
+
+        // Sem resposta JSON = servidor Express ausente (GitHub Pages).
+        if (!res) {
+          if (!isChefe && !isFuncionario) return;
+          setDiagnosticoPainel({
+            gravidade: "aviso",
+            titulo: "Modo estático: leitura limitada",
+            detalhe:
+              "Esta versão roda sem servidor. A lista de usuários, contas escolares e histórico ficam indisponíveis aqui porque o banco não aceita mais leitura desses dados por chave pública.",
+          });
+          return;
+        }
+
+        /*
+          A base do projeto tem DOIS caminhos de persistência:
+           - Postgres/Drizzle (opcional): alimenta `/api/db-status`;
+           - Supabase (obrigatório para o painel): exige SUPABASE_SECRET_KEY.
+          O que interessa aqui é o segundo: sem a chave secreta o servidor não
+          lê `users`, `school_accounts` nem o histórico — e cada aba apareceria
+          vazia sem explicar nada.
+        */
+        const corpo = await res.json().catch(() => null);
+        const supabaseIndisponivel =
+          corpo && (corpo.saasConfigured === false || corpo.supabaseAdmin === false);
+        if (supabaseIndisponivel) {
+          setDiagnosticoPainel({
+            gravidade: "erro",
+            titulo: "Servidor sem acesso ao banco de dados",
+            detalhe:
+              "Configure SUPABASE_SECRET_KEY no servidor. Sem ela o painel não consegue listar usuários, contas escolares, sugestões nem o histórico de eventos excluídos.",
+          });
+        }
+      } catch {
+        /* diagnóstico é best effort */
+      }
+    };
+
+    void checar();
+    return () => {
+      cancelado = true;
+    };
+  }, [isChefe, isFuncionario]);
   const [showAddInstModal, setShowAddInstModal] = useState(false);
   const [accountToResetPassword, setAccountToResetPassword] = useState<any | null>(null);
   const [newPasswordValue, setNewPasswordValue] = useState("");
@@ -1224,6 +1284,30 @@ export default function AdminPanel({
           </div>
 
           {/*
+            Diagnóstico visível.
+
+            Antes, quando o servidor não tinha acesso ao banco, cada aba
+            simplesmente aparecia vazia — indistinguível de "não há usuários".
+            Este bloco transforma o silêncio em uma frase acionável.
+          */}
+          {diagnosticoPainel && (
+            <div
+              role="status"
+              className={`mb-2 flex items-start gap-2.5 rounded-2xl border px-3.5 py-3 text-[11px] leading-snug ${
+                diagnosticoPainel.gravidade === "erro"
+                  ? "border-red-300 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
+                  : "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
+              }`}
+            >
+              <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+              <div className="min-w-0">
+                <p className="font-bold">{diagnosticoPainel.titulo}</p>
+                <p className="opacity-90 mt-0.5">{diagnosticoPainel.detalhe}</p>
+              </div>
+            </div>
+          )}
+
+          {/*
             Faixa de KPIs — leitura rápida do estado da rede.
             No celular era `flex-wrap`: cinco pílulas ocupavam 2-3 linhas
             (~120px) e empurravam a lista para fora da tela. Agora é uma faixa
@@ -1819,7 +1903,7 @@ export default function AdminPanel({
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => { setUserToViewDetails(u); setShowUserPassword(false); setPasswordCopied(false); }}
+                            onClick={() => { setUserToViewDetails(u); }}
                             className="flex-1 h-10 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer hover-only-scale border border-slate-200 dark:border-white/10 bg-slate-50 hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200"
                             title="Visualizar ficha completa (dados pessoais)"
                           >
@@ -2788,7 +2872,7 @@ export default function AdminPanel({
                         <p className="flex items-center gap-1.5">
                           <span className="font-semibold text-slate-800 dark:text-slate-200">Senha:</span>
                           <code className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded font-mono text-slate-700 dark:text-slate-200">
-                            {acc.password ? "definida (hash)" : "não definida"}
+                            {acc.senhaDefinida || acc.password ? "definida (hash)" : "não definida"}
                           </code>
                         </p>
                         {acc.lastLogin && (
@@ -4188,7 +4272,7 @@ export default function AdminPanel({
                 </div>
                 <button
                   type="button"
-                  onClick={() => { setUserToViewDetails(null); setShowUserPassword(false); setPasswordCopied(false); }}
+                  onClick={() => { setUserToViewDetails(null); }}
                   className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-white/10 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
                 >
                   <X size={18} />
@@ -4279,23 +4363,15 @@ export default function AdminPanel({
                           {userToViewDetails.password ? "protegida por hash (scrypt)" : "não definida"}
                         </span>
 
-                        {userToViewDetails.password && (
+                        {/*
+                          Não existe mais "olho" nem "copiar": o banco guarda
+                          apenas o hash scrypt e a senha não pode ser lida nem
+                          pelo Chefe. O botão de lápis (abaixo) é o fluxo real
+                          de suporte — define uma senha nova e marca o usuário
+                          para trocá-la no próximo acesso.
+                        */}
+                        {(
                           <>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                notifyAdmin(
-                                  "A senha é guardada apenas como hash e não pode ser lida. Use o lápis para definir uma nova senha.",
-                                  "warning"
-                                )
-                              }
-                              className="p-1 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-white/60 dark:hover:bg-white/10 transition-colors cursor-pointer shrink-0"
-                              title={showUserPassword ? "Ocultar senha" : "Mostrar senha"}
-                              aria-label={showUserPassword ? "Ocultar senha" : "Mostrar senha"}
-                            >
-                              {showUserPassword ? <EyeOff size={13} /> : <Eye size={13} />}
-                            </button>
-
                             <button
                               type="button"
                               onClick={() => {
@@ -4309,33 +4385,12 @@ export default function AdminPanel({
                               <Pencil size={13} />
                             </button>
 
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  await navigator.clipboard.writeText(userToViewDetails.password || "");
-                                  setPasswordCopied(true);
-                                  setTimeout(() => setPasswordCopied(false), 2000);
-                                } catch (_) {
-                                  notifyAdmin("Não foi possível copiar a senha.", "warning");
-                                }
-                              }}
-                              className="p-1 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-white/60 dark:hover:bg-white/10 transition-colors cursor-pointer shrink-0"
-                              title="Copiar senha"
-                              aria-label="Copiar senha"
-                            >
-                              {passwordCopied ? (
-                                <Check size={13} className="text-emerald-600 dark:text-emerald-400" />
-                              ) : (
-                                <Copy size={13} />
-                              )}
-                            </button>
                           </>
                         )}
                       </div>
                     </div>
                     <p className="text-[10px] text-amber-700/80 dark:text-amber-400/70 mt-1 leading-snug">
-                      Visível apenas para o Chefe Administrador. Oriente o usuário a trocar no primeiro acesso.
+                      A senha é guardada como hash e não pode ser lida. Use o lápis para definir uma nova: o usuário será obrigado a trocá-la no próximo acesso.
                     </p>
 
                     {/* Alteração da senha — o Chefe Admin pode corrigir a senha do usuário */}
@@ -4466,7 +4521,7 @@ export default function AdminPanel({
 
                 <button
                   type="button"
-                  onClick={() => { setUserToViewDetails(null); setShowUserPassword(false); setPasswordCopied(false); }}
+                  onClick={() => { setUserToViewDetails(null); }}
                   className={`h-11 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center justify-center transition-all cursor-pointer hover-only-scale ${
                     isChefe ? "px-5" : "w-full"
                   }`}

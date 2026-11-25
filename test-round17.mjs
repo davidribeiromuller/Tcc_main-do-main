@@ -27,6 +27,8 @@ function ok(nome, cond, detalhe = "") {
 
 const servico = readFileSync("./src/lib/schoolAccountsService.ts", "utf8");
 const painel = readFileSync("./src/components/AdminPanel.tsx", "utf8");
+// Rodada 35: a criação/gestão de conta escolar passou a rodar no servidor.
+const servidorAdmin = readFileSync("./server.ts", "utf8");
 const app = readFileSync("./src/App.tsx", "utf8");
 const usersSvc = readFileSync("./src/lib/usersService.ts", "utf8");
 const migration = readFileSync("./src/db/migrations/0009_school_accounts_table.sql", "utf8");
@@ -48,22 +50,30 @@ console.log("\n=== 2. Serviço dedicado ===");
 {
   ok("módulo novo existe e usa a tabela própria",
     /from\("school_accounts"\)/.test(servico));
+  // Rodada 35: a criação deixou de acontecer no navegador. O requisito é o
+  // mesmo (conta vinculada à escola, sem misturar com `users`); só mudou o
+  // lado que executa — o servidor, que valida duplicidade e grava o hash.
   ok("cria conta com o e-mail/identificador da escola",
-    /login_identifier: identificador/.test(servico) && /institutional_email: email/.test(servico));
+    /login_identifier: identificadorNorm/.test(servidorAdmin) &&
+    /institutional_email: emailNorm/.test(servidorAdmin) &&
+    /escola\.slug/.test(servidorAdmin) &&
+    /\/api\/admin\/school-accounts/.test(servico));
   ok("detecta duplicidade DENTRO da lista escolar",
-    /from\("school_accounts"\)\s*\.select\("id, login_identifier, institutional_email"\)/.test(servico));
+    /from\("school_accounts"\)[\s\S]{0,120}login_identifier\.eq\.\$\{identificadorNorm\},institutional_email\.eq\.\$\{emailNorm\}/.test(servidorAdmin));
   ok("não grava mais em `users`", !/from\("users"\)\s*\.insert/.test(servico));
   ok("explica quando a migration não foi aplicada", /0009_school_accounts_table\.sql/.test(servico));
   ok("lista ordenada por escola", /order\("school_id"/.test(servico));
   ok("bloquear/desbloquear grava account_status",
-    /account_status: ativo \? "active" : "suspended"/.test(servico));
+    /account_status: ativo \? "active" : "suspended"/.test(servidorAdmin));
   ok("verificação grava verified_by/verified_at",
-    /verified_by: "ADM Chefe"/.test(servico));
+    /verified_by:/.test(servidorAdmin) && /verified_at:/.test(servidorAdmin));
   // Rodada 32 (segurança): a senha passou a ser gravada com hash scrypt.
   // O requisito original — "o Chefe redefine e o usuário é forçado a trocar" —
   // continua valendo; o que muda é que não existe mais texto claro.
   ok("redefinir senha força troca no próximo acesso",
-    /must_change_password: true/.test(servico) && /password: hashPassword\(novaSenha\)/.test(servico));
+    /must_change_password: true/.test(servidorAdmin) &&
+    /password: hashPassword\(novaSenha\)/.test(servidorAdmin) &&
+    /redefinirSenhaContaEscolar/.test(servico));
   ok("remover conta existe como ação explícita",
     /export async function removerContaEscolar/.test(servico));
   ok("autentica por identificador OU e-mail",
@@ -112,7 +122,7 @@ console.log("\n=== 5. Regras herdadas preservadas ===");
 {
   ok("senha mínima de 6 caracteres continua", /senha\.length < 6/.test(servico));
   ok("conta nasce pendente de verificação",
-    /verification_status: "pending_verification"/.test(servico));
+    /verification_status: "pending_verification"/.test(servidorAdmin));
   ok("nada é publicado automaticamente (sem insert em events)",
     !/from\("events"\)/.test(servico));
   ok("exclusão exige confirmação", /window\.confirm/.test(painel));

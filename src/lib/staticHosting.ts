@@ -108,3 +108,43 @@ export async function fetchJsonApiWithAuth(
   headers.set("Authorization", `Bearer ${token}`);
   return fetchJsonApi(input, { ...init, headers });
 }
+
+/**
+ * Traduz uma resposta de erro da API em mensagem para a tela.
+ *
+ * Regra que vale para todo o app: **nunca** transformar falha de infraestrutura
+ * em "nenhum registro". Lista vazia por erro é indistinguível de lista vazia
+ * real, e foi exatamente isso que fez o painel administrativo parecer vazio.
+ */
+export async function mensagemDeErroDaApi(
+  res: Response | null,
+  padrao: string
+): Promise<string> {
+  if (!res) {
+    return "O servidor do eloEscola não respondeu. Esta função exige backend (na versão estática ela não existe).";
+  }
+
+  let corpo: any = null;
+  try {
+    corpo = await res.clone().json();
+  } catch {
+    /* corpo não-JSON (HTML de SPA, proxy, etc.) */
+  }
+
+  if (corpo?.code === "SAAS_NOT_CONFIGURED") {
+    return corpusMensagem(corpo) || "O servidor está sem SUPABASE_SECRET_KEY: configure para usar esta função.";
+  }
+  if (corpo?.code === "SAAS_UNREACHABLE") {
+    return corpusMensagem(corpo) || "O banco de dados não respondeu. Verifique se o Supabase está ativo e acessível.";
+  }
+  if (corpo?.error) return String(corpo.error);
+
+  if (res.status === 401) return "Sua sessão expirou. Entre novamente.";
+  if (res.status === 403) return "Ação restrita ao Administrador Chefe da instituição.";
+  if (res.status === 503) return "Serviço indisponível no momento. Tente novamente em instantes.";
+  return padrao;
+}
+
+function corpusMensagem(corpo: any): string {
+  return typeof corpo?.error === "string" ? corpo.error : "";
+}

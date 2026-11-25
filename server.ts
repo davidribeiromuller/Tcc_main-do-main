@@ -222,6 +222,31 @@ function ownIdentityCandidates(req: AuthRequest, dbUser?: any): string[] {
  */
 const AUTHORIZATION_FORBIDDEN = "Você não tem permissão para acessar esta autorização.";
 
+/**
+ * Erro de rede/indisponibilidade do Supabase.
+ *
+ * Sem isso, uma falha de conexão virava "500 — erro interno" e o painel não
+ * tinha como reagir. Com o código `SAAS_UNREACHABLE` a tela pode dizer o que
+ * aconteceu (banco fora do ar / rede bloqueada) em vez de sugerir bug.
+ */
+function isRedeIndisponivel(error: any): boolean {
+  const msg = String(error?.message || error || "");
+  return /fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|network|socket hang up/i.test(msg);
+}
+
+function responderIndisponivel(res: any, mensagem: string) {
+  return res.status(503).json({
+    error: mensagem,
+    code: "SAAS_UNREACHABLE",
+    hint: "Verifique se o projeto Supabase está ativo e se o servidor tem acesso de rede até ele.",
+  });
+}
+
+/** E-mail do token, quando o provedor informa (Supabase/Firebase). */
+function correio(req: AuthRequest): string {
+  return String((req.user as any)?.email || "");
+}
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT || 3000);
@@ -249,6 +274,14 @@ async function startServer() {
   });
 
   // Supabase/Postgres Database Status Info
+  /**
+   * Diagnóstico de infraestrutura.
+   *
+   * `saasConfigured` diz se o servidor tem `SUPABASE_SECRET_KEY` — é essa
+   * chave, e não o Postgres opcional, que alimenta painel, contas escolares e
+   * histórico. O painel usa esse campo para avisar "não consigo ler o banco"
+   * em vez de mostrar listas vazias como se não houvesse dado.
+   */
   app.get("/api/db-status", async (req, res) => {
     try {
       const isSupabase = !!(process.env.SUPABASE_DB_URL || process.env.SUPABASE_DATABASE_URL || process.env.DATABASE_URL || process.env.DIRECT_URL || process.env.POSTGRES_URL);
@@ -258,6 +291,10 @@ async function startServer() {
       const { sql } = await import("drizzle-orm");
       const healthStats = getDbHealthStats();
       
+      // `saasConfigured`: o painel administrativo depende desta chave, não do
+      // Postgres opcional acima. Vai em TODAS as respostas de diagnóstico.
+      const saasConfigured = isSaasBackendConfigured();
+
       if (isDbCachedOffline()) {
         return res.json({
           active: false,
@@ -267,6 +304,7 @@ async function startServer() {
           cachedOffline: true,
           error: "Conexão off-line em cache",
           sdkInstalled: true,
+          saasConfigured,
           health: healthStats
         });
       }
@@ -284,6 +322,7 @@ async function startServer() {
         host: host,
         version: "Drizzle ORM + PG Node Driver",
         sdkInstalled: true,
+        saasConfigured,
         health: getDbHealthStats()
       });
     } catch (error: any) {
@@ -299,6 +338,7 @@ async function startServer() {
         provider: !!(process.env.SUPABASE_DB_URL || process.env.DATABASE_URL) ? "Supabase PostgreSQL (Não conectado)" : "Cloud SQL / Local (Sem conexão)",
         error: error.message || "Erro de conexão",
         sdkInstalled: true,
+        saasConfigured: isSaasBackendConfigured(),
         health: healthStats
       });
     }
@@ -2137,6 +2177,1133 @@ async function startServer() {
       });
     } catch (error: any) {
       res.status(500).json({ error: "Erro ao executar rotina de expiração." });
+    }
+  });
+
+  // --- ALTERAÇÕES DE PERFIL (fila de aprovação) ---
+  //
+  // `profile_change_requests` também estava com UPDATE público: qualquer
+  // visitante podia aprovar um pedido de mudança de nome/CPF/e-mail — e a
+  // aprovação aplica o valor direto em `users`. Decisão passa ao servidor.
+  const mapProfileRequestRow = (row: any) => ({
+    id: Number(row.id),
+    userId: Number(row.user_id),
+    userUid: row.user_uid,
+    userNome: row.user_nome || "Usuário",
+    alteracoes: Object.entries(row.requested_changes || {}).map(([campo, valorNovo]) => ({
+      campo,
+      valorAnterior: (row.previous_values || {})[campo] ?? "",
+      valorNovo,
+    })),
+    status: row.status || "pending",
+    createdAt: row.created_at,
+    reviewedAt: row.reviewed_at ?? null,
+    reviewedBy: row.reviewed_by ?? null,
+    rejectionReason: row.rejection_reason ?? null,
+  });
+
+  app.get("/api/admin/profile-requests", requireAuth, requireAdminOrStaff, async (req: AuthRequest, res) => {
+    const sb = getSaasAdminClient();
+    if (!sb) {
+      return res.status(503).json({ error: "As alterações de perfil exigem o servidor com SUPABASE_SECRET_KEY.", code: "SAAS_NOT_CONFIGURED" });
+    }
+    try {
+      const status = String(req.query.status || "pending");
+      let consulta = sb.from("profile_change_requests").select("*");
+      if (status !== "all") consulta = consulta.eq("status", status);
+
+      const { data, error } = await consulta.order("created_at", { ascending: false }).limit(200);
+      if (error) if (isRedeIndisponivel(error)) return responderIndisponivel(res, "Não foi possível consultar as solicitações.");
+        return res.status(500).json({ error: "Não foi possível consultar as solicitações." });
+
+      res.json({ requests: (data || []).map(mapProfileRequestRow) });
+    } catch (error: any) {
+      res.status(500).json({ error: "Erro ao consultar as solicitações de perfil." });
+    }
+  });
+
+  app.post(
+    "/api/admin/profile-requests/:id/approve",
+    requireAuth,
+    requireChefeAdmin,
+    async (req: AuthRequest, res) => {
+      const sb = getSaasAdminClient();
+      if (!sb) return res.status(503).json({ error: "Servidor sem SUPABASE_SECRET_KEY.", code: "SAAS_NOT_CONFIGURED" });
+
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Identificador inválido." });
+
+      try {
+        const { data: linhas, error: erroBusca } = await sb
+          .from("profile_change_requests")
+          .select("*")
+          .eq("id", id)
+          .limit(1);
+
+        if (erroBusca) return res.status(500).json({ error: "Não foi possível ler a solicitação." });
+        if (!linhas || linhas.length === 0) return res.status(404).json({ error: "Solicitação não encontrada." });
+
+        const pedido: any = linhas[0];
+        if (pedido.status !== "pending") return res.status(409).json({ error: "Esta solicitação já foi revisada." });
+
+        const reviewedBy = String((req.user as any)?.email || "ADM Chefe");
+
+        // 1. Reivindica primeiro (evita aprovação dupla em duas abas).
+        const { data: reivindicada, error: erroClaim } = await sb
+          .from("profile_change_requests")
+          .update({ status: "approved", reviewed_at: new Date().toISOString(), reviewed_by: reviewedBy })
+          .eq("id", id)
+          .eq("status", "pending")
+          .select("id");
+
+        if (erroClaim) return res.status(500).json({ error: "Não foi possível reservar a solicitação." });
+        if (!reivindicada || reivindicada.length === 0) {
+          return res.status(409).json({ error: "Esta solicitação já foi revisada por outro administrador." });
+        }
+
+        // 2. Aplica no usuário. Só campos conhecidos; o resto é ignorado.
+        const alteracoes = pedido.requested_changes || {};
+        const permitidos = ["nome", "email", "cpf", "phone", "birthdate", "gender", "institution", "role"];
+        const update: Record<string, any> = {};
+        for (const campo of permitidos) {
+          if (alteracoes[campo] !== undefined) update[campo] = String(alteracoes[campo]).trim();
+        }
+
+        if (Object.keys(update).length > 0) {
+          const { error: erroUpdate } = await sb
+            .from("users")
+            .update({ ...update, updated_at: new Date().toISOString() })
+            .eq("id", pedido.user_id);
+
+          if (erroUpdate) {
+            // Reverte o pedido para não perder a solicitação.
+            await sb
+              .from("profile_change_requests")
+              .update({ status: "pending", reviewed_at: null, reviewed_by: null })
+              .eq("id", id);
+            return res.status(500).json({ error: "Não foi possível aplicar as alterações no perfil." });
+          }
+        }
+
+        await logPlatformAudit({
+          actorEmail: reviewedBy,
+          action: "profile_request.approved",
+          targetType: "profile_change_request",
+          targetId: String(id),
+          metadata: { userId: pedido.user_id, campos: Object.keys(update) },
+        }).catch(() => {});
+
+        res.json({ success: true });
+      } catch (error: any) {
+        res.status(500).json({ error: "Erro ao aprovar a solicitação." });
+      }
+    }
+  );
+
+  app.post(
+    "/api/admin/profile-requests/:id/reject",
+    requireAuth,
+    requireChefeAdmin,
+    async (req: AuthRequest, res) => {
+      const sb = getSaasAdminClient();
+      if (!sb) return res.status(503).json({ error: "Servidor sem SUPABASE_SECRET_KEY.", code: "SAAS_NOT_CONFIGURED" });
+
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Identificador inválido." });
+
+      try {
+        const reviewedBy = String((req.user as any)?.email || "ADM Chefe");
+        const motivo = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+
+        const { error } = await sb
+          .from("profile_change_requests")
+          .update({
+            status: "rejected",
+            reviewed_at: new Date().toISOString(),
+            reviewed_by: reviewedBy,
+            rejection_reason: motivo || null,
+          })
+          .eq("id", id)
+          .eq("status", "pending");
+
+        if (error) return res.status(500).json({ error: "Não foi possível rejeitar a solicitação." });
+
+        await logPlatformAudit({
+          actorEmail: reviewedBy,
+          action: "profile_request.rejected",
+          targetType: "profile_change_request",
+          targetId: String(id),
+        }).catch(() => {});
+
+        res.json({ success: true });
+      } catch (error: any) {
+        res.status(500).json({ error: "Erro ao rejeitar a solicitação." });
+      }
+    }
+  );
+
+  // --- PERFIS INSTITUCIONAIS DAS ESCOLAS ---
+  //
+  // `school_profiles` tem leitura pública (ok: é a ficha da escola) mas a
+  // ESCRITA também era pública — qualquer visitante podia reescrever nome,
+  // endereço e telefone de uma escola no diretório. Leitura segue pública;
+  // gravação agora exige Chefe Administrador.
+  const mapSchoolProfileRow = (row: any) => ({
+    slug: row.slug,
+    name: row.name ?? undefined,
+    shortName: row.short_name ?? undefined,
+    type: row.type ?? undefined,
+    neighborhood: row.neighborhood ?? undefined,
+    city: row.city ?? undefined,
+    state: row.state ?? undefined,
+    address: row.address ?? undefined,
+    cep: row.cep ?? undefined,
+    phone: row.phone ?? undefined,
+    email: row.email ?? undefined,
+    website: row.website ?? undefined,
+    network: row.network ?? undefined,
+    nre: row.nre ?? undefined,
+    modalities: Array.isArray(row.modalities) ? row.modalities : [],
+    historicalOverview: row.historical_overview ?? undefined,
+    pedagogicalHighlights: Array.isArray(row.pedagogical_highlights) ? row.pedagogical_highlights : [],
+    infrastructure: Array.isArray(row.infrastructure) ? row.infrastructure : [],
+    latitude: typeof row.latitude === "number" ? row.latitude : null,
+    longitude: typeof row.longitude === "number" ? row.longitude : null,
+    image: row.image ?? undefined,
+    updatedAt: row.updated_at ?? undefined,
+    updatedBy: row.updated_by ?? undefined,
+  });
+
+  app.get("/api/school-profiles", async (_req, res) => {
+    const sb = getSaasAdminClient();
+    if (!sb) return res.json({ profiles: [] });
+    try {
+      const { data, error } = await sb.from("school_profiles").select("*");
+      if (error) return res.json({ profiles: [] });
+      res.json({ profiles: (data || []).map(mapSchoolProfileRow) });
+    } catch {
+      res.json({ profiles: [] });
+    }
+  });
+
+  app.put("/api/school-profiles/:slug", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
+    const sb = getSaasAdminClient();
+    if (!sb) return res.status(503).json({ error: "Servidor sem SUPABASE_SECRET_KEY.", code: "SAAS_NOT_CONFIGURED" });
+
+    const slug = String(req.params.slug || "").trim().toLowerCase();
+    if (!/^[a-z0-9-]{2,80}$/.test(slug)) return res.status(400).json({ error: "Identificador de escola inválido." });
+
+    const texto = (v: unknown) => {
+      const t = String(v ?? "").trim();
+      return t ? t : null;
+    };
+    const lista = (v: unknown) =>
+      Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : [];
+
+    const corpo = req.body || {};
+
+    const payload = {
+      slug,
+      name: texto(corpo.name),
+      short_name: texto(corpo.shortName),
+      type: texto(corpo.type),
+      neighborhood: texto(corpo.neighborhood),
+      city: texto(corpo.city),
+      state: texto(corpo.state),
+      address: texto(corpo.address),
+      cep: texto(corpo.cep),
+      phone: texto(corpo.phone),
+      email: texto(corpo.email),
+      website: texto(corpo.website),
+      network: texto(corpo.network),
+      nre: texto(corpo.nre),
+      modalities: lista(corpo.modalities),
+      historical_overview: texto(corpo.historicalOverview),
+      pedagogical_highlights: lista(corpo.pedagogicalHighlights),
+      infrastructure: lista(corpo.infrastructure),
+      latitude: typeof corpo.latitude === "number" ? corpo.latitude : null,
+      longitude: typeof corpo.longitude === "number" ? corpo.longitude : null,
+      image: texto(corpo.image),
+      updated_at: new Date().toISOString(),
+      updated_by: String((req.user as any)?.email || "ADM Chefe"),
+    };
+
+    try {
+      const { data, error } = await sb
+        .from("school_profiles")
+        .upsert(payload, { onConflict: "slug" })
+        .select();
+
+      if (error) return res.status(500).json({ error: "Não foi possível gravar as informações da escola." });
+      if (!data || data.length === 0) return res.status(500).json({ error: "As informações não foram gravadas." });
+
+      await logPlatformAudit({
+        actorEmail: String((req.user as any)?.email || ""),
+        action: "school_profile.updated",
+        targetType: "school_profile",
+        targetId: slug,
+      }).catch(() => {});
+
+      res.json({ profile: mapSchoolProfileRow(data[0]) });
+    } catch (error: any) {
+      res.status(500).json({ error: "Erro ao gravar as informações da escola." });
+    }
+  });
+
+  // --- CONTAS ESCOLARES (equipe gestora) — exclusivo do Chefe ---
+  //
+  // Antes o painel lia/gravava direto no Supabase com a chave publicável.
+  // `school_accounts` guarda senha (mesmo em hash) e dados do responsável, e a
+  // RLS foi fechada na Parte 2 — o que, sem estas rotas, deixava a aba "Contas
+  // das Escolas" simplesmente vazia. Aqui o servidor usa a chave de serviço e
+  // devolve a visão de gestão, sem senha.
+  const mapSchoolAccountRow = (row: any) => ({
+    id: Number(row.id),
+    escolaId: Number(row.school_id),
+    escolaSlug: row.school_slug,
+    escolaNome: row.school_name,
+    identificador: row.login_identifier,
+    email: row.institutional_email,
+    responsavel: row.responsible_name,
+    cargo: row.responsible_role,
+    telefone: row.institutional_contact || "",
+    ativo: row.account_status === "active",
+    status: row.account_status,
+    verificationStatus: row.verification_status,
+    mustChangePassword: row.must_change_password === true,
+    // A senha NUNCA sai do servidor: nem em hash. O Chefe pode DEFINIR uma
+    // nova (rota de reset), mas não consegue lê-la.
+    senhaDefinida: Boolean(row.password),
+    createdAt: row.created_at || undefined,
+    updatedAt: row.updated_at || undefined,
+    lastLogin: row.last_login_at || undefined,
+  });
+
+  const listarContasEscolaresServidor = async (escolaId?: number) => {
+    const sb = getSaasAdminClient();
+    if (!sb) return { contas: null as any[] | null, error: "Servidor sem SUPABASE_SECRET_KEY." };
+    let consulta = sb
+      .from("school_accounts")
+      .select("*")
+      .order("school_id", { ascending: true })
+      .order("id", { ascending: true });
+    if (escolaId) consulta = consulta.eq("school_id", escolaId);
+    const { data, error } = await consulta;
+    if (error) return { contas: null, error: error.message };
+    return { contas: (data || []).map(mapSchoolAccountRow), error: null };
+  };
+
+  app.get("/api/admin/school-accounts", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
+    const escolaId = Number(req.query.escolaId) || undefined;
+    const { contas, error } = await listarContasEscolaresServidor(escolaId);
+    if (error) {
+      return res.status(503).json({
+        error: "A lista de contas escolares exige o servidor com SUPABASE_SECRET_KEY configurado.",
+        code: "SAAS_NOT_CONFIGURED",
+        detail: error,
+      });
+    }
+    res.json({ accounts: contas, adminRole: "chefe" });
+  });
+
+  app.post("/api/admin/school-accounts", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
+    const sb = getSaasAdminClient();
+    if (!sb) return res.status(503).json({ error: "Servidor sem SUPABASE_SECRET_KEY.", code: "SAAS_NOT_CONFIGURED" });
+
+    const {
+      escolaSlug,
+      identificador,
+      email,
+      password,
+      responsavel,
+      cargo,
+      telefone,
+    } = req.body || {};
+
+    const escola = ARAUCARIA_SCHOOLS.find((e) => e.slug === String(escolaSlug || "").trim());
+    if (!escola) return res.status(400).json({ error: "Escola não encontrada no cadastro de Araucária." });
+
+    const identificadorNorm = String(identificador || "").trim().toLowerCase();
+    const emailNorm = String(email || "").trim().toLowerCase();
+    if (!identificadorNorm || !emailNorm || !String(responsavel || "").trim() || !String(cargo || "").trim()) {
+      return res.status(400).json({ error: "Preencha identificador, e-mail, responsável e cargo." });
+    }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailNorm)) {
+      return res.status(400).json({ error: "E-mail institucional inválido." });
+    }
+
+    const forcaSenha = validatePasswordStrength(String(password || ""));
+    if (forcaSenha) {
+      return res.status(400).json({ error: forcaSenha, fieldErrors: { password: forcaSenha } });
+    }
+
+    try {
+      const { data: existentes } = await sb
+        .from("school_accounts")
+        .select("id, login_identifier, institutional_email")
+        .or(`login_identifier.eq.${identificadorNorm},institutional_email.eq.${emailNorm}`)
+        .limit(5);
+
+      if (existentes && existentes.length > 0) {
+        const mesmoEmail =
+          String(existentes[0].institutional_email || "").toLowerCase() === emailNorm;
+        return res.status(409).json({
+          error: mesmoEmail
+            ? "Já existe uma conta escolar com este e-mail."
+            : "Já existe uma conta escolar com este identificador.",
+          fieldErrors: mesmoEmail
+            ? { email: "Já existe uma conta escolar com este e-mail." }
+            : { identificador: "Já existe uma conta escolar com este identificador." },
+        });
+      }
+
+      const { data, error } = await sb
+        .from("school_accounts")
+        .insert([
+          {
+            school_id: escola.id,
+            school_slug: escola.slug,
+            school_name: escola.name,
+            login_identifier: identificadorNorm,
+            institutional_email: emailNorm,
+            password: hashPassword(String(password)),
+            responsible_name: String(responsavel).trim(),
+            responsible_role: String(cargo).trim(),
+            institutional_contact: String(telefone || "").trim() || emailNorm,
+            account_status: "active",
+            verification_status: "pending_verification",
+            created_by: "ADM Chefe",
+          },
+        ])
+        .select()
+        .single();
+
+      if (error) {
+        if (error.code === "23505") {
+          return res.status(409).json({ error: "Identificador ou e-mail já cadastrado para outra conta escolar." });
+        }
+        return res.status(500).json({ error: "Não foi possível criar a conta escolar." });
+      }
+
+      await logPlatformAudit({
+        actorEmail: (req.user as any)?.email || null,
+        action: "school_account.created",
+        targetType: "school_account",
+        targetId: String(data.id),
+        metadata: { escola: escola.slug },
+      }).catch(() => {});
+
+      res.status(201).json({ success: true, conta: mapSchoolAccountRow(data) });
+    } catch (error: any) {
+      res.status(500).json({ error: "Erro ao criar a conta escolar." });
+    }
+  });
+
+  app.put("/api/admin/school-accounts/:id/status", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
+    const sb = getSaasAdminClient();
+    if (!sb) return res.status(503).json({ error: "Servidor sem SUPABASE_SECRET_KEY.", code: "SAAS_NOT_CONFIGURED" });
+
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "Identificador inválido." });
+    const ativo = req.body?.ativo !== false;
+
+    const { data, error } = await sb
+      .from("school_accounts")
+      .update({ account_status: ativo ? "active" : "suspended", updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select("id");
+
+    if (error) return res.status(500).json({ error: "Não foi possível alterar o status da conta." });
+    if (!data || data.length === 0) return res.status(404).json({ error: "Conta escolar não encontrada." });
+
+    await logPlatformAudit({
+      actorEmail: (req.user as any)?.email || null,
+      action: ativo ? "school_account.unblocked" : "school_account.blocked",
+      targetType: "school_account",
+      targetId: String(id),
+    }).catch(() => {});
+
+    res.json({ success: true });
+  });
+
+  app.put("/api/admin/school-accounts/:id/verify", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
+    const sb = getSaasAdminClient();
+    if (!sb) return res.status(503).json({ error: "Servidor sem SUPABASE_SECRET_KEY.", code: "SAAS_NOT_CONFIGURED" });
+
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "Identificador inválido." });
+
+    const status = String(req.body?.verificationStatus || "verified");
+    if (!["pending_verification", "verified", "revoked"].includes(status)) {
+      return res.status(400).json({ error: "Situação de verificação inválida." });
+    }
+
+    const { data, error } = await sb
+      .from("school_accounts")
+      .update({
+        verification_status: status,
+        verified_by: String((req.user as any)?.email || "ADM Chefe"),
+        verified_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select("id");
+
+    if (error) return res.status(500).json({ error: "Não foi possível registrar a verificação." });
+    if (!data || data.length === 0) return res.status(404).json({ error: "Conta escolar não encontrada." });
+
+    await logPlatformAudit({
+      actorEmail: (req.user as any)?.email || null,
+      action: "school_account.verified",
+      targetType: "school_account",
+      targetId: String(id),
+      metadata: { verificationStatus: status },
+    }).catch(() => {});
+
+    res.json({ success: true });
+  });
+
+  app.put("/api/admin/school-accounts/:id/reset-password", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
+    const sb = getSaasAdminClient();
+    if (!sb) return res.status(503).json({ error: "Servidor sem SUPABASE_SECRET_KEY.", code: "SAAS_NOT_CONFIGURED" });
+
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "Identificador inválido." });
+
+    const novaSenha = String(req.body?.password || "");
+    const forcaSenha = validatePasswordStrength(novaSenha);
+    if (forcaSenha) {
+      return res.status(400).json({ error: forcaSenha, fieldErrors: { password: forcaSenha } });
+    }
+
+    const { data, error } = await sb
+      .from("school_accounts")
+      .update({
+        password: hashPassword(novaSenha),
+        must_change_password: true,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select("id");
+
+    if (error) return res.status(500).json({ error: "Não foi possível redefinir a senha." });
+    if (!data || data.length === 0) return res.status(404).json({ error: "Conta escolar não encontrada." });
+
+    await logPlatformAudit({
+      actorEmail: (req.user as any)?.email || null,
+      action: "school_account.password_reset",
+      targetType: "school_account",
+      targetId: String(id),
+    }).catch(() => {});
+
+    res.json({ success: true, mustChangePassword: true });
+  });
+
+  app.delete("/api/admin/school-accounts/:id", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
+    const sb = getSaasAdminClient();
+    if (!sb) return res.status(503).json({ error: "Servidor sem SUPABASE_SECRET_KEY.", code: "SAAS_NOT_CONFIGURED" });
+
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "Identificador inválido." });
+
+    const { error } = await sb.from("school_accounts").delete().eq("id", id);
+    if (error) return res.status(500).json({ error: "Não foi possível remover a conta escolar." });
+
+    await logPlatformAudit({
+      actorEmail: (req.user as any)?.email || null,
+      action: "school_account.deleted",
+      targetType: "school_account",
+      targetId: String(id),
+    }).catch(() => {});
+
+    res.json({ success: true });
+  });
+
+  // --- AGENDA PESSOAL (rotas do próprio usuário) ---
+  //
+  // A tabela `personal_events` deixou de aceitar escrita de `anon` (migração
+  // 20261113): antes qualquer visitante lia a agenda de todos. Estas rotas
+  // mantêm a funcionalidade para o dono, com o vínculo vindo do token.
+  const mapPersonalEventRow = (row: any) => ({
+    id: Number(row.id),
+    ownerId: Number(row.owner_id),
+    ownerName: row.owner_name ?? "Usuário",
+    ownerEmail: row.owner_email ?? null,
+    title: row.title ?? "",
+    description: row.description ?? null,
+    location: row.location ?? null,
+    city: row.city ?? null,
+    day: Number(row.day),
+    month: Number(row.month),
+    year: Number(row.year),
+    time: row.time ?? null,
+    category: row.category ?? null,
+    isPaid: Boolean(row.is_paid),
+    price: row.price ?? null,
+    reminder: Boolean(row.reminder),
+    notes: row.notes ?? null,
+    createdAt: row.created_at ?? new Date().toISOString(),
+  });
+
+  app.get("/api/personal-events", requireAuth, async (req: AuthRequest, res) => {
+    const sb = getSaasAdminClient();
+    if (!sb) return res.status(503).json({ error: "Servidor sem SUPABASE_SECRET_KEY.", code: "SAAS_NOT_CONFIGURED" });
+
+    try {
+      const dbUser = req.dbUser || (await resolveDbUserForRequest(req));
+      const donoId = Number(dbUser?.id ?? (req.user as any)?.id ?? 0);
+      if (!Number.isFinite(donoId) || donoId <= 0) {
+        return res.status(400).json({ error: "Não foi possível identificar o dono da agenda." });
+      }
+
+      const { data, error } = await sb
+        .from("personal_events")
+        .select(
+          "id, owner_id, owner_name, owner_email, title, description, location, city, day, month, year, time, category, is_paid, price, reminder, notes, created_at"
+        )
+        .eq("owner_id", donoId)
+        .order("year", { ascending: false })
+        .order("month", { ascending: false })
+        .order("day", { ascending: false });
+
+      if (error) {
+        if (isRedeIndisponivel(error)) return responderIndisponivel(res, "O banco não respondeu ao carregar sua agenda.");
+        return res.status(500).json({ error: "Não foi possível carregar sua agenda." });
+      }
+
+      res.json({ events: (data || []).map(mapPersonalEventRow) });
+    } catch (error: any) {
+      if (isRedeIndisponivel(error)) return responderIndisponivel(res, "O banco não respondeu ao carregar sua agenda.");
+      res.status(500).json({ error: "Erro ao carregar sua agenda." });
+    }
+  });
+
+  app.post("/api/personal-events", requireAuth, async (req: AuthRequest, res) => {
+    const sb = getSaasAdminClient();
+    if (!sb) return res.status(503).json({ error: "Servidor sem SUPABASE_SECRET_KEY.", code: "SAAS_NOT_CONFIGURED" });
+
+    try {
+      const dbUser = req.dbUser || (await resolveDbUserForRequest(req));
+      const donoId = Number(dbUser?.id ?? (req.user as any)?.id ?? 0);
+      if (!Number.isFinite(donoId) || donoId <= 0) {
+        return res.status(400).json({ error: "Não foi possível identificar o dono da agenda." });
+      }
+
+      const corpo = req.body || {};
+      const titulo = String(corpo.title || "").trim();
+      const dia = Number(corpo.day);
+      const mes = Number(corpo.month);
+      const ano = Number(corpo.year);
+
+      if (!titulo) return res.status(400).json({ error: "Dê um nome ao compromisso." });
+      if (!Number.isInteger(dia) || dia < 1 || dia > 31) return res.status(400).json({ error: "Dia inválido: use de 1 a 31." });
+      if (!Number.isInteger(mes) || mes < 0 || mes > 11) return res.status(400).json({ error: "Mês inválido." });
+      if (!Number.isInteger(ano) || ano < 2000 || ano > 2100) return res.status(400).json({ error: "Ano inválido." });
+
+      const hoje = new Date();
+      const dataDoEvento = new Date(ano, mes, dia);
+      const hojeZerado = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+      if (dataDoEvento < hojeZerado) {
+        return res.status(400).json({ error: "Escolha uma data de hoje em diante." });
+      }
+
+      const { data, error } = await sb
+        .from("personal_events")
+        .insert([
+          {
+            // O dono vem do token, nunca do corpo da requisição.
+            owner_id: donoId,
+            owner_name: String(dbUser?.nome || correio(req) || "Usuário"),
+            owner_email: String(dbUser?.email || (req.user as any)?.email || "") || null,
+            title: titulo,
+            description: String(corpo.description || "").trim() || null,
+            location: String(corpo.location || "").trim() || null,
+            city: String(corpo.city || "").trim() || null,
+            day: dia,
+            month: mes,
+            year: ano,
+            time: String(corpo.time || "").trim() || null,
+            category: String(corpo.category || "Pessoal"),
+            is_paid: Boolean(corpo.isPaid),
+            price: corpo.isPaid ? String(corpo.price || "").trim() || null : null,
+            reminder: Boolean(corpo.reminder),
+            notes: String(corpo.notes || "").trim() || null,
+          },
+        ])
+        .select()
+        .single();
+
+      if (error) {
+        if (isRedeIndisponivel(error)) return responderIndisponivel(res, "O banco não respondeu ao salvar o compromisso.");
+        return res.status(500).json({ error: "Não foi possível salvar o compromisso." });
+      }
+
+      res.status(201).json({ event: mapPersonalEventRow(data) });
+    } catch (error: any) {
+      if (isRedeIndisponivel(error)) return responderIndisponivel(res, "O banco não respondeu ao salvar o compromisso.");
+      res.status(500).json({ error: "Erro ao salvar o compromisso." });
+    }
+  });
+
+  app.delete("/api/personal-events/:id", requireAuth, async (req: AuthRequest, res) => {
+    const sb = getSaasAdminClient();
+    if (!sb) return res.status(503).json({ error: "Servidor sem SUPABASE_SECRET_KEY.", code: "SAAS_NOT_CONFIGURED" });
+
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "Identificador inválido." });
+
+    try {
+      const dbUser = req.dbUser || (await resolveDbUserForRequest(req));
+      const donoId = Number(dbUser?.id ?? (req.user as any)?.id ?? 0);
+
+      const { data: linhas } = await sb.from("personal_events").select("id, owner_id").eq("id", id).limit(1);
+      if (!linhas || linhas.length === 0) return res.status(404).json({ error: "Compromisso não encontrado." });
+      if (Number(linhas[0].owner_id) !== donoId) {
+        return res.status(403).json({ error: "Este compromisso pertence a outro usuário." });
+      }
+
+      const { error } = await sb.from("personal_events").delete().eq("id", id);
+      if (error) return res.status(500).json({ error: "Não foi possível remover o compromisso." });
+
+      res.json({ success: true });
+    } catch (error: any) {
+      if (isRedeIndisponivel(error)) return responderIndisponivel(res, "O banco não respondeu ao remover o compromisso.");
+      res.status(500).json({ error: "Erro ao remover o compromisso." });
+    }
+  });
+
+  // --- SUGESTÕES DE EVENTOS (IA / motor local) ---
+  //
+  // Antes o painel listava, aprovava e rejeitava direto no Supabase. As
+  // políticas de `event_suggestions` são públicas para leitura, escrita e
+  // atualização — ou seja, qualquer visitante podia aprovar uma sugestão e
+  // publicá-la como evento oficial da rede. Agora a decisão é do servidor.
+  const mapSuggestionRow = (row: any) => ({
+    id: Number(row.id),
+    title: row.title,
+    location: row.location ?? null,
+    address: row.address ?? null,
+    city: row.city ?? null,
+    category: row.category ?? null,
+    description: row.description ?? null,
+    requirements: row.requirements ?? null,
+    website: row.website ?? null,
+    image: row.image ?? null,
+    day: row.day ?? null,
+    month: row.month ?? null,
+    year: row.year ?? null,
+    time: row.time ?? null,
+    isPaid: Boolean(row.is_paid),
+    price: row.price ?? null,
+    schoolName: row.school_name ?? null,
+    sourceName: row.source_name ?? null,
+    sourceUrl: row.source_url ?? null,
+    aiConfidence:
+      row.ai_confidence !== null && row.ai_confidence !== undefined ? Number(row.ai_confidence) : null,
+    aiReasoning: row.ai_reasoning ?? null,
+    origin: row.origin === "local_engine" ? "local_engine" : "ai",
+    isEstimated: Boolean(row.is_estimated),
+    status: row.status,
+    createdAt: row.created_at,
+    reviewedAt: row.reviewed_at ?? null,
+    reviewedBy: row.reviewed_by ?? null,
+    approvedEventId: row.approved_event_id ?? null,
+    rejectionReason: row.rejection_reason ?? null,
+  });
+
+  app.get("/api/admin/suggestions", requireAuth, requireAdminOrStaff, async (req: AuthRequest, res) => {
+    const sb = getSaasAdminClient();
+    if (!sb) {
+      return res.status(503).json({ error: "As sugestões exigem o servidor com SUPABASE_SECRET_KEY.", code: "SAAS_NOT_CONFIGURED" });
+    }
+    try {
+      const status = String(req.query.status || "pending");
+      let consulta = sb.from("event_suggestions").select("*");
+      if (status !== "all") consulta = consulta.eq("status", status);
+
+      const { data, error } = await consulta.order("created_at", { ascending: false }).limit(200);
+      if (error) {
+        console.warn("[Admin] Falha ao listar sugestões:", error.message);
+        if (isRedeIndisponivel(error)) return responderIndisponivel(res, "Não foi possível consultar as sugestões.");
+        return res.status(500).json({ error: "Não foi possível consultar as sugestões." });
+      }
+      res.json({ suggestions: (data || []).map(mapSuggestionRow) });
+    } catch (error: any) {
+      res.status(500).json({ error: "Erro ao consultar as sugestões." });
+    }
+  });
+
+  // Aprovar: cria o evento de verdade e marca a sugestão. Exclusivo do Chefe
+  // (Funcionário vê, mas não publica).
+  app.post(
+    "/api/admin/suggestions/:id/approve",
+    requireAuth,
+    requireChefeAdmin,
+    async (req: AuthRequest, res) => {
+      const sb = getSaasAdminClient();
+      if (!sb) return res.status(503).json({ error: "Servidor sem SUPABASE_SECRET_KEY.", code: "SAAS_NOT_CONFIGURED" });
+
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Identificador inválido." });
+
+      try {
+        const { data: linhas, error: erroBusca } = await sb
+          .from("event_suggestions")
+          .select("*")
+          .eq("id", id)
+          .limit(1);
+
+        if (erroBusca) return res.status(500).json({ error: "Não foi possível ler a sugestão." });
+        if (!linhas || linhas.length === 0) return res.status(404).json({ error: "Sugestão não encontrada." });
+
+        const sugestao: any = linhas[0];
+        if (sugestao.status !== "pending") {
+          return res.status(409).json({ error: "Esta sugestão já foi revisada." });
+        }
+
+        const dbUser = req.dbUser || (await resolveDbUserForRequest(req));
+        const reviewedBy = String((req.user as any)?.email || dbUser?.email || "Administrador");
+
+        const novoEvento = {
+          title: sugestao.title,
+          location: sugestao.location || sugestao.address || sugestao.city || "Local a confirmar",
+          day: sugestao.day,
+          month: sugestao.month,
+          year: sugestao.year,
+          time: sugestao.time || "08:00",
+          isPaid: Boolean(sugestao.is_paid),
+          price: sugestao.price ?? null,
+          requirements: sugestao.requirements ?? null,
+          website: sugestao.website ?? null,
+          image: sugestao.image ?? null,
+          description: sugestao.description ?? null,
+          category: sugestao.category ?? null,
+          city: sugestao.city ?? null,
+          schoolName: sugestao.school_name ?? null,
+        };
+
+        let eventId: number | null = null;
+        let tabelaUsada = "events";
+
+        const { data: criado, error: erroCriar } = await sb
+          .from("events")
+          .insert(novoEvento)
+          .select("id")
+          .limit(1)
+          .maybeSingle();
+
+        if (erroCriar) {
+          // A base do projeto tem as duas tabelas espelhadas (`events` e
+          // `eventos`). Se a primeira recusar, tentamos a segunda antes de
+          // desistir — mas nunca "fingimos" sucesso.
+          const { data: criado2, error: erro2 } = await sb
+            .from("eventos")
+            .insert(novoEvento)
+            .select("id")
+            .limit(1)
+            .maybeSingle();
+          if (erro2) {
+            console.warn("[Admin] Falha ao publicar sugestão:", erroCriar.message, erro2.message);
+            return res.status(500).json({ error: "Não foi possível publicar o evento a partir da sugestão." });
+          }
+          eventId = criado2?.id ?? null;
+          tabelaUsada = "eventos";
+        } else {
+          eventId = criado?.id ?? null;
+        }
+
+        const { error: erroMarcar } = await sb
+          .from("event_suggestions")
+          .update({
+            status: "approved",
+            reviewed_at: new Date().toISOString(),
+            reviewed_by: reviewedBy,
+            approved_event_id: eventId,
+            approved_table: tabelaUsada,
+          })
+          .eq("id", id);
+
+        if (erroMarcar) {
+          console.warn("[Admin] Evento criado, mas a sugestão não foi marcada como aprovada:", erroMarcar.message);
+        }
+
+        await logPlatformAudit({
+          actorEmail: reviewedBy,
+          action: "suggestion.approved",
+          targetType: "event_suggestion",
+          targetId: String(id),
+          metadata: { eventId, tabelaUsada },
+        }).catch(() => {});
+
+        res.json({ success: true, eventId });
+      } catch (error: any) {
+        res.status(500).json({ error: "Erro ao aprovar a sugestão." });
+      }
+    }
+  );
+
+  app.post(
+    "/api/admin/suggestions/:id/reject",
+    requireAuth,
+    requireChefeAdmin,
+    async (req: AuthRequest, res) => {
+      const sb = getSaasAdminClient();
+      if (!sb) return res.status(503).json({ error: "Servidor sem SUPABASE_SECRET_KEY.", code: "SAAS_NOT_CONFIGURED" });
+
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Identificador inválido." });
+
+      try {
+        const dbUser = req.dbUser || (await resolveDbUserForRequest(req));
+        const reviewedBy = String((req.user as any)?.email || dbUser?.email || "Administrador");
+        const motivo = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+
+        const { error } = await sb
+          .from("event_suggestions")
+          .update({
+            status: "rejected",
+            reviewed_at: new Date().toISOString(),
+            reviewed_by: reviewedBy,
+            rejection_reason: motivo || null,
+          })
+          .eq("id", id);
+
+        if (error) return res.status(500).json({ error: "Não foi possível rejeitar a sugestão." });
+
+        await logPlatformAudit({
+          actorEmail: reviewedBy,
+          action: "suggestion.rejected",
+          targetType: "event_suggestion",
+          targetId: String(id),
+          metadata: { motivo: motivo || null },
+        }).catch(() => {});
+
+        res.json({ success: true });
+      } catch (error: any) {
+        res.status(500).json({ error: "Erro ao rejeitar a sugestão." });
+      }
+    }
+  );
+
+  // --- AGENDA PESSOAL (visão da administração) ---
+  //
+  // `personal_events` tem leitura pública no Supabase (qualquer visitante lê a
+  // agenda de todos os usuários). O painel precisa enxergar o uso, mas essa
+  // leitura passa a ser feita aqui, com o papel verificado no servidor.
+  app.get("/api/admin/personal-events", requireAuth, requireAdminOrStaff, async (req: AuthRequest, res) => {
+    const sb = getSaasAdminClient();
+    if (!sb) {
+      return res.status(503).json({
+        error: "A agenda pessoal de todos os usuários exige o servidor com SUPABASE_SECRET_KEY.",
+        code: "SAAS_NOT_CONFIGURED",
+      });
+    }
+    try {
+      const { data, error } = await sb
+        .from("personal_events")
+        .select(
+          "id, owner_id, owner_name, owner_email, title, description, location, city, day, month, year, time, category, is_paid, price, reminder, notes, created_at"
+        )
+        .order("year", { ascending: false })
+        .order("month", { ascending: false })
+        .order("day", { ascending: false })
+        .limit(1000);
+
+      if (error) {
+        console.warn("[Admin] Falha ao listar agenda pessoal:", error.message);
+        if (isRedeIndisponivel(error)) {
+          return responderIndisponivel(res, "O banco de dados não respondeu ao consultar a agenda pessoal.");
+        }
+        return res.status(500).json({ error: "Não foi possível consultar a agenda pessoal." });
+      }
+      res.json({ events: data || [] });
+    } catch (error: any) {
+      if (isRedeIndisponivel(error)) {
+        return responderIndisponivel(res, "O banco de dados não respondeu ao consultar a agenda pessoal.");
+      }
+      res.status(500).json({ error: "Erro ao consultar a agenda pessoal." });
+    }
+  });
+
+  // Remoção pelo painel. Funcionário Administrador só remove o que ele mesmo criou.
+  app.delete("/api/admin/personal-events/:id", requireAuth, requireAdminOrStaff, async (req: AuthRequest, res) => {
+    const sb = getSaasAdminClient();
+    if (!sb) return res.status(503).json({ error: "Servidor sem SUPABASE_SECRET_KEY.", code: "SAAS_NOT_CONFIGURED" });
+
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "Identificador inválido." });
+
+    try {
+      const { data: linhas } = await sb.from("personal_events").select("id, owner_id").eq("id", id).limit(1);
+      if (!linhas || linhas.length === 0) return res.status(404).json({ error: "Compromisso não encontrado." });
+
+      const adminRole = (req as any).adminRole;
+      if (adminRole !== "chefe") {
+        const dbUser = req.dbUser || (await resolveDbUserForRequest(req));
+        const dono = ownIdentityCandidates(req, dbUser).includes(String(linhas[0].owner_id));
+        if (!dono) {
+          return res.status(403).json({ error: "Como Funcionário Administrador, você só remove compromissos da sua própria agenda." });
+        }
+      }
+
+      const { error } = await sb.from("personal_events").delete().eq("id", id);
+      if (error) return res.status(500).json({ error: "Não foi possível remover o compromisso." });
+
+      await logPlatformAudit({
+        actorEmail: (req.user as any)?.email || null,
+        action: "personal_event.deleted",
+        targetType: "personal_event",
+        targetId: String(id),
+      }).catch(() => {});
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: "Erro ao remover o compromisso." });
+    }
+  });
+
+  // --- HISTÓRICO DE EVENTOS EXCLUÍDOS (exclusivo administração) ---
+  //
+  // Antes o painel lia/restaurava/expurgava direto no Supabase com a chave
+  // publicável. As políticas de `deleted_events` são `qual: true` até hoje, o
+  // que significa que QUALQUER visitante podia listar e apagar o histórico de
+  // eventos da rede inteira. As rotas abaixo colocam a decisão no servidor,
+  // onde o papel é verificado de verdade.
+  const deletedEventsStore = () => getSaasAdminClient();
+
+  /** Serializa a linha de `deleted_events` para o formato do cliente. */
+  const mapDeletedEventRow = (row: any) => ({
+    id: Number(row.id),
+    sourceTable: row.source_table,
+    sourceId: Number(row.source_id),
+    title: row.title ?? "Evento sem título",
+    payload: row.payload ?? {},
+    eventEndsAt: row.ends_at ?? row.event_ends_at ?? null,
+    deletedAt: row.deleted_at,
+    deletionReason: row.deletion_reason ?? "manual",
+    deletedBy: row.deleted_by ?? null,
+    restoredAt: row.restored_at ?? null,
+    restoredEventId: row.restored_event_id ?? null,
+  });
+
+  app.get("/api/events/deleted", requireAuth, requireAdminOrStaff, async (req: AuthRequest, res) => {
+    const sb = deletedEventsStore();
+    if (!sb) {
+      return res.status(503).json({
+        error: "O histórico de eventos excluídos exige o servidor com SUPABASE_SECRET_KEY configurado.",
+        code: "SAAS_NOT_CONFIGURED",
+      });
+    }
+    try {
+      const incluirRestaurados = String(req.query.includeRestored || "") === "1";
+      const limite = Math.min(Number(req.query.limit) || 200, 500);
+
+      let consulta = sb
+        .from("deleted_events")
+        .select("*")
+        .order("deleted_at", { ascending: false })
+        .limit(limite);
+
+      if (!incluirRestaurados) consulta = consulta.is("restored_at", null);
+
+      const { data, error } = await consulta;
+      if (error) {
+        console.warn("[Admin] Falha ao listar eventos excluídos:", error.message);
+        if (isRedeIndisponivel(error)) return responderIndisponivel(res, "Não foi possível consultar o histórico de eventos excluídos.");
+        return res.status(500).json({ error: "Não foi possível consultar o histórico de eventos excluídos." });
+      }
+
+      res.json({ events: (data || []).map(mapDeletedEventRow), retentionDays: EVENT_RETENTION_DAYS });
+    } catch (error: any) {
+      res.status(500).json({ error: "Erro ao consultar o histórico de eventos excluídos." });
+    }
+  });
+
+  // Restaura: recria o evento na tabela de origem a partir do snapshot.
+  app.post("/api/events/deleted/:id/restore", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
+    const sb = deletedEventsStore();
+    if (!sb) {
+      return res.status(503).json({ error: "Servidor sem SUPABASE_SECRET_KEY não pode restaurar eventos.", code: "SAAS_NOT_CONFIGURED" });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "Identificador inválido." });
+
+    try {
+      const { data: linhas, error: erroBusca } = await sb
+        .from("deleted_events")
+        .select("*")
+        .eq("id", id)
+        .limit(1);
+
+      if (erroBusca) return res.status(500).json({ error: "Não foi possível ler o evento excluído." });
+      if (!linhas || linhas.length === 0) return res.status(404).json({ error: "Evento excluído não encontrado." });
+
+      const registro: any = linhas[0];
+      if (registro.restored_at) return res.status(409).json({ error: "Este evento já foi restaurado anteriormente." });
+
+      const payload: Record<string, any> = { ...(registro.payload || {}) };
+      delete payload.id;
+      delete payload.archived_at;
+      delete payload.ends_at;
+      if ("is_archived" in payload) payload.is_archived = false;
+      if ("status" in payload) payload.status = "ativo";
+
+      const tabelaOrigem = registro.source_table === "eventos" ? "eventos" : "events";
+      const { data: inserido, error: erroInsert } = await sb
+        .from(tabelaOrigem)
+        .insert(payload)
+        .select("id")
+        .limit(1);
+
+      if (erroInsert) {
+        console.warn("[Admin] Falha ao recriar evento restaurado:", erroInsert.message);
+        return res.status(500).json({ error: "Não foi possível recriar o evento na agenda." });
+      }
+
+      const restoredEventId = inserido?.[0]?.id ?? null;
+      const { error: erroMarcar } = await sb
+        .from("deleted_events")
+        .update({ restored_at: new Date().toISOString(), restored_event_id: restoredEventId })
+        .eq("id", id);
+
+      if (erroMarcar) console.warn("[Admin] Evento recriado, mas restored_at não foi gravado:", erroMarcar.message);
+
+      await logPlatformAudit({
+        actorEmail: (req.user as any)?.email || null,
+        action: "event.restored",
+        targetType: "deleted_event",
+        targetId: String(id),
+        metadata: { restoredEventId, sourceTable: tabelaOrigem },
+      }).catch(() => {});
+
+      res.json({ success: true, restoredEventId });
+    } catch (error: any) {
+      res.status(500).json({ error: "Erro ao restaurar o evento." });
+    }
+  });
+
+  // Expurgo definitivo — irreversível, só o Chefe.
+  app.delete("/api/events/deleted/:id", requireAuth, requireChefeAdmin, async (req: AuthRequest, res) => {
+    const sb = deletedEventsStore();
+    if (!sb) return res.status(503).json({ error: "Servidor sem SUPABASE_SECRET_KEY.", code: "SAAS_NOT_CONFIGURED" });
+
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "Identificador inválido." });
+
+    try {
+      const { error } = await sb.from("deleted_events").delete().eq("id", id);
+      if (error) return res.status(500).json({ error: "Não foi possível excluir definitivamente." });
+
+      await logPlatformAudit({
+        actorEmail: (req.user as any)?.email || null,
+        action: "event.purged",
+        targetType: "deleted_event",
+        targetId: String(id),
+      }).catch(() => {});
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: "Erro ao excluir definitivamente o evento." });
     }
   });
 

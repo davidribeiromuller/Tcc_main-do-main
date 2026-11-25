@@ -115,8 +115,13 @@ console.log("\n=== 5. Senhas em texto claro ===");
 {
   ok("server grava hash no cadastro", /hashPassword\(password\)/.test(server));
   ok("server migra senha legada no login", /needsUpgrade/.test(server));
-  ok("contas escolares gravam hash", /password: hashPassword\(dados\.password\)/.test(schoolAccounts));
-  ok("redefinição de conta escolar grava hash", /password: hashPassword\(novaSenha\)/.test(schoolAccounts));
+  // Rodada 35: a gravação da senha saiu do navegador e foi para o servidor.
+  ok("contas escolares gravam hash",
+    /from\("school_accounts"\)[\s\S]{0,700}password: hashPassword\(/.test(server) &&
+    /\/api\/admin\/school-accounts/.test(schoolAccounts));
+  ok("redefinição de conta escolar grava hash",
+    /password: hashPassword\(novaSenha\)/.test(server) &&
+    /redefinirSenhaContaEscolar/.test(schoolAccounts));
   ok("autenticação escolar usa verifyPassword", /verifyPassword\(password, conta\.password\)/.test(schoolAccounts));
   ok("seed do banco não cria senha fixa", !semComentarios(dbIndex).includes("senha123") && dbIndex.includes("BOOTSTRAP_ADMIN_PASSWORD"));
   ok("seed exige admin inexistente antes de criar", /is_admin = true/.test(dbIndex) && /adminCount/.test(dbIndex));
