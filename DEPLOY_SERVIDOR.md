@@ -197,3 +197,57 @@ secreta** no seu provedor. O que falta é:
 Se preferir, também posso adicionar um workflow do GitHub Actions que faça o
 deploy automático a cada push na `main` (Railway e Render já fazem isso sozinhos
 ao conectar o repositório).
+
+---
+
+## Rodada 42 — checklist para o ADM funcionar no endereço público
+
+O ADM precisa de um processo Node. `github.io` é hospedagem estática e nunca vai
+executar `server.ts`. Passos mínimos:
+
+### 1. Variáveis de ambiente no host
+
+| Variável | Obrigatória | Para que |
+|---|---|---|
+| `SUPABASE_URL` | sim | `https://jaoheenjltzzglfncgfq.supabase.co` |
+| `SUPABASE_SECRET_KEY` | sim | acesso ao banco com RLS contornado (só no servidor) |
+| `SESSION_SECRET` | sim | assina o cookie/token de sessão (32+ caracteres) |
+| `PLATFORM_OWNER_EMAILS` | para o painel Master | `professor@gmail.com` |
+| `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` | para o build | chave publicável, vai no bundle |
+| `WHATSAPP_TOKEN` / `WHATSAPP_PHONE_ID` | opcional | aviso automático de leads |
+
+### 2. Nunca coloque no frontend
+
+`SUPABASE_SECRET_KEY`, `SESSION_SECRET` e `WHATSAPP_TOKEN` **não** podem ter
+prefixo `VITE_` — tudo com `VITE_` é assado no bundle e fica visível no navegador.
+
+### 3. Deploy
+
+```bash
+# Railway
+railway init && railway up          # usa railway.json + Dockerfile
+railway variables set SUPABASE_URL=... SUPABASE_SECRET_KEY=... \
+  SESSION_SECRET=... PLATFORM_OWNER_EMAILS=professor@gmail.com
+```
+
+Healthcheck em `/api/health` já está configurado. O mesmo processo serve o app
+(`dist/`) e a API (`/api/*`) na mesma origem — o que evita CORS e cookie
+cross-site.
+
+### 4. Conferir depois do deploy
+
+```bash
+curl https://SEU-DOMINIO/api/health                     # {"status":"ok"}
+curl -X POST https://SEU-DOMINIO/api/auth/local-login-password \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"professor@gmail.com","password":"1234"}'   # deve devolver token
+```
+
+Com token:
+
+```bash
+curl https://SEU-DOMINIO/api/master/plans -H "Authorization: Bearer $TOKEN"
+```
+
+Se `/api/master/plans` responder 503 `MASTER_NOT_CONFIGURED`, falta
+`PLATFORM_OWNER_EMAILS`.

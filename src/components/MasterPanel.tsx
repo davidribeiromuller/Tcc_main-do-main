@@ -17,13 +17,28 @@ import {
 } from "lucide-react";
 import { fetchJsonApi, getStoredSessionToken } from "../lib/staticHosting.ts";
 import { formatBRL } from "../lib/subscription.ts";
+import PlansManagementTab from "./PlansManagementTab.tsx";
 
-type Tab = "overview" | "schools" | "subscriptions" | "finance" | "partners" | "audit" | "leads";
+type Tab =
+  | "overview"
+  | "schools"
+  | "subscriptions"
+  | "plans"
+  | "finance"
+  | "partners"
+  | "audit"
+  | "leads";
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "overview", label: "Visão geral", icon: LayoutDashboard },
   { id: "schools", label: "Instituições", icon: Building2 },
   { id: "subscriptions", label: "Assinaturas", icon: CheckCircle2 },
+  /*
+    PEDIDO (rodada 42): "crie uma página para essa opção no dashboard com a
+    tabela de preços pré-estabelecidas anteriormente". Fica ao lado de
+    Assinaturas porque é onde se decide o que se cobra.
+  */
+  { id: "plans", label: "Planos e preços", icon: CreditCard },
   { id: "finance", label: "Financeiro", icon: CreditCard },
   { id: "partners", label: "Parceiros", icon: Handshake },
   { id: "leads", label: "Leads", icon: Users },
@@ -396,6 +411,8 @@ export default function MasterPanel({ onNavigate, onShowToast }: Props) {
           </table>
         </section>
       )}
+
+      {tab === "plans" && <PlansManagementTab onShowToast={onShowToast} />}
 
       {tab === "finance" && (
         <div className="space-y-5">
