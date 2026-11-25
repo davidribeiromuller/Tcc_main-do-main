@@ -2,6 +2,7 @@ import { getSupabaseClient, isSupabaseConfigured } from "./supabase.ts";
 import { hashPassword, verifyPassword } from "./security.ts";
 import { isStaticHosting, getStoredSessionToken, isServerAvailable } from "./staticHosting.ts";
 import { User } from "../types.ts";
+import { mensagemPrecisaServidor } from "./mensagensServidor.ts";
 
 /**
  * Converte um registro da tabela 'users' do Supabase para a interface User do frontend.
@@ -362,9 +363,10 @@ export async function findUserByPhoneDirectInSupabase(phone: string): Promise<Us
  * explicação que já era conhecida.
  */
 export const MENSAGEM_LOGIN_EXIGE_SERVIDOR =
-  "O login por e-mail e senha só funciona com o servidor do eloEscola em execução. " +
-  "Esta versão publicada é a demonstração estática: use \"Entrar como visitante\" " +
-  "para conhecer o aplicativo.";
+  "Você está na versão publicada do eloEscola, que é somente leitura: ela mostra " +
+  "os dados, mas não consegue conferir senhas. O login por e-mail e senha funciona " +
+  "na versão com servidor ativo. Aqui você pode entrar como visitante para conhecer " +
+  "o aplicativo.";
 
 /**
  * Realiza autenticação local diretamente no Supabase por e-mail e senha.
@@ -436,7 +438,10 @@ export async function authenticateUserDirectInSupabase(
       return {
         user: null,
         error: isStaticHosting()
-          ? "O login com senha exige o servidor do eloEscola. Esta demonstração estática permite apenas o modo visitante."
+          ? mensagemPrecisaServidor(
+              "O login com senha",
+              "Nesta versão publicada, entre como visitante."
+            )
           : "Usuário não encontrado no diretório escolar.",
       };
     }
@@ -509,7 +514,7 @@ export async function registerUserDirectInSupabase(
     return {
       user: null,
       error:
-        "A criação de conta exige o servidor do eloEscola em execução, porque a senha é " +
+        "A criação de conta exige uma versão do eloEscola com servidor ativo, porque a senha é " +
         "protegida por criptografia que só existe no servidor. Esta versão publicada é a " +
         "demonstração estática: entre como visitante para conhecer o aplicativo.",
     };

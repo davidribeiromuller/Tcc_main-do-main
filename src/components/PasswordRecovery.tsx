@@ -18,6 +18,7 @@ import {
 import logoImg from "../assets/images/logo.jpg";
 import { findUserByPhoneDirectInSupabase } from "../lib/usersService.ts";
 import { isSupabaseConfigured } from "../lib/supabase.ts";
+import { mensagemPrecisaServidor } from "../lib/mensagensServidor.ts";
 
 interface PasswordRecoveryProps {
   onNavigate: (screen: string) => void;
@@ -193,7 +194,10 @@ export default function PasswordRecovery({
       // Sem backend não existe recuperação segura: um token gerado no navegador
       // (como antes) permitiria trocar a senha de qualquer conta.
       setErrorMessage(
-        "A recuperação de senha precisa do servidor do eloEscola. Verifique sua conexão ou fale com a secretaria da escola."
+        mensagemPrecisaServidor(
+          "A recuperação de senha",
+          "Enquanto isso, peça à secretaria da escola para redefinir a sua senha."
+        )
       );
     } catch (err: any) {
       console.error("Erro ao solicitar recuperação:", err);

@@ -19,6 +19,7 @@
  *    VÊ-LA e ALTERÁ-LA na ficha da conta.
  *  - Nada é publicado automaticamente: a conta nasce "pendente de verificação".
  */
+import { mensagemPrecisaServidor } from "./mensagensServidor.ts";
 
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase.ts";
 import { fetchJsonApiWithAuth, isServerAvailable } from "./staticHosting.ts";
@@ -215,7 +216,10 @@ export async function listarContasEscolares(opcoes?: {
         return {
           contas: [],
           error:
-            "A lista de contas escolares só pode ser lida pelo servidor do eloEscola. Em hospedagem estática, use o ambiente com backend.",
+            mensagemPrecisaServidor(
+              "Ver a lista de contas escolares",
+              "Ela contém dados de acesso e por isso só é liberada para administradores, com o servidor ativo."
+            )
         };
       }
       if (error.code === "42P01" || /does not exist|schema cache/i.test(msg)) {
@@ -261,7 +265,7 @@ async function chamarAcaoContaEscolar(
     if (!res) {
       return {
         success: false,
-        error: "O servidor do eloEscola não respondeu. Esta ação exige backend (não funciona na versão estática).",
+        error: mensagemPrecisaServidor("Esta ação")
       };
     }
     if (res.status === 401) return { success: false, error: "Sua sessão expirou. Entre novamente." };
@@ -334,7 +338,10 @@ export async function criarContaEscolar(
   return {
     success: false,
     error:
-      "A criação de contas escolares exige o servidor do eloEscola (o banco não aceita mais escrita direta pelo navegador).",
+      mensagemPrecisaServidor(
+        "Criar contas escolares",
+        "A senha precisa ser gravada no servidor — o banco não aceita criação de conta pelo navegador."
+      )
   };
 }
 
@@ -399,7 +406,7 @@ export async function autenticarContaEscolar(
     return {
       user: null,
       error:
-        "O acesso institucional exige o servidor do eloEscola em execução. " +
+        "O acesso institucional exige a versão do eloEscola com servidor ativo. " +
         "Esta versão publicada é apenas a demonstração estática.",
     };
   }

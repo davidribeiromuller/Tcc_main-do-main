@@ -213,8 +213,11 @@ console.log("\n[7] Mensagem do login não culpa 'o servidor do eloEscola'");
   const fs = await import("node:fs");
   const login = fs.readFileSync("src/components/Login.tsx", "utf8");
   check("o texto explica o motivo e dá a saída", () => {
-    assert.match(login, /só funciona na versão com servidor ativo/);
-    assert.match(login, /Entrar como visitante/);
+    // A intenção: dizer o limite (somente leitura / versão com servidor) sem
+    // jargão. O texto exato pode mudar; o que não pode é faltar a saída.
+    assert.match(login, /somente leitura/);
+    assert.match(login, /versão com servidor/);
+    assert.match(login, /visitante/i);
   });
   check("não diz mais que o servidor 'precisa' sem explicar", () => {
     assert.doesNotMatch(login, /precisa do servidor do eloEscola\. Esta versão publicada é a demonstração estática/);

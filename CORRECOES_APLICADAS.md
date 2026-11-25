@@ -2612,3 +2612,102 @@ secreta no bundle (número do WhatsApp aparece 1×, como esperado).
   isso que o painel do ADM ainda não aparece** na conta publicada: as correções
   do login ainda não estão no ar.
 - **WhatsApp automático**: só com `WHATSAPP_TOKEN` + `WHATSAPP_PHONE_ID`.
+
+---
+
+## §41 — O jargão "servidor do eloEscola" saiu de todo o app (e o que o site publicado realmente faz)
+
+Depois do merge do §40 eu conferi o **site publicado**, não só o código: baixei o
+bundle em produção (`index-Ce8to1nc.js`) e procurei os textos novos. As rodadas
+39 e 40 estavam lá — mas apareceram frases antigas que eu tinha deixado para
+trás:
+
+```
+"O login com senha exige o servidor do eloEscola. Esta demonstração estática
+ permite apenas o modo visitante."
+```
+
+Na rodada 40 eu corrigi **um** arquivo (`Login.tsx`) e dei o item como
+resolvido. Estava errado: a mesma frase sobrevivia em **8 arquivos** —
+`usersService`, `staticHosting`, `schoolAccountsService`, `schoolProfilesService`,
+`profileChangeService`, `plansService`, `PasswordRecovery`, `SchoolSubscription`.
+
+### Por que essa frase é pior do que parece
+
+"Servidor do eloEscola" é vocabulário de quem construiu. Para o diretor que
+tentou entrar com a senha, "servidor" parece um aparelho que desligou — ou que o
+sistema caiu. Não é nada disso: o app está funcionando **exatamente como
+publicado**, e a limitação é do modo de hospedagem.
+
+`src/lib/mensagensServidor.ts` centraliza a explicação, com a regra: dizer **o
+que** não dá para fazer, **por que**, e **o que fazer agora**.
+
+| Antes | Agora |
+|---|---|
+| "O login com senha exige o servidor do eloEscola. Esta demonstração estática permite apenas o modo visitante." | "Você está na versão publicada do eloEscola, que é **somente leitura**: ela mostra os dados, mas não consegue conferir senhas. O login funciona na versão com servidor ativo. Aqui você pode entrar como visitante." |
+
+Nenhuma mensagem culpa "conexão" — o teste proíbe explicitamente as palavras
+`conexão`, `fora do ar`, `caiu`, porque nada disso aconteceu.
+
+### O que este teste impede
+
+`test-round41-linguagem.mjs` (**20 verificações**) varre todo o `src/` e falha se
+qualquer **string renderizada** voltar a citar o termo. Comentários continuam
+podendo citá-lo: eles documentam a origem do problema, e apagar o histórico
+garantiria que alguém reintroduzisse o erro. O teste exige as duas coisas —
+proíbe na interface, **exige** no comentário.
+
+### A pergunta que o autor do TCC fez, respondida com precisão
+
+> "não sei se você já deu push para o git para substituir as novas alterações,
+> mas ainda não aparece o painel de adm nas contas adm"
+
+Duas coisas separadas, e as duas explicadas:
+
+**1. Push — resolvido.** O PR #42 foi mergeado com squash (`413ee5d`), o deploy
+rodou verde e o bundle que está em produção é **byte-idêntico** ao build local
+desse commit. As rodadas 39 e 40 **estão no ar**.
+
+**2. O painel de ADM no site publicado não vai abrir — e não é bug.**
+Verificado no banco, com o conector do Supabase:
+
+```sql
+select tablename, policyname, cmd, roles, qual from pg_policies
+where tablename in ('users','school_accounts');
+```
+
+Resultado: **`users` só tem `users_self_read` e `users_self_update`, ambas para
+`authenticated`, com `auth.uid()::text = uid`. Não existe política para `anon`.**
+
+Ou seja: o navegador anônimo lê **zero** linhas de `users` — e isso está
+**correto**, porque a tabela guarda hash de senha. O login por senha depende de
+um processo com a chave secreta, que o GitHub Pages não tem. O app já detecta
+isso (`isStaticHosting()`), nem tenta a consulta, e mostra a mensagem honesta.
+
+Três saídas, em ordem de custo:
+
+1. **Rodar o servidor** (`server.ts`) — é para isso que existe o
+   `DEPLOY_SERVIDOR.md` e a aprovação de Railway/Render/Fly da rodada 38. Ali o
+   `professor@gmail.com` / `1234` entra e o painel abre com os 27 usuários reais.
+2. **Supabase Auth** — trocar a autenticação própria por `auth.signInWithPassword`,
+   o que permitiria login no navegador com a chave publicável. É mudança de
+   arquitetura, não correção: as senhas atuais (texto claro em
+   `school_accounts`, scrypt em `users`) teriam de ser migradas para o provedor.
+   **Não fiz** — mexe no modelo de dados que o TCC documenta.
+3. Aceitar que o site publicado é vitrine somente leitura e usar o painel no
+   ambiente com servidor.
+
+Escolhi **não** "resolver" isso liberando leitura de `users` para `anon`: exporia
+hashes de senha de 27 pessoas para qualquer visitante. Seria trocar um problema
+de usabilidade por uma falha de segurança.
+
+### Provas da rodada 41
+
+- `test-round41-linguagem.mjs`: **20/20**.
+- **39 suítes, 0 falhas**; `tsc` limpo; `npm run build` OK.
+- Bundle de produção conferido por download: `index-Ce8to1nc.js` = build local do
+  commit mergeado.
+- Bundle novo: **zero** ocorrências de "servidor do eloEscola".
+- `test-round37` e `test-round40` tiveram asserções ajustadas: elas exigiam a
+  frase antiga literal — a intenção era "explicar o limite e apontar a saída",
+  não "citar o jargão".

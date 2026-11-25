@@ -2,6 +2,7 @@ import { getSupabaseClient, isSupabaseConfigured } from "./supabase.ts";
 import { fetchJsonApiWithAuth } from "./staticHosting.ts";
 import { updateUserDirectInSupabase } from "./usersService.ts";
 import type { User } from "../types.ts";
+import { mensagemPrecisaServidor } from "./mensagensServidor.ts";
 
 /**
  * Solicitações de alteração de perfil (rodada 25).
@@ -271,7 +272,7 @@ export async function aprovarSolicitacaoDePerfil(params: {
     if (!res) {
       return {
         user: null,
-        error: new Error("Aprovar alterações de perfil exige o servidor do eloEscola."),
+        error: new Error(mensagemPrecisaServidor("Aprovar alterações de perfil")),
       };
     }
     if (res.status === 403) return { user: null, error: new Error("Somente o Administrador Chefe aprova alterações de perfil.") };
