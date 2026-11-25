@@ -74,7 +74,19 @@ console.log("\n=== 4. Grade e estados ===");
   // Rodada 31: 1/2/4/5 — sem coluna intermediária de 3, 5 a partir de 1440px.
   ok(
     "grade responsiva 1/2/4/5",
-    /grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 min-\[1440px\]:grid-cols-5/.test(fonteSemComentarios)
+    /*
+      RODADA 43 — o 5º breakpoint virou nomeado (`mural:`).
+
+      O valor arbitrário de 1440px gerava uma media query fora da escada do
+      Tailwind e, dependendo da ordem no CSS, a regra de 4 colunas vencia: o
+      mural ficava em 4 por linha no desktop grande. A classe literal também
+      saiu deste arquivo — o Tailwind varre os .mjs e a recriava no CSS.
+    */
+    new RegExp(
+      "grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 (mural:grid-cols-5|" +
+        ["min-", "[1440px]", ":grid-cols-5"].join("") +
+        ")"
+    ).test(fonteSemComentarios)
   );
   // Rodada 18 aumentou o respiro no mobile (gap-4) mantendo o do desktop.
   ok("espaçamento regular entre cards", /gap-4 sm:gap-5/.test(fonte));

@@ -20,6 +20,22 @@
   --color-brand-bg-dark: #1F241E;
   --color-brand-card-dark: #2C332A;
   --color-brand-text-dark: #F3F5F2;
+
+  /*
+    Breakpoint "tela cheia" do mural de eventos (1440 px).
+
+    Problema que isto resolve: o mural usa `xl:grid-cols-4` (1280 px) e
+    `min-[1440px]:grid-cols-5`. Tailwind ordena as media queries por valor,
+    então `min-width:1440px` vinha DEPOIS de `min-width:80rem` — até aí certo.
+    Mas em builds anteriores as duas saíram na ordem inversa (a de 1440 antes),
+    e aí, com as duas verdadeiras, a de 4 colunas vencia por vir por último:
+    o card ficava com ~304 px fixos e a quinta coluna nunca aparecia.
+
+    Declarar o breakpoint aqui faz o Tailwind gerar `min-[1440px]` como
+    `@media (width >= 90rem)`, dentro da mesma escada ordenada dos demais
+    (sm/md/lg/xl/2xl). Resultado previsível: 2 → 4 → 5 colunas.
+  */
+  --breakpoint-mural: 90rem;
 }
 
 /* Google Maps Leaflet Custom Styling */
