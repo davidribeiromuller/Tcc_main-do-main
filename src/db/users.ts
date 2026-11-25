@@ -1,4 +1,13 @@
 import { db, isDbCachedOffline, markDbOffline, markDbOnline } from './index.ts';
+import {
+  usaSupabaseComoFonte,
+  listarUsuariosDoSupabase,
+  buscarUsuarioNoSupabasePorEmail,
+  buscarUsuarioNoSupabasePorUid,
+  buscarUsuarioNoSupabasePorId,
+  atualizarUsuarioNoSupabase,
+  criarUsuarioNoSupabase,
+} from './supabaseUsers.ts';
 import { users, events } from './schema.ts';
 import { eq, sql } from 'drizzle-orm';
 import {
@@ -35,6 +44,46 @@ export async function getOrCreateUser(
   role?: string,
   password?: string
 ) {
+  if (usaSupabaseComoFonte()) {
+    /*
+      RODADA 39 — criação de conta no Supabase.
+
+      O caminho abaixo (Drizzle → fallback JSON) criava a conta no arquivo
+      local quando não havia `DATABASE_URL`. Em produção isso fazia o cadastro
+      "dar certo" e a conta desaparecer no deploy seguinte. Aqui a linha vai
+      para `users`.
+
+      Privilégio nunca vem do e-mail (o código antigo promovia
+      `diretoria@helenawysocki.com` e `davidribeiromuller2009@gmail.com` a
+      Diretor por string fixa, dentro do arquivo público). Agora a conta nasce
+      com o `role` recebido — e o cadastro público passa "Aluno".
+    */
+    const cleanEmail = (email || '').trim().toLowerCase();
+    const existente = await buscarUsuarioNoSupabasePorEmail(cleanEmail).catch(() => null);
+    if (existente) {
+      return atualizarUsuarioNoSupabase(existente.id, {
+        uid,
+        provider,
+        ...(password ? { password } : {}),
+        ...(fotoPerfil ? { foto_perfil: fotoPerfil } : {}),
+        ...(nome ? { nome } : {}),
+        lastActiveAt: new Date().toISOString(),
+        lastLogin: new Date().toISOString(),
+      });
+    }
+    return criarUsuarioNoSupabase({
+      uid,
+      email: cleanEmail,
+      nome: nome || cleanEmail.split('@')[0],
+      foto_perfil: fotoPerfil || '',
+      provider,
+      // Cadastro público nunca cria administrador.
+      role: role || 'Aluno',
+      ativo: true,
+      isAdmin: false,
+      password,
+    });
+  }
   if (isDbCachedOffline()) {
     return getOrCreateUserFallback(uid, email, nome, fotoPerfil, provider, role, password);
   }
@@ -128,6 +177,9 @@ export async function getOrCreateUser(
 }
 
 export async function getUserByUid(uid: string) {
+  if (usaSupabaseComoFonte()) {
+    return buscarUsuarioNoSupabasePorUid(uid);
+  }
   if (isDbCachedOffline()) {
     return getUserByUidFallback(uid);
   }
@@ -145,6 +197,22 @@ export async function getUserByUid(uid: string) {
 export async function getUserByEmail(email: string) {
   const cleanEmail = (email || "").trim().toLowerCase();
   if (!cleanEmail) return null;
+/*
+  RODADA 39 — ordem das fontes de dados.
+
+  Antes: Drizzle/Postgres → fallback JSON. Sem `DATABASE_URL` (o caso do
+  deploy, que usa Supabase via REST) TODA leitura caía no JSON de
+  demonstração (`src/db/fallback_users.json`), e o painel do administrador
+  mostrava 5 contas fictícias em vez das 27 do banco. Pior: as edições
+  feitas no painel eram gravadas nesse JSON e sumiam no deploy seguinte.
+
+  Agora: quando existe `SUPABASE_SECRET_KEY` (produção), o Supabase manda.
+  Se ele falhar, o erro é propagado — nunca substituído por dados de
+  demonstração, que foi o que escondeu o problema por várias rodadas.
+*/
+  if (usaSupabaseComoFonte()) {
+    return buscarUsuarioNoSupabasePorEmail(cleanEmail);
+  }
   if (isDbCachedOffline()) {
     return getUserByEmailFallback(cleanEmail);
   }
@@ -184,6 +252,11 @@ export async function getUserByPhone(phone: string) {
 }
 
 export async function updateUserPassword(userIdOrEmail: number | string, newPassword: string) {
+  if (usaSupabaseComoFonte()) {
+    // A senha chega aqui JÁ com hash (o chamador usa hashPassword).
+    await atualizarUsuarioNoSupabase(userIdOrEmail, { password: newPassword });
+    return null;
+  }
   try {
     updateUserPasswordFallback(userIdOrEmail, newPassword);
   } catch (_) {}
@@ -220,6 +293,11 @@ export async function updateUserPassword(userIdOrEmail: number | string, newPass
 }
 
 export async function updateUserByUid(uid: string, data: any) {
+  if (usaSupabaseComoFonte()) {
+    const alvo = await buscarUsuarioNoSupabasePorUid(uid);
+    if (!alvo) return null;
+    return atualizarUsuarioNoSupabase(alvo.id, data);
+  }
   if (isDbCachedOffline()) {
     return updateUserByUidFallback(uid, data);
   }
@@ -258,6 +336,21 @@ export async function updateUserByUid(uid: string, data: any) {
 export async function updateUserById(id: number, data: any) {
   const cleanEmail = data?.email ? String(data.email).trim().toLowerCase() : null;
   const isSafeInteger = Number.isInteger(id) && id > 0 && id <= 2147483647;
+
+  if (usaSupabaseComoFonte()) {
+    /*
+      RODADA 39 — edições do painel precisam chegar ao banco.
+
+      Antes, esta função escalava para o JSON local: o Chefe trocava a senha
+      de um usuário no painel, a tela dizia "salvo", e o login do usuário
+      continuava com a senha antiga (ou a conta sumia no deploy seguinte).
+    */
+    const alvo =
+      (isSafeInteger ? await buscarUsuarioNoSupabasePorId(id).catch(() => null) : null) ||
+      (cleanEmail ? await buscarUsuarioNoSupabasePorEmail(cleanEmail).catch(() => null) : null);
+    if (!alvo) return null;
+    return atualizarUsuarioNoSupabase(alvo.id, data);
+  }
 
   if (isDbCachedOffline()) {
     return updateUserByIdFallback(id, data, cleanEmail);
@@ -345,6 +438,10 @@ export async function updateUserById(id: number, data: any) {
 }
 
 export async function listAllUsers() {
+  if (usaSupabaseComoFonte()) {
+    const usuarios = await listarUsuariosDoSupabase();
+    return usuarios || [];
+  }
   if (isDbCachedOffline()) {
     return listAllUsersFallback();
   }

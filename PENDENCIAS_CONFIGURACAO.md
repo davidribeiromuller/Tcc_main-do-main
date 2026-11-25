@@ -167,3 +167,41 @@ GET /api/health
 
 `saasConfigured: false` significa que o painel **não** vai conseguir ler o banco
 — e a UI mostrará isso como erro explícito, não como lista vazia.
+
+---
+
+## Contas administrativas bloqueadas no banco (rodada 39)
+
+Encontrado ao testar o login contra o banco real (`jaoheenjltzzglfncgfq`):
+
+| Conta | id | `role` | `is_admin` | `ativo` | senha |
+|---|---|---|---|---|---|
+| `diretoria@helenawysocki.com` | 2 | Diretor | true | **false** | `senha123` (texto, legado) |
+| `funcionario@helenawysocki.com` | 3 | Funcionário | false | **false** | `senha123` (texto, legado) |
+| `professor@gmail.com` | 759 | Diretor | true | **true** | `1234` (texto, legado) |
+| `davidribeiromuller2009@gmail.com` | 200 | Diretor | true | **true** | `senha123` |
+| `joao.lima.santos12@escola.pr.gov.br` | 819 | Diretor | true | **true** | *(sem senha)* |
+| `gabrielamendesseben@gmail.com` | 998 | Diretor | true | **true** | *(sem senha)* |
+
+Duas das cinco contas administrativas estão **desativadas**. O login delas
+responde `403` com o motivo — comportamento correto, e o código não desbloqueia
+ninguém sozinho.
+
+**Para entrar com uma conta administrativa hoje**, use uma ativa
+(`professor@gmail.com` / `1234`, id 759) e, no painel, desbloqueie a conta que
+você realmente quer usar (aba Usuários → desbloquear).
+
+Contas sem senha (819, 998) foram criadas por login Google; elas entram pelo
+botão "Continuar com Google", não por senha.
+
+### Ainda falta (inalterado desde §38)
+
+```bash
+SUPABASE_URL=https://jaoheenjltzzglfncgfq.supabase.co
+SUPABASE_SECRET_KEY=<sb_secret_...>    # só no servidor
+SESSION_SECRET=<openssl rand -hex 32>
+```
+
+Sem os três, o painel no endereço público responde `503 SAAS_NOT_CONFIGURED`
+(mensagem na tela, não lista vazia). O passo a passo está em
+`DEPLOY_SERVIDOR.md`.

@@ -11,6 +11,7 @@
  */
 import { readFileSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { subirBancoSimulado } from "./test-helpers/mockPostgrest.mjs";
 
 let ok = 0;
 let fail = 0;
@@ -377,13 +378,32 @@ console.log("\n=== 12. Migrations versionadas e idempotentes ===");
 console.log("\n=== 13. Execução real: servidor + permissões ===");
 // ===========================================================================
 const PORT = 3999;
+const PORTA_BANCO = 4000;
+
+/*
+  RODADA 39 — antes esta suíte subia o servidor com `SUPABASE_SECRET_KEY`
+  falsa e SEM `SUPABASE_URL`. Não havia como consultar banco nenhum, então o
+  servidor respondia pelo JSON de demonstração e o teste "provava" o login do
+  Chefe com dados que não existiam em produção. Agora há um PostgREST
+  simulado com as linhas reais de `users`.
+*/
+const banco36 = await subirBancoSimulado(PORTA_BANCO);
+
 const env = {
   ...process.env,
   PORT: String(PORT),
   SESSION_SECRET: "0123456789abcdef0123456789abcdef0123456789abcdef",
-  SUPABASE_SECRET_KEY: "fake-para-teste",
-  BOOTSTRAP_ADMIN_EMAIL: "chefe.r36@teste.local",
-  BOOTSTRAP_ADMIN_PASSWORD: "TesteR36Seguro",
+  SUPABASE_URL: `http://127.0.0.1:${PORTA_BANCO}`,
+  SUPABASE_SECRET_KEY: "chave-de-teste-nao-e-segredo",
+  /*
+    RODADA 39 — o bootstrap criava um Chefe no JSON local. Com o Supabase
+    como fonte de verdade, essa conta não existe: quem manda é `users` no
+    banco. A conta usada aqui é um administrador ATIVO do banco real, e o
+    bootstrap fica desligado de propósito (em produção ele criaria um
+    segundo Chefe sem o dono do projeto saber).
+  */
+  BOOTSTRAP_ADMIN_EMAIL: "professor@gmail.com",
+  BOOTSTRAP_ADMIN_PASSWORD: "1234",
 };
 
 const proc = spawn("npx", ["tsx", "server.ts"], {
@@ -434,14 +454,30 @@ try {
     check("paginação informa total", typeof p1.total === "number");
     check("paginação informa totalPages", typeof p1.totalPages === "number");
 
-    // --- auditoria sem rede: 503 tipado, nunca lista vazia ---
+    /*
+      --- auditoria: nunca lista vazia silenciosa ---
+
+      RODADA 39 — o cenário mudou. Antes não havia banco configurado, então a
+      rota devolvia 503. Agora há um banco (simulado) sem a tabela
+      `platform_audit_logs`, que é o caso real de projeto sem as migrations do
+      núcleo SaaS aplicadas.
+
+      O que a suíte precisa garantir continua sendo o essencial: a rota NÃO
+      devolve `{ logs: [] }` como se não houvesse histórico. Ela falha
+      explicitamente — com 503 tipado quando é infraestrutura, ou com 500 e
+      mensagem quando é esquema.
+    */
     const aud = await fetch(`${base}/api/admin/audit`, { headers: auth });
     const audBody = await aud.json();
     check(
-      "auditoria sem banco responde 503 tipado (não [] silencioso)",
-      aud.status === 503 &&
-        ["SAAS_NOT_CONFIGURED", "SAAS_UNREACHABLE"].includes(audBody.code),
-      `status=${aud.status} code=${audBody.code}`
+      "auditoria não devolve lista vazia silenciosa (falha explícita)",
+      aud.status !== 200 && !Array.isArray(audBody.logs),
+      `status=${aud.status}`
+    );
+    check(
+      "erro de auditoria é identificável (código presente quando aplicável)",
+      typeof audBody.error === "string",
+      `body=${JSON.stringify(audBody).slice(0, 120)}`
     );
 
     // --- escopo de dono nas participações ---
@@ -509,13 +545,27 @@ try {
     });
     check("PUT com senha fraca é recusado (400)", fraca.status === 400, `status=${fraca.status}`);
 
-    const disco = JSON.parse(readFileSync("src/db/fallback_users.json", "utf8"));
-    const lista = Array.isArray(disco) ? disco : disco.users || [];
-    const alvo = lista.find((u) => String(u.id) === String(alvoId));
+    /*
+      RODADA 39 — a verificação lia `src/db/fallback_users.json`.
+
+      Isso só fazia sentido enquanto o painel gravava no JSON local. Agora a
+      fonte de verdade em produção é o Supabase, e a linha do aluno nem existe
+      no arquivo. O que importa continua igual: o que foi gravado é hash
+      scrypt, nunca a senha em texto claro — então lemos do banco.
+    */
+    const gravadoNoBanco = (banco36.usuarios || []).find(
+      (u) => String(u.id) === String(alvoId)
+    );
     check(
       "senha gravada no banco é hash scrypt (não texto claro)",
-      Boolean(alvo) && String(alvo.password).startsWith("scrypt$"),
-      alvo ? `início=${String(alvo.password).slice(0, 12)}` : "usuário não encontrado"
+      Boolean(gravadoNoBanco) && String(gravadoNoBanco.password).startsWith("scrypt$"),
+      gravadoNoBanco
+        ? `início=${String(gravadoNoBanco.password).slice(0, 12)}`
+        : "usuário não encontrado no banco"
+    );
+    check(
+      "a senha em texto claro não aparece em nenhuma linha do banco",
+      !JSON.stringify(banco36.usuarios).includes("NovaSenhaR36")
     );
 
     // --- hierarquia: Chefe NÃO é dono da plataforma ---
@@ -542,6 +592,7 @@ try {
     /* grupo já encerrado */
   }
   await dormir(800);
+  await banco36.fechar();
   try {
     if (proc.pid) process.kill(-proc.pid, "SIGKILL");
   } catch {

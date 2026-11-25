@@ -230,10 +230,16 @@ export default function Settings({
 
   const fetchDbStatus = () => {
     setIsLoadingDbStatus(true);
-    fetch("/api/db-status")
-      .then((res) => res.json())
+    /*
+      RODADA 39 — `fetch` cru numa rota que não existe na hospedagem estática
+      resultava em 404 no console e, pior, `res.json()` sobre o HTML do
+      fallback de SPA. `fetchJsonApi` devolve `null` e a tela mostra o estado
+      "sem servidor" em vez de erro.
+    */
+    fetchJsonApi("/api/db-status")
+      .then((res) => (res ? res.json() : null))
       .then((data) => {
-        setDbStatus(data);
+        setDbStatus(data ?? null);
         setIsLoadingDbStatus(false);
       })
       .catch((err) => {

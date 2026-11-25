@@ -2314,3 +2314,169 @@ em `503 SAAS_NOT_CONFIGURED`, porque o backend não descobre a URL sozinho. O
 Suíte nova: `test-round38-deploy.mjs` — **38 verificações** (mesma origem,
 artefatos, segurança do Dockerfile, nenhum segredo versionado, o par obrigatório,
 cobertura da documentação).
+
+---
+
+## §39 — Os erros do console e o ADM que não aparecia (25/11)
+
+O relato veio com dois prints do console do GitHub Pages e uma frase:
+
+> "entre com conta adm, e não apareceu [o painel]"
+
+Os prints tinham **oito** mensagens diferentes. Elas não eram oito bugs: eram
+sintomas de quatro causas, e uma delas explicava por que o ADM existente não
+entrava.
+
+### Causa 1 — `Du.randomBytes is not a function` (cadastro nunca funcionou no Pages)
+
+`src/lib/security.ts` importava `crypto` **default** de `node:crypto`:
+
+```js
+import crypto from "node:crypto";   // antes
+```
+
+No bundle do navegador esse módulo não existe, e o Vite **não avisa**: ele emite
+`const Du = {}`. O import "funcionava" e a primeira chamada estourava:
+
+```
+[usersService] Exceção ao registrar usuário:
+TypeError: Du.randomBytes is not a function
+```
+
+O `catch` genérico do cadastro traduzia isso para *"Não foi possível criar sua
+conta agora. Verifique sua conexão"* — ou seja, a tela culpava a internet do
+usuário por um erro de build, em **toda** tentativa de cadastro.
+
+Correção em duas camadas:
+
+| Camada | O que faz |
+|---|---|
+| `src/lib/security.ts` | passa a importar **funções nomeadas** (`randomBytes`, `scryptSync`…). Se faltar alguma, o erro é de build — não de execução disfarçado. |
+| `vite.config.ts` | `node:crypto` → `src/lib/nodeCryptoShim.ts`, que carrega normalmente e lança uma mensagem em português explicando por que a operação exige servidor. |
+
+O bundle antigo (`const Du={}` + `randomBytes`) provava o diagnóstico. O novo é
+verificado pelos testes: **0** ocorrências de `scryptSync` real no cliente, **1**
+do substituto, e `dist/server.cjs` continua usando o crypto do Node.
+
+### Causa 2 — O painel do ADM mostrava dados que não eram do banco
+
+Esta é a que explica o pedido principal. `src/db/users.ts` falava
+Postgres/Drizzle e, na falta de `DATABASE_URL` (exatamente o caso do deploy, que
+usa Supabase via REST), caía em `fallbackStore` — um JSON local de demonstração.
+
+Consequências, todas visíveis no banco real (projeto `jaoheenjltzzglfncgfq`):
+
+| Sintoma | Realidade do banco |
+|---|---|
+| diretório com 5 contas | `public.users` tem 27 |
+| "Diretoria" com id **9901** | id **2** |
+| edição do painel "salvava" | gravava no JSON do processo e sumia no deploy seguinte |
+| `/api/admin/audit` 503 | histórico vive só no Supabase |
+
+Novo módulo `src/db/supabaseUsers.ts`, e `users.ts` passa a decidir a fonte:
+**Supabase quando há `SUPABASE_SECRET_KEY`** (produção), Drizzle/JSON caso
+contrário (banco local). A regra fica em um só lugar (`usaSupabaseComoFonte()`),
+usada por leitura, busca, edição e criação.
+
+Regra que virou invariante: **falha de leitura nunca vira lista vazia.** Era isso
+que fazia o painel parecer vazio "de verdade".
+
+### Causa 3 — `401` em `school_accounts` e o fallback com senhas públicas
+
+O acesso institucional consultava `school_accounts` com a chave **publicável**.
+A tabela tem RLS ligado e **zero** políticas (de propósito: guarda senha), então
+a consulta voltava 401 — o erro do print. O servidor então caía em
+`fallback_institutional_accounts.json`, cujas senhas estão versionadas no
+repositório (`senhaInstitucional123`). Autenticação por credencial pública.
+
+Agora a validação acontece no servidor com a chave de serviço, e o fallback de
+demonstração **só vale quando não há banco configurado**.
+
+### Causa 4 — Ruído de console: `404 /api/db-status`, `/api/users`, `/api/saas/plans`
+
+Cinco pontos ainda chamavam `/api/*` com `fetch` cru, mesmo no Pages, onde a
+rota não existe. Passaram a usar `fetchJsonApi`/`fetchJsonApiWithAuth`, que
+devolvem `null` sem tocar na rede quando não há backend — e as telas mostram o
+motivo em vez de erro de rede.
+
+| Arquivo | Antes | Agora |
+|---|---|---|
+| `AdminPanel.tsx` (auditoria) | `fetch` → HTML 200 → `res.json()` estourava | `fetchJsonApiWithAuth` + mensagem honesta |
+| `AdminPanel.tsx` (sonda de planos) | `fetch` 404 | `fetchJsonApi` |
+| `App.tsx` (db-status no arranque) | `fetch` 404 a cada carga | `fetchJsonApi` |
+| `App.tsx` (heartbeat 2 min) | 404 recorrente | só com servidor disponível |
+| `Settings.tsx` | `res.json()` sobre HTML | `fetchJsonApi` |
+
+### Correções de comportamento que o relato expôs
+
+| Problema | Correção |
+|---|---|
+| conta `ativo = false` barrava sem dizer que era bloqueio | 403 com o motivo (já era o contrato; a suíte que exigia 200 estava errada) |
+| banco inalcançável virava **500** `TypeError: fetch failed` | **503 `SAAS_UNREACHABLE`** + "a conta não foi apagada: o servidor é que não alcança o banco" |
+| `isRedeIndisponivel` não via erro do PostgREST | lê `message`/`details`/`hint`; `UND_ERR`, `EAI_AGAIN`, `other side closed` incluídos |
+| `/admin` montava o painel para quem não é admin (cada aba 401/403) | guarda `canAccessAdminPanel` **antes** de montar, com explicação e botão de saída |
+| botão "Entrar na Conta" tentava 3 redes antes de explicar | pré-checagem `isServerAvailable()` no `handleLocalLogin` |
+| cadastro tentava gravar pelo navegador (RLS recusa INSERT) | guarda antes da criptografia, com a mensagem certa |
+| `getOrCreateUser` criava conta no JSON local | cria linha em `users` no Supabase (`criarUsuarioNoSupabase`) |
+| privilégio por e-mail fixo em `db/users.ts` | removido: cargo vem de `role`/`is_admin` |
+
+### Provas
+
+Não bastava afirmar: o sandbox **não tem rede** para `*.supabase.co`
+(`curl` → `000`), e sem isso o caminho feliz não rodaria. Criei
+`test-helpers/mockPostgrest.mjs`, que sobe um PostgREST simulado com as linhas
+**reais** do projeto e é usado pelas suítes de integração.
+
+`test-round39-login-adm-banco.mjs` sobe o `server.ts` de verdade contra ele:
+
+```
+[1] Login do ADM que JÁ EXISTE no banco
+  ✓ devolve 200 (antes o painel não aparecia)
+  ✓ usa a linha do BANCO (id 759), não o JSON de demonstração (9901)
+  ✓ reconhece o cargo administrativo
+  ✓ emite sessão assinada
+[2] O painel recebe o diretório REAL
+  ✓ lista os ids do banco          ✓ não há mais conta fictícia 9901
+  ✓ adminRole do chefe reconhecido ✓ nome vem do banco
+[3] Conta desativada no banco continua bloqueada (403)
+[4] Senha errada continua 401 (não vira 503)
+[5] Acesso institucional pela tabela real (200, papel Escola)
+[6] Banco fora de alcance → 503 explicativo, nunca 500
+16/16
+```
+
+Build de produção (`NODE_ENV=production`, `node dist/server.cjs`):
+
+```
+/  200 eloEscola    /admin 200    /login 200
+POST /api/auth/local-login-password → 200, id 759, role Diretor, isAdmin true
+```
+
+### Suítes antigas que estavam "verdes" sem provar nada
+
+Três suítes subiam o servidor com `SUPABASE_SECRET_KEY: "fake-para-teste"` e
+**nenhuma `SUPABASE_URL`**. O servidor não tinha como consultar banco algum,
+respondia pelo JSON de demonstração, e os testes passavam — foi assim que o bug
+do id 9901 sobreviveu a várias rodadas. Passaram a usar o banco simulado.
+
+Elas também revelaram dados do banco que contradiziam o teste:
+`diretoria@helenawysocki.com` e `funcionario@helenawysocki.com` estão
+`ativo = false` desde 08/09/2026. O login das duas é **403, e está certo**.
+
+### Suítes novas
+
+- `test-round39-erros-console.mjs` — **24 verificações** (uma por mensagem do print)
+- `test-round39-login-adm-banco.mjs` — **16 verificações** (integração real)
+
+**Bateria completa: 36 suítes, 0 falhas.** `tsc` limpo, `npm run build` OK.
+
+### O que continua dependendo do usuário
+
+O painel do ADM só fica utilizável no endereço público quando o servidor existir.
+O código está pronto e testado contra o banco; falta o serviço no Railway/Render
+com `SUPABASE_URL` + `SUPABASE_SECRET_KEY` + `SESSION_SECRET` (§38).
+
+E uma decisão que é dele: `diretoria@helenawysocki.com` está **bloqueada no
+banco**. Se essa é a conta que ele usa, é preciso desbloquear pelo painel (com um
+Chefe ativo, ex. `professor@gmail.com`) — o código não faz isso sozinho, e não
+deve.

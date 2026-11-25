@@ -90,7 +90,7 @@ import {
   getAdminRoleType
 } from "../lib/permissions";
 import { getEventYearOptions, validateEventDate } from "../lib/dateGuards.ts";
-import { fetchJsonApi, mensagemDeErroDaApi } from "../lib/staticHosting.ts";
+import { fetchJsonApi, fetchJsonApiWithAuth, mensagemDeErroDaApi } from "../lib/staticHosting.ts";
 
 interface AdminPanelProps {
   usersList: User[];
@@ -335,8 +335,14 @@ export default function AdminPanel({
           DE VERDADE.
         */
         try {
-          const sonda = await fetch("/api/saas/plans", { headers: { Accept: "application/json" } });
-          if (cancelado) return;
+          /*
+            `fetchJsonApi` devolve `null` em hospedagem estática, em vez de
+            bater numa rota `/api` que não existe. Era daqui que vinha o
+            `Failed to load resource: 404 api/db-status` / `api/saas/plans`
+            que aparecia no console do GitHub Pages a cada abertura do painel.
+          */
+          const sonda = await fetchJsonApi("/api/saas/plans", { headers: { Accept: "application/json" } });
+          if (cancelado || !sonda) return;
           const corpoSonda = await sonda.json().catch(() => ({} as any));
           if (sonda.status === 503 && corpoSonda?.code === "SAAS_UNREACHABLE") {
             setDiagnosticoPainel({
@@ -623,10 +629,22 @@ export default function AdminPanel({
       setAuditLoading(true);
       setAuditError(null);
       try {
-        const token = typeof window !== "undefined" ? localStorage.getItem("elo_session_token") || "" : "";
-        const res = await fetch("/api/admin/audit?limit=200", {
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        });
+        const res = await fetchJsonApiWithAuth("/api/admin/audit?limit=200");
+        if (!res) {
+          /*
+            Sem servidor não existe histórico de auditoria: ele é gravado
+            pelo backend. Antes esta chamada batia numa rota inexistente,
+            recebia HTML 200 e estourava `res.json()` — o console enchia de
+            "Resposta não-JSON interceptada (status 404)".
+          */
+          if (!cancelado) {
+            setAuditLogs([]);
+            setAuditError(
+              "O histórico de auditoria é gravado pelo servidor. Esta versão publicada é a demonstração estática e não tem backend."
+            );
+          }
+          return;
+        }
         const corpo = await res.json().catch(() => ({} as any));
         if (!res.ok) {
           throw new Error(await mensagemDeErroDaApi(res, corpo?.error || "Não foi possível consultar o histórico de auditoria."));

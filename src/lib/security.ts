@@ -23,7 +23,26 @@
  * Nada aqui depende de pacote externo: usa apenas `node:crypto`, para não
  * introduzir dependência nativa no build do TCC.
  */
-import crypto from "node:crypto";
+/*
+  Import nomeado (e não `import crypto from "node:crypto"`).
+
+  O `default` some no bundle do navegador: o Vite emitia `const Du = {}` e a
+  primeira chamada estourava `Du.randomBytes is not a function` — o cadastro
+  no GitHub Pages nunca funcionava. Com nomes explícitos, o alias de
+  `node:crypto` em `vite.config.ts` resolve cada função e, se alguma faltar,
+  o erro é de build, não de execução disfarçado de "falha de conexão".
+*/
+import {
+  createHash,
+  createHmac,
+  createPublicKey,
+  randomBytes,
+  randomInt,
+  scryptSync,
+  timingSafeEqual,
+  verify as verifySignature,
+  type KeyObject,
+} from "node:crypto";
 
 // ---------------------------------------------------------------------------
 // SENHAS
@@ -37,8 +56,8 @@ const PASSWORD_PREFIX = "scrypt";
 
 /** Gera o hash de uma senha no formato `scrypt$N$r$p$saltHex$hashHex`. */
 export function hashPassword(password: string): string {
-  const salt = crypto.randomBytes(16);
-  const derived = crypto.scryptSync(password.normalize("NFKC"), salt, SCRYPT_KEYLEN, {
+  const salt = randomBytes(16);
+  const derived = scryptSync(password.normalize("NFKC"), salt, SCRYPT_KEYLEN, {
     N: SCRYPT_N,
     r: SCRYPT_R,
     p: SCRYPT_P,
@@ -64,7 +83,7 @@ function safeEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a, "utf8");
   const bufB = Buffer.from(b, "utf8");
   if (bufA.length !== bufB.length) return false;
-  return crypto.timingSafeEqual(bufA, bufB);
+  return timingSafeEqual(bufA, bufB);
 }
 
 export interface PasswordCheck {
@@ -101,13 +120,13 @@ export function verifyPassword(password: string, stored: string | null | undefin
   try {
     const salt = Buffer.from(saltHex, "hex");
     const expected = Buffer.from(hashHex, "hex");
-    const derived = crypto.scryptSync(password.normalize("NFKC"), salt, expected.length, {
+    const derived = scryptSync(password.normalize("NFKC"), salt, expected.length, {
       N,
       r,
       p,
       maxmem: 64 * 1024 * 1024,
     });
-    const ok = derived.length === expected.length && crypto.timingSafeEqual(derived, expected);
+    const ok = derived.length === expected.length && timingSafeEqual(derived, expected);
     return { ok, needsUpgrade: false };
   } catch {
     return { ok: false, needsUpgrade: false };
@@ -168,7 +187,7 @@ export function getSessionSecret(): string | null {
   }
 
   if (!cachedDevSecret) {
-    cachedDevSecret = crypto.randomBytes(32).toString("hex");
+    cachedDevSecret = randomBytes(32).toString("hex");
     console.warn(
       "[Security] SESSION_SECRET não configurado — usando segredo efêmero de desenvolvimento. " +
         "As sessões expiram ao reiniciar o servidor."
@@ -191,7 +210,7 @@ function base64UrlDecode(input: string): Buffer {
 }
 
 function signHmac(data: string, secret: string): string {
-  return base64UrlEncode(crypto.createHmac("sha256", secret).update(data).digest());
+  return base64UrlEncode(createHmac("sha256", secret).update(data).digest());
 }
 
 /** Cria um token de sessão assinado. `null` quando não há segredo configurado. */
@@ -204,7 +223,7 @@ export function createSessionToken(
   const now = Math.floor(Date.now() / 1000);
   const body: SessionPayload = {
     sub: payload.sub,
-    sid: payload.sid || crypto.randomBytes(12).toString("hex"),
+    sid: payload.sid || randomBytes(12).toString("hex"),
     iat: now,
     exp: now + (payload.ttlSeconds || 60 * 60 * 12),
     v: 1,
@@ -241,17 +260,17 @@ export function verifySessionToken(token: string | null | undefined): SessionPay
 
 /** Hash estável de um token opaco (para guardar no banco sem o valor original). */
 export function hashOpaqueToken(token: string): string {
-  return crypto.createHash("sha256").update(token).digest("hex");
+  return createHash("sha256").update(token).digest("hex");
 }
 
 /** Token aleatório (recuperação de senha, convites, idempotência). */
 export function randomToken(bytes = 32): string {
-  return crypto.randomBytes(bytes).toString("base64url");
+  return randomBytes(bytes).toString("base64url");
 }
 
 /** Código numérico de 6 dígitos para OTP (nunca devolvido ao navegador). */
 export function randomOtpCode(): string {
-  return String(crypto.randomInt(100000, 1000000));
+  return String(randomInt(100000, 1000000));
 }
 
 // ---------------------------------------------------------------------------
@@ -305,13 +324,13 @@ async function loadJwks(force = false): Promise<Jwk[]> {
   }
 }
 
-function keyFromJwk(jwk: Jwk): crypto.KeyObject | null {
+function keyFromJwk(jwk: Jwk): KeyObject | null {
   try {
     if (jwk.kty === "RSA") {
-      return crypto.createPublicKey({ key: { kty: "RSA", n: jwk.n!, e: jwk.e! }, format: "jwk" });
+      return createPublicKey({ key: { kty: "RSA", n: jwk.n!, e: jwk.e! }, format: "jwk" });
     }
     if (jwk.kty === "EC") {
-      return crypto.createPublicKey({
+      return createPublicKey({
         key: { kty: "EC", crv: jwk.crv || "P-256", x: jwk.x!, y: jwk.y! },
         format: "jwk",
       });
@@ -371,8 +390,8 @@ export async function verifyProviderJwt(token: string): Promise<VerifiedProvider
     try {
       const ok =
         alg === "RS256"
-          ? crypto.verify(nodeAlg, signingInput, key, signature)
-          : crypto.verify(nodeAlg, signingInput, { key, dsaEncoding: "ieee-p1363" }, signature);
+          ? verifySignature(nodeAlg, signingInput, key, signature)
+          : verifySignature(nodeAlg, signingInput, { key, dsaEncoding: "ieee-p1363" }, signature);
       if (ok) {
         const sub = String(payload.sub || payload.user_id || payload.uid || "");
         if (!sub) return null;

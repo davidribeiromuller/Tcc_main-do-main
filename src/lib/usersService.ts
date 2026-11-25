@@ -353,6 +353,20 @@ export async function findUserByPhoneDirectInSupabase(phone: string): Promise<Us
 }
 
 /**
+ * Mensagem única exibida quando não há servidor para validar a senha.
+ *
+ * Existe como constante exportada porque a tela de login também precisa dela
+ * ANTES de tentar autenticar: sem esse pré-aviso, o botão "Entrar na Conta"
+ * emitia duas tentativas de rede (login e depois a sonda do diretório) e só
+ * então mostrava o erro — o usuário via a tela "carregando" para receber uma
+ * explicação que já era conhecida.
+ */
+export const MENSAGEM_LOGIN_EXIGE_SERVIDOR =
+  "O login por e-mail e senha só funciona com o servidor do eloEscola em execução. " +
+  "Esta versão publicada é a demonstração estática: use \"Entrar como visitante\" " +
+  "para conhecer o aplicativo.";
+
+/**
  * Realiza autenticação local diretamente no Supabase por e-mail e senha.
  */
 export async function authenticateUserDirectInSupabase(
@@ -387,13 +401,7 @@ export async function authenticateUserDirectInSupabase(
   const semServidor =
     isStaticHosting() || !(await isServerAvailable());
   if (semServidor) {
-    return {
-      user: null,
-      error:
-        "O login por e-mail e senha só funciona com o servidor do eloEscola em execução. " +
-        "Esta versão publicada é apenas a demonstração estática: use \"Entrar como visitante\" " +
-        "para conhecer o aplicativo.",
-    };
+    return { user: null, error: MENSAGEM_LOGIN_EXIGE_SERVIDOR };
   }
 
   if (!isSupabaseConfigured()) {
@@ -479,6 +487,34 @@ export async function authenticateUserDirectInSupabase(
 export async function registerUserDirectInSupabase(
   userData: Partial<User> & { email: string; password?: string; nome: string }
 ): Promise<{ user: User | null; error: string | null }> {
+  /*
+    RODADA 39 — esta função roda no NAVEGADOR (via registerSchoolAccount) e
+    tinha dois defeitos que se somavam:
+
+    1. `hashPassword()` usa scrypt de `node:crypto`. No bundle do navegador o
+       módulo virava `{}` e a chamada estourava
+       `TypeError: Du.randomBytes is not a function`. O `catch` genérico
+       transformava isso em "Não foi possível criar sua conta agora.
+       Verifique sua conexão" — culpa da conexão do usuário por um erro de
+       build, em toda tentativa de cadastro.
+    2. Mesmo sem o crash, o INSERT em `users` é recusado: a tabela tem RLS
+       ligado e só permite `users_self_read` / `users_self_update` (por uid).
+       Nenhuma política abre INSERT para `anon`. O cadastro nunca gravou nada
+       pelo navegador.
+
+    Cadastro com senha exige servidor. Esta guarda roda ANTES de qualquer
+    criptografia e devolve a explicação, em vez de mascará-la.
+  */
+  if (!(await isServerAvailable())) {
+    return {
+      user: null,
+      error:
+        "A criação de conta exige o servidor do eloEscola em execução, porque a senha é " +
+        "protegida por criptografia que só existe no servidor. Esta versão publicada é a " +
+        "demonstração estática: entre como visitante para conhecer o aplicativo.",
+    };
+  }
+
   if (!isSupabaseConfigured()) {
     return { user: null, error: "Supabase não configurado." };
   }
