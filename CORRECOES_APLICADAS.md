@@ -2254,3 +2254,63 @@ O Funcionário também não recebe `cpf`, `phone`, `birthdate`, `gender` nem
 - `test-round37-login-estatico.mjs` — **6 verificações** (host `github.io`, toda
   `/api/*` devolvendo HTML, login honesto)
 - Bundle de produção conferido: a mensagem nova está no `dist`, a antiga não
+
+---
+
+## 38. Rodada 38 — deploy do servidor (o painel fora do GitHub Pages)
+
+**Contexto:** o painel foi reconstruído sobre o Express (rodada 35) e o
+repositório só era publicado no **GitHub Pages** — estático, sem Node. Por isso
+o painel e o login por senha nunca funcionariam no endereço público, mesmo com
+o código correto nas rodadas 36 e 37.
+
+### Boa notícia: o build de produção já estava pronto
+
+`npm run build` gera `dist/index.html` + `dist/server.cjs`, e o servidor em
+`NODE_ENV=production` serve **app e API na mesma origem**. Verificado em
+execução:
+
+```
+/            200 eloEscola        /api/health  200
+/admin       200 eloEscola        /api/db-status 200
+/master      200 eloEscola        POST /api/auth/local-login-password 200
+/planos      200 eloEscola        (Diretor, com token)
+```
+
+Portanto não foi preciso mudar arquitetura — só empacotar.
+
+### Entregue
+
+| Arquivo | Conteúdo |
+|---|---|
+| `Dockerfile` | build em 2 etapas, `USER node`, healthcheck em `/api/health`, `npm ci --omit=dev` no runtime, `VITE_*` como build-arg (publicável, nunca a secreta) |
+| `.dockerignore` | barra `.env`, `node_modules`, `.git` e os JSON de fallback |
+| `railway.json` | builder Docker + healthcheck |
+| `render.yaml` | blueprint com `SESSION_SECRET` gerado e chave secreta pedida no deploy (`sync: false`) |
+| `DEPLOY_SERVIDOR.md` | passo a passo (Railway, Render, Docker), checklist pós-deploy e o que depende do usuário |
+
+### A armadilha que documentei em destaque
+
+`isSaasBackendConfigured()` exige **`SUPABASE_URL` E `SUPABASE_SECRET_KEY`**.
+Configurar só a chave secreta — o erro mais natural de cometer — deixa o painel
+em `503 SAAS_NOT_CONFIGURED`, porque o backend não descobre a URL sozinho. O
+`render.yaml` já traz a URL preenchida e o guia avisa em bloco destacado.
+
+### Validado aqui
+
+- build de produção sobe com `NODE_ENV=production` e serve app + API
+- `npm ci --omit=dev` (passo do Dockerfile) instala e o servidor roda **só com
+  dependências de produção** — testado em diretório isolado
+- login de administrador retorna token nesse build
+
+### NÃO validado aqui (declarado no guia)
+
+- **a imagem Docker não foi construída** — não há Docker neste sandbox; o
+  Dockerfile repete os passos testados acima, mas a confirmação final é o
+  primeiro deploy
+- sem rede para `*.supabase.co`, as abas dependentes do banco respondem
+  `503 SAAS_UNREACHABLE` neste ambiente
+
+Suíte nova: `test-round38-deploy.mjs` — **38 verificações** (mesma origem,
+artefatos, segurança do Dockerfile, nenhum segredo versionado, o par obrigatório,
+cobertura da documentação).

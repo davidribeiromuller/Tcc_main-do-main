@@ -3,7 +3,7 @@
 Documento de rastreabilidade: cada item da auditoria de segurança/comercialização
 com o **estado atual**, **onde está no código** e **como verificar**.
 
-- Versão: **2026-11-11** (Rodadas 32, 33, 35, 36 e 37)
+- Versão: **2026-11-11** (Rodadas 32, 33, 35, 36, 37 e 38)
 - Suítes: `test-round32-security.mjs` (121 verificações) e
   `test-round33-saas.mjs` (135), `test-round35-admin.mjs` (90) e
   `test-round36-restauracao.mjs` (104), `test-round37-adm-existente.mjs` (21) —
@@ -42,6 +42,8 @@ com o **estado atual**, **onde está no código** e **como verificar**.
 | 1.24 | Login no GitHub Pages consultava `users` com chave publicável e culpava a "conexão" | ✅ | login para sem backend, com mensagem honesta; sonda `isServerAvailable()` | `round37` |
 | 1.25 | `Login.tsx` lia JSON do HTML do SPA (erro de parse em vez de mensagem) | ✅ | `fetchJsonApi` no lugar do `fetch` cru | `round37` |
 | 1.26 | Painel não distinguia "sem chave" de "banco fora de alcance" | ✅ | sonda em `/api/saas/plans` no diagnóstico | `round37` |
+| 1.27 | Único deploy era o GitHub Pages (estático): painel inutilizável em produção | ✅ | `Dockerfile` + `railway.json` + `render.yaml` + `DEPLOY_SERVIDOR.md` | `round38` |
+| 1.28 | Risco de `503 SAAS_NOT_CONFIGURED` por configurar só a chave secreta | ✅ | documentado em destaque; `render.yaml` já traz `SUPABASE_URL` | `round38` |
 
 ## Parte 2 — Autenticação e sessão
 

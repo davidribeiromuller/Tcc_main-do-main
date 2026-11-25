@@ -1,0 +1,46 @@
+# Render Blueprint — eloEscola
+#
+# Um único serviço web que serve o app React e a API Express na MESMA origem.
+# Deploy: New → Blueprint → aponte para o repositório.
+#
+# As variáveis marcadas com `sync: false` não ficam no repositório: o Render
+# pede o valor no momento do deploy. `generateValue: true` cria um segredo
+# aleatório sozinho (útil para SESSION_SECRET).
+
+services:
+  - type: web
+    name: eloescola
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: oregon
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Segredo dos tokens de sessão. Sem ele TODO login responde 503.
+      - key: SESSION_SECRET
+        generateValue: true
+
+      # As duas são obrigatórias juntas: isSaasBackendConfigured() exige
+      # SUPABASE_URL *e* SUPABASE_SECRET_KEY. Configurar só a chave deixa o
+      # painel em 503 SAAS_NOT_CONFIGURED.
+      - key: SUPABASE_URL
+        value: https://jaoheenjltzzglfncgfq.supabase.co
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+
+      # Quem acessa o painel Master (/master). Sem isso, ninguém entra.
+      - key: PLATFORM_OWNER_EMAILS
+        sync: false
+
+      # Railway/Render põem um proxy na frente: sem isso o rate limit e o IP
+      # da auditoria registram o proxy em vez do usuário.
+      - key: TRUST_PROXY
+        value: "1"
+
+      # Usada nos links enviados por e-mail. Trocar pelo domínio real.
+      - key: PUBLIC_APP_URL
+        sync: false
