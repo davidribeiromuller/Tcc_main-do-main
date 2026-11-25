@@ -2198,3 +2198,59 @@ Produção estava correta (fechamento aplicado manualmente); o **repositório**
 não estava. Corrigido nas duas migrations (removem as policies por nome, não
 criam nenhuma de escrita, preservam a leitura pública da ficha) e travado por
 teste que percorre as migrations em ordem cronológica.
+
+---
+
+## 37. Rodada 37 — login no modo estático e acesso do ADM já existente
+
+**Sintoma reportado (com print):** ao tentar entrar com
+`diretoria@helenawysocki.com` no app publicado, aparecia
+**"Erro de conexão ao consultar banco de dados."**
+
+### Roteiro do bug
+
+O app é publicado no **GitHub Pages** (`.github/workflows/deploy.yml`), que é
+hospedagem estática — não existe Express lá. O caminho era:
+
+1. `handleLocalLogin` chama `POST /api/auth/local-login-password`
+2. No Pages, o fallback de SPA responde **HTML** para qualquer `/api/*`
+3. `fetchJsonApi` detecta que não é JSON e devolve `null`
+4. O `App.tsx` cai no "caminho 2": `authenticateUserDirectInSupabase`
+5. Essa função consultava `users` com a chave **publicável**
+6. A RLS só permite `users_self_read` → erro → mensagem genérica
+
+**A mensagem estava errada em dois sentidos:** não era problema de conexão do
+usuário, e a consulta **nunca poderia funcionar** — `users` guarda hashes de
+senha e é fechada para o navegador de propósito.
+
+### Correções
+
+| # | O que | Onde |
+|---|---|---|
+| 1 | Login sem backend não consulta mais `users`; devolve frase honesta citando o servidor e o modo visitante | `usersService.ts` |
+| 2 | Nova sonda `isServerAvailable()` pergunta de verdade ao `/api/health` (cache de 30 s), em vez de decidir só pelo nome do host | `staticHosting.ts` — cobre também host próprio sem backend |
+| 3 | `Login.tsx` deixou de usar `fetch` cru: `fetchJsonApi` evita ler JSON do HTML do SPA; acesso institucional e visitante têm mensagem própria sem servidor | `Login.tsx` |
+| 4 | Diagnóstico do painel separa **"sem chave"** de **"chave ok, banco fora de alcance"** — antes as duas davam a mesma frase | `AdminPanel.tsx` |
+| 5 | `authenticateUserDirectInSupabase` mantém o caminho Supabase apenas para cenário legado, sem a mensagem enganosa | `usersService.ts` |
+
+### Acesso do ADM que já existia
+
+Verificado em execução real (não só no fonte): as duas contas administrativas
+do seed autenticam, recebem token e abrem o painel com o cargo correto.
+
+| Conta | Login | Cargo reconhecido | Diretório | Exclusivo de Chefe |
+|---|---|---|---|---|
+| `diretoria@helenawysocki.com` (Diretor) | 200 | `chefe` | 200 | passa |
+| `funcionario@helenawysocki.com` (Funcionário) | 200 | `funcionario` | 200 | **403** (correto) |
+
+O Funcionário também não recebe `cpf`, `phone`, `birthdate`, `gender` nem
+`password` no diretório.
+
+### Suítes
+
+- `test-round37-adm-existente.mjs` — **21 verificações** (login dos dois cargos,
+  reconhecimento do cargo, escopo de permissão, 401 sem token, ausência da
+  mensagem enganosa)
+- `test-round37-login-estatico.mjs` — **6 verificações** (host `github.io`, toda
+  `/api/*` devolvendo HTML, login honesto)
+- Bundle de produção conferido: a mensagem nova está no `dist`, a antiga não
