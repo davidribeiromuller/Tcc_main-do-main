@@ -283,6 +283,20 @@ console.log("\n=== 11. Servidor sem rede: degrade honesto ===");
     "auditoria não devolve lista vazia em falha de rede",
     /Falha ao ler auditoria[\s\S]{0,300}responderIndisponivel/.test(server)
   );
+  /*
+    Catálogo público de planos (/planos). Era a única rota que alimenta a
+    página pública e devolvia 500 genérico quando o banco não respondia —
+    a página quebrava sem dizer se era rede, configuração ou catálogo vazio.
+  */
+  const blocoPlanos = server.slice(server.indexOf('app.get("/api/saas/plans"'));
+  check(
+    "/api/saas/plans identifica falha de rede como 503 tipado",
+    /isRedeIndisponivel\(plans\.error\)[\s\S]{0,200}responderIndisponivel/.test(blocoPlanos)
+  );
+  check(
+    "/api/saas/plans usa código DATABASE_CONNECTION_ERROR no fallback",
+    /DATABASE_CONNECTION_ERROR/.test(blocoPlanos.slice(0, 1600))
+  );
 }
 
 // ===========================================================================

@@ -4039,7 +4039,20 @@ async function startServer() {
   app.get("/api/saas/plans", async (req, res) => {
     if (!isSaasBackendConfigured()) return saasUnavailable(res);
     const plans = await listPlans();
-    if (plans.error) return res.status(500).json({ error: plans.error });
+    if (plans.error) {
+      // Esta é a ÚNICA rota que alimenta a página pública /planos. Antes ela
+      // devolvia 500 com o texto cru do banco — a página quebrava sem dizer se
+      // era falta de configuração, rede fora ou catálogo vazio. Agora separa:
+      // falha de rede → 503 tipado; resto → 500 com mensagem de leitura.
+      if (isRedeIndisponivel(plans.error)) {
+        return responderIndisponivel(res, "O banco não respondeu ao carregar o catálogo de planos.");
+      }
+      console.warn("[SaaS] Falha ao listar planos:", plans.error);
+      return res.status(500).json({
+        error: "Não foi possível consultar o catálogo de planos.",
+        code: "DATABASE_CONNECTION_ERROR",
+      });
+    }
     const addons = await listPlanAddons();
     const founderSlotsTaken = (await listSchools()).data?.filter((s) => s.is_founder).length || 0;
 

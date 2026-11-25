@@ -13,7 +13,7 @@
 | `npm run build` | ✅ OK |
 | Suítes automatizadas | ✅ **29 de 29 verdes** |
 | Verificações totais | **~1.100 asserções** |
-| Suíte nova desta rodada | `test-round36-restauracao.mjs` — **98/98** |
+| Suíte nova desta rodada | `test-round36-restauracao.mjs` — **104/104** |
 
 ---
 
@@ -48,7 +48,7 @@
 | round32-security | 121 | ✅ |
 | round33-saas | 135 | ✅ |
 | round35-admin | 90 | ✅ |
-| **round36-restauracao** | **98** | ✅ 🆕 |
+| **round36-restauracao** | **104** | ✅ 🆕 |
 
 ---
 
@@ -96,9 +96,11 @@ aluno e bate nas rotas de verdade.
 ✓ senha gravada no banco é hash scrypt (não texto claro)
 ✓ Chefe da instituição não entra no /master sem allowlist
 ✓ /api/users | /api/admin/audit | /api/admin/school-accounts sem token → 401
+✓ /api/saas/plans identifica falha de rede como 503 tipado
+✓ /api/saas/plans usa código DATABASE_CONNECTION_ERROR no fallback
 ```
 
-Executada **duas vezes consecutivas**: 98/98 nas duas. Não depende de estado
+Executada **duas vezes consecutivas**: verde nas duas. Não depende de estado
 deixado por execução anterior (o e-mail do aluno de teste é único por execução).
 
 ---
@@ -221,3 +223,70 @@ done
 A round36 sobe o próprio servidor na porta 3999. Se você tiver um servidor
 rodando na 3000, não há conflito — mas se houver processo preso, mate antes
 (o teste usa `detached` e mata o grupo inteiro no `finally`).
+
+---
+
+## 8. Testes manuais da bateria final (pré-push)
+
+Executados contra o servidor local em modo fallback, com Chefe via
+`BOOTSTRAP_ADMIN_*`.
+
+### 8.1 Ciclo CRUD completo de usuário
+
+| Passo | Esperado | Obtido |
+|---|---|---|
+| criar | 200 + id | ✅ id 2349 |
+| aparece na listagem (`?q=email`) | 1 | ✅ 1 |
+| editar nome | 200, nome novo | ✅ "CRUD Renomeado" |
+| bloquear | 200, `ativo: false` | ✅ |
+| listar só bloqueados | contém o novo | ✅ 1, contém |
+| desbloquear | 200, `ativo: true` | ✅ |
+| excluir definitivo | 200 | ✅ |
+| confirmar que sumiu | 0 | ✅ 0 |
+
+### 8.2 Ciclo completo de evento (painel ↔ feed público)
+
+| Passo | Esperado | Obtido |
+|---|---|---|
+| criar | 201 + id | ✅ id 5865 |
+| aparece no feed **sem token** | true | ✅ true |
+| editar pelo painel | 200, título novo | ✅ "Evento Editado R36" |
+| excluir | 200 | ✅ |
+| **sumiu do feed público** | true | ✅ true |
+
+A sincronização pedida na §3.4 está confirmada de fato: alteração no painel
+reflete no feed respeitando o status.
+
+### 8.3 Participações
+
+| Passo | Esperado | Obtido |
+|---|---|---|
+| confirmar | 201 | ✅ |
+| listar | 1 | ✅ 1 |
+| cancelar | 200 | ✅ |
+| cancelar de novo | 404 | ✅ 404 |
+
+### 8.4 Telas
+
+| Rota | Status |
+|---|---|
+| `/admin` | 200 |
+| `/master` | 200 |
+| `/planos` | 200 |
+| `/subscription` | 200 |
+| `/privacidade` | 200 |
+
+O bundle servido contém a aba Auditoria (7 ocorrências de `Auditoria`/`auditLogs`).
+
+### 8.5 Bug encontrado nesta bateria: `/api/saas/plans` devolvia 500 genérico
+
+A rota que alimenta a **página pública `/planos`** respondia
+`500 {"error":"TypeError: fetch failed"}` quando o banco estava inacessível —
+expondo o erro cru do driver e sem dizer se era rede, configuração ou catálogo
+vazio. Corrigido:
+
+- falha de rede → `503 {code: "SAAS_UNREACHABLE", hint}`
+- outros erros → `500 {code: "DATABASE_CONNECTION_ERROR"}` com mensagem de leitura
+
+Verificado: `503 SAAS_UNREACHABLE | O banco não respondeu ao carregar o
+catálogo de planos.` Travado por 2 asserções novas na round36.
