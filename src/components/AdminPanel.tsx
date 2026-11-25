@@ -310,15 +310,46 @@ export default function AdminPanel({
           vazia sem explicar nada.
         */
         const corpo = await res.json().catch(() => null);
-        const supabaseIndisponivel =
+
+        // Três situações bem diferentes, que antes viravam a MESMA frase:
+        //   1. falta a chave       → ação: configurar segredo (erro, corrigível em 1 min)
+        //   2. chave ok, banco fora → ação: verificar rede/projeto (erro, não é config)
+        //   3. tudo ok             → sem aviso
+        const semChaveSecreta =
           corpo && (corpo.saasConfigured === false || corpo.supabaseAdmin === false);
-        if (supabaseIndisponivel) {
+        if (semChaveSecreta) {
           setDiagnosticoPainel({
             gravidade: "erro",
             titulo: "Servidor sem acesso ao banco de dados",
             detalhe:
               "Configure SUPABASE_SECRET_KEY no servidor. Sem ela o painel não consegue listar usuários, contas escolares, sugestões nem o histórico de eventos excluídos.",
           });
+          return;
+        }
+
+        /*
+          A chave existe, mas o painel pode estar inacessível de qualquer forma.
+          Sondamos uma rota leve que depende do banco: se ela devolver
+          `SAAS_UNREACHABLE`, o problema é rede/projeto fora do ar — e o Chefe
+          precisa saber disso, senão as abas aparecem vazias e parecem vazias
+          DE VERDADE.
+        */
+        try {
+          const sonda = await fetch("/api/saas/plans", { headers: { Accept: "application/json" } });
+          if (cancelado) return;
+          const corpoSonda = await sonda.json().catch(() => ({} as any));
+          if (sonda.status === 503 && corpoSonda?.code === "SAAS_UNREACHABLE") {
+            setDiagnosticoPainel({
+              gravidade: "erro",
+              titulo: "Banco configurado, mas fora de alcance",
+              detalhe:
+                "O servidor tem a chave, porém não consegue alcançar o Supabase agora. " +
+                "As abas aparecerão vazias até a conexão voltar — isto NÃO significa que não há registros. " +
+                "Verifique se o projeto está ativo e se o servidor tem saída de rede até ele.",
+            });
+          }
+        } catch {
+          /* sonda é best effort: nunca deve quebrar o painel */
         }
       } catch {
         /* diagnóstico é best effort */

@@ -1,6 +1,6 @@
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase.ts";
 import { hashPassword, verifyPassword } from "./security.ts";
-import { isStaticHosting, getStoredSessionToken } from "./staticHosting.ts";
+import { isStaticHosting, getStoredSessionToken, isServerAvailable } from "./staticHosting.ts";
 import { User } from "../types.ts";
 
 /**
@@ -359,6 +359,43 @@ export async function authenticateUserDirectInSupabase(
   email: string,
   password?: string
 ): Promise<{ user: User | null; error: string | null }> {
+  /*
+    RODADA 37 — login sem backend não pode consultar `users`.
+
+    Esta era a origem do erro "Erro de conexão ao consultar banco de dados."
+    que aparecia na tela de login do GitHub Pages.
+
+    O caminho: o app roda em hospedagem estática (sem Express) → o `fetch`
+    para `/api/auth/local-login-password` devolve o HTML do fallback de SPA →
+    `fetchJsonApi` detecta que não é JSON e devolve `null` → o `App.tsx` cai
+    neste "caminho 2" → consulta `users` com a chave PUBLICÁVEL → a RLS só
+    permite `users_self_read` → erro → mensagem genérica de "conexão".
+
+    O texto era duplamente errado: não era problema de conexão do usuário, e
+    a consulta nunca poderia funcionar — a tabela `users` guarda hashes de
+    senha e por isso é fechada para o navegador de propósito.
+
+    Sem servidor não existe login por senha. A resposta honesta diz isso, em
+    vez de culpar a conexão.
+  */
+  /*
+    `isServerAvailable()` confirma de fato se existe backend — o nome do host
+    sozinho não bastava. Se não houver, paramos aqui: consultar `users` com a
+    chave publicável nunca vai funcionar e só produz o erro enganoso de
+    "conexão" que aparecia na tela de login.
+  */
+  const semServidor =
+    isStaticHosting() || !(await isServerAvailable());
+  if (semServidor) {
+    return {
+      user: null,
+      error:
+        "O login por e-mail e senha só funciona com o servidor do eloEscola em execução. " +
+        "Esta versão publicada é apenas a demonstração estática: use \"Entrar como visitante\" " +
+        "para conhecer o aplicativo.",
+    };
+  }
+
   if (!isSupabaseConfigured()) {
     return { user: null, error: "Configuração do Supabase não inicializada." };
   }
@@ -375,7 +412,13 @@ export async function authenticateUserDirectInSupabase(
 
     if (error) {
       console.warn("[usersService] Erro ao autenticar no Supabase:", error);
-      return { user: null, error: "Erro de conexão ao consultar banco de dados." };
+      // Erro de leitura do banco — não confundir com "conexão do usuário".
+      return {
+        user: null,
+        error:
+          "Não foi possível consultar o diretório de usuários agora. " +
+          "Se você está usando a demonstração estática, entre como visitante.",
+      };
     }
 
     if (!data || data.length === 0) {

@@ -72,6 +72,58 @@ export async function fetchJsonApi(
 }
 
 /**
+ * Existe servidor Express atendendo este build?
+ *
+ * `isStaticHosting()` decide pelo NOME DO HOST (github.io, vercel.app…). Isso é
+ * rápido, mas erra nos dois sentidos: um deploy na Vercel COM backend seria
+ * tratado como estático, e um host próprio sem backend passaria batido.
+ *
+ * Esta sonda pergunta de fato ao servidor (`/api/health`) e guarda a resposta
+ * por alguns segundos — não queremos um round-trip a cada chamada.
+ *
+ * Uso principal: decidir se vale a pena tentar consultar o banco pelo navegador.
+ * Sem servidor, essa consulta não tem como funcionar: a tabela `users` guarda
+ * hashes de senha e é fechada para a chave publicável de propósito (RLS).
+ */
+let _serverProbe: { at: number; available: boolean } | null = null;
+const SERVER_PROBE_TTL_MS = 30_000;
+
+export async function isServerAvailable(): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+
+  // Em hospedagem sabidamente estática nem perde tempo na rede.
+  if (isStaticHosting()) return false;
+
+  const agora = Date.now();
+  if (_serverProbe && agora - _serverProbe.at < SERVER_PROBE_TTL_MS) {
+    return _serverProbe.available;
+  }
+
+  let available = false;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch("/api/health", {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    const contentType = res.headers.get("content-type") || "";
+    available = res.ok && contentType.includes("application/json");
+  } catch {
+    available = false;
+  }
+
+  _serverProbe = { at: agora, available };
+  return available;
+}
+
+/** Esquece o resultado da sonda (chamado depois de um erro de rede). */
+export function invalidateServerProbe(): void {
+  _serverProbe = null;
+}
+
+/**
  * Chave onde o App guarda o token de sessão (`elo1.<payload>.<hmac>`).
  * Mantida aqui para que nenhum componente precise repetir a string.
  */

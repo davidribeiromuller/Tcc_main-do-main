@@ -2198,3 +2198,119 @@ Produção estava correta (fechamento aplicado manualmente); o **repositório**
 não estava. Corrigido nas duas migrations (removem as policies por nome, não
 criam nenhuma de escrita, preservam a leitura pública da ficha) e travado por
 teste que percorre as migrations em ordem cronológica.
+
+---
+
+## 37. Rodada 37 — login no modo estático e acesso do ADM já existente
+
+**Sintoma reportado (com print):** ao tentar entrar com
+`diretoria@helenawysocki.com` no app publicado, aparecia
+**"Erro de conexão ao consultar banco de dados."**
+
+### Roteiro do bug
+
+O app é publicado no **GitHub Pages** (`.github/workflows/deploy.yml`), que é
+hospedagem estática — não existe Express lá. O caminho era:
+
+1. `handleLocalLogin` chama `POST /api/auth/local-login-password`
+2. No Pages, o fallback de SPA responde **HTML** para qualquer `/api/*`
+3. `fetchJsonApi` detecta que não é JSON e devolve `null`
+4. O `App.tsx` cai no "caminho 2": `authenticateUserDirectInSupabase`
+5. Essa função consultava `users` com a chave **publicável**
+6. A RLS só permite `users_self_read` → erro → mensagem genérica
+
+**A mensagem estava errada em dois sentidos:** não era problema de conexão do
+usuário, e a consulta **nunca poderia funcionar** — `users` guarda hashes de
+senha e é fechada para o navegador de propósito.
+
+### Correções
+
+| # | O que | Onde |
+|---|---|---|
+| 1 | Login sem backend não consulta mais `users`; devolve frase honesta citando o servidor e o modo visitante | `usersService.ts` |
+| 2 | Nova sonda `isServerAvailable()` pergunta de verdade ao `/api/health` (cache de 30 s), em vez de decidir só pelo nome do host | `staticHosting.ts` — cobre também host próprio sem backend |
+| 3 | `Login.tsx` deixou de usar `fetch` cru: `fetchJsonApi` evita ler JSON do HTML do SPA; acesso institucional e visitante têm mensagem própria sem servidor | `Login.tsx` |
+| 4 | Diagnóstico do painel separa **"sem chave"** de **"chave ok, banco fora de alcance"** — antes as duas davam a mesma frase | `AdminPanel.tsx` |
+| 5 | `authenticateUserDirectInSupabase` mantém o caminho Supabase apenas para cenário legado, sem a mensagem enganosa | `usersService.ts` |
+
+### Acesso do ADM que já existia
+
+Verificado em execução real (não só no fonte): as duas contas administrativas
+do seed autenticam, recebem token e abrem o painel com o cargo correto.
+
+| Conta | Login | Cargo reconhecido | Diretório | Exclusivo de Chefe |
+|---|---|---|---|---|
+| `diretoria@helenawysocki.com` (Diretor) | 200 | `chefe` | 200 | passa |
+| `funcionario@helenawysocki.com` (Funcionário) | 200 | `funcionario` | 200 | **403** (correto) |
+
+O Funcionário também não recebe `cpf`, `phone`, `birthdate`, `gender` nem
+`password` no diretório.
+
+### Suítes
+
+- `test-round37-adm-existente.mjs` — **21 verificações** (login dos dois cargos,
+  reconhecimento do cargo, escopo de permissão, 401 sem token, ausência da
+  mensagem enganosa)
+- `test-round37-login-estatico.mjs` — **6 verificações** (host `github.io`, toda
+  `/api/*` devolvendo HTML, login honesto)
+- Bundle de produção conferido: a mensagem nova está no `dist`, a antiga não
+
+---
+
+## 38. Rodada 38 — deploy do servidor (o painel fora do GitHub Pages)
+
+**Contexto:** o painel foi reconstruído sobre o Express (rodada 35) e o
+repositório só era publicado no **GitHub Pages** — estático, sem Node. Por isso
+o painel e o login por senha nunca funcionariam no endereço público, mesmo com
+o código correto nas rodadas 36 e 37.
+
+### Boa notícia: o build de produção já estava pronto
+
+`npm run build` gera `dist/index.html` + `dist/server.cjs`, e o servidor em
+`NODE_ENV=production` serve **app e API na mesma origem**. Verificado em
+execução:
+
+```
+/            200 eloEscola        /api/health  200
+/admin       200 eloEscola        /api/db-status 200
+/master      200 eloEscola        POST /api/auth/local-login-password 200
+/planos      200 eloEscola        (Diretor, com token)
+```
+
+Portanto não foi preciso mudar arquitetura — só empacotar.
+
+### Entregue
+
+| Arquivo | Conteúdo |
+|---|---|
+| `Dockerfile` | build em 2 etapas, `USER node`, healthcheck em `/api/health`, `npm ci --omit=dev` no runtime, `VITE_*` como build-arg (publicável, nunca a secreta) |
+| `.dockerignore` | barra `.env`, `node_modules`, `.git` e os JSON de fallback |
+| `railway.json` | builder Docker + healthcheck |
+| `render.yaml` | blueprint com `SESSION_SECRET` gerado e chave secreta pedida no deploy (`sync: false`) |
+| `DEPLOY_SERVIDOR.md` | passo a passo (Railway, Render, Docker), checklist pós-deploy e o que depende do usuário |
+
+### A armadilha que documentei em destaque
+
+`isSaasBackendConfigured()` exige **`SUPABASE_URL` E `SUPABASE_SECRET_KEY`**.
+Configurar só a chave secreta — o erro mais natural de cometer — deixa o painel
+em `503 SAAS_NOT_CONFIGURED`, porque o backend não descobre a URL sozinho. O
+`render.yaml` já traz a URL preenchida e o guia avisa em bloco destacado.
+
+### Validado aqui
+
+- build de produção sobe com `NODE_ENV=production` e serve app + API
+- `npm ci --omit=dev` (passo do Dockerfile) instala e o servidor roda **só com
+  dependências de produção** — testado em diretório isolado
+- login de administrador retorna token nesse build
+
+### NÃO validado aqui (declarado no guia)
+
+- **a imagem Docker não foi construída** — não há Docker neste sandbox; o
+  Dockerfile repete os passos testados acima, mas a confirmação final é o
+  primeiro deploy
+- sem rede para `*.supabase.co`, as abas dependentes do banco respondem
+  `503 SAAS_UNREACHABLE` neste ambiente
+
+Suíte nova: `test-round38-deploy.mjs` — **38 verificações** (mesma origem,
+artefatos, segurança do Dockerfile, nenhum segredo versionado, o par obrigatório,
+cobertura da documentação).

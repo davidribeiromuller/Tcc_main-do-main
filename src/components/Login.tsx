@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import logoImg from "../assets/images/logo.jpg";
 import { User } from "../types";
+import { fetchJsonApi } from "../lib/staticHosting.ts";
 
 interface LoginProps {
   onGoogleLogin: () => Promise<void>;
@@ -97,11 +98,20 @@ export default function Login({
       if (onInstitutionalLogin) {
         await onInstitutionalLogin(cleanId, instPassword);
       } else {
-        const res = await fetch("/api/auth/institutional-login", {
+        // `fetchJsonApi` devolve `null` quando não há backend (GitHub Pages).
+        // Antes o `fetch` cru tentava ler JSON do HTML do SPA e estourava um
+        // erro de parse — o usuário via uma falha incompreensível.
+        const res = await fetchJsonApi("/api/auth/institutional-login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ identificador: cleanId, password: instPassword })
         });
+        if (!res) {
+          throw new Error(
+            "O acesso institucional precisa do servidor do eloEscola. " +
+            "Esta versão publicada é a demonstração estática."
+          );
+        }
         const data = await res.json();
         if (!res.ok) {
           throw new Error(data.error || "Identificador ou senha institucional inválidos.");
@@ -123,9 +133,9 @@ export default function Login({
       await onGuestLogin("feed");
     } else {
       try {
-        const res = await fetch("/api/auth/guest-login", { method: "POST" });
-        const data = await res.json();
-        if (data.token) {
+        const res = await fetchJsonApi("/api/auth/guest-login", { method: "POST" });
+        const data = res ? await res.json().catch(() => ({} as any)) : null;
+        if (data?.token) {
           localStorage.setItem("token", data.token);
           localStorage.setItem("user", JSON.stringify(data.user));
           window.location.reload();
