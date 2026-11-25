@@ -203,15 +203,11 @@ check("rolagem: corpo com overflow-y-auto e teto de altura", modal.includes("max
 check("serviço schoolProfilesService existe", existsSync("src/lib/schoolProfilesService.ts"));
 const perfis = readFileSync("src/lib/schoolProfilesService.ts", "utf8");
 check("salvarPerfilEscola exportado", perfis.includes("export async function salvarPerfilEscola"));
-// Rodada 35: o upsert (com onConflict por slug) passou a rodar no servidor;
-// o serviço do navegador só chama a API.
-const servidorPerfis = readFileSync("server.ts", "utf8");
-check("upsert por slug",
-  perfis.includes("/api/school-profiles") && servidorPerfis.includes('onConflict: "slug"'));
+check("upsert por slug", perfis.includes('onConflict: "slug"'));
 check("carregarEscolas exportado", perfis.includes("export async function carregarEscolas"));
 check("erro de tabela ausente não quebra o app", perfis.includes("42P01"));
 check("mescla não apaga dado estático", perfis.includes("mesclarPerfil") && perfis.includes("return n ? n : antigo"));
-check("grava updated_by para auditoria", servidorPerfis.includes("updated_by"));
+check("grava updated_by para auditoria", perfis.includes("updated_by"));
 
 const escolaBase = ARAUCARIA_SCHOOLS[0];
 const mesclado = mesclarPerfil(escolaBase, { slug: escolaBase.slug, phone: "(41) 99999-0000" });

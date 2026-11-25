@@ -1,5 +1,4 @@
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase.ts";
-import { fetchJsonApiWithAuth } from "./staticHosting.ts";
 import { isPastDate } from "./dateGuards.ts";
 import { createEventDirectInSupabase } from "./eventsService.ts";
 
@@ -97,29 +96,6 @@ export function isSuggestionInThePast(
 export async function fetchEventSuggestions(
   status: "pending" | "approved" | "rejected" | "all" = "pending"
 ): Promise<{ suggestions: EventSuggestion[]; error: any }> {
-  /*
-    Servidor primeiro. `event_suggestions` tem leitura/escrita/atualização
-    públicas no Supabase, então o navegador não é lugar de decidir o que é
-    sugestão legítima — e a aprovação publica um evento de verdade.
-  */
-  try {
-    const res = await fetchJsonApiWithAuth(`/api/admin/suggestions?status=${encodeURIComponent(status)}`);
-    if (res && res.ok) {
-      const corpo = await res.json().catch(() => null);
-      if (corpo && Array.isArray(corpo.suggestions)) {
-        const suggestions = corpo.suggestions
-          .map(mapSuggestion)
-          .filter((s: EventSuggestion) => !isSuggestionInThePast(s));
-        return { suggestions, error: null };
-      }
-    }
-    if (res && (res.status === 401 || res.status === 403)) {
-      return { suggestions: [], error: new Error("As sugestões são visíveis apenas para administradores.") };
-    }
-  } catch {
-    /* servidor indisponível — leitura direta abaixo (somente leitura) */
-  }
-
   if (!isSupabaseConfigured()) {
     return { suggestions: [], error: new Error("Supabase não configurado no cliente") };
   }
@@ -153,36 +129,6 @@ export async function fetchEventSuggestions(
  * (tabelas `events` e `eventos`) e marca a sugestão como aprovada.
  */
 export async function approveEventSuggestion(
-  suggestionId: number,
-  reviewedBy: string
-): Promise<{ success: boolean; eventId?: number; error: any }> {
-  /*
-    Aprovar = publicar um evento oficial. Por isso passa pelo servidor, que
-    confere se quem clicou é o Chefe Administrador. Não existe caminho
-    alternativo no navegador: sem servidor, a ação não acontece.
-  */
-  try {
-    const res = await fetchJsonApiWithAuth(`/api/admin/suggestions/${suggestionId}/approve`, {
-      method: "POST",
-    });
-    if (res && res.ok) {
-      const corpo = await res.json().catch(() => ({}));
-      return { success: true, eventId: corpo?.eventId ?? undefined, error: null };
-    }
-    const detalhe = res ? await res.clone().json().catch(() => null) : null;
-    const mensagem =
-      detalhe?.error ||
-      (res?.status === 403
-        ? "Apenas o Administrador Chefe pode publicar uma sugestão."
-        : "Não foi possível aprovar a sugestão.");
-    return { success: false, error: new Error(mensagem) };
-  } catch (err: any) {
-    return { success: false, error: new Error(err?.message || "Servidor indisponível para aprovar a sugestão.") };
-  }
-}
-
-/** @deprecated caminho antigo, mantido apenas como referência de migração. */
-async function approveEventSuggestionLegado(
   suggestionId: number,
   reviewedBy: string
 ): Promise<{ success: boolean; eventId?: number; error: any }> {
@@ -258,30 +204,6 @@ async function approveEventSuggestionLegado(
 
 /** Rejeita uma sugestão (não cria evento). */
 export async function rejectEventSuggestion(
-  suggestionId: number,
-  reviewedBy: string,
-  reason?: string
-): Promise<{ success: boolean; error: any }> {
-  try {
-    const res = await fetchJsonApiWithAuth(`/api/admin/suggestions/${suggestionId}/reject`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reason: reason ?? null }),
-    });
-    if (res && res.ok) return { success: true, error: null };
-
-    const detalhe = res ? await res.clone().json().catch(() => null) : null;
-    return {
-      success: false,
-      error: new Error(detalhe?.error || "Não foi possível rejeitar a sugestão."),
-    };
-  } catch (err: any) {
-    return { success: false, error: new Error(err?.message || "Servidor indisponível.") };
-  }
-}
-
-/** @deprecated caminho antigo, mantido apenas como referência de migração. */
-async function rejectEventSuggestionLegado(
   suggestionId: number,
   reviewedBy: string,
   reason?: string

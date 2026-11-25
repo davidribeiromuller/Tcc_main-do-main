@@ -20,14 +20,6 @@ export const users = pgTable('users', {
   institution: text('institution').default('Escola estadual Helena Wysocki'),
   lastActiveAt: timestamp('last_active_at').defaultNow(),
   lastLogin: timestamp('last_login').defaultNow(),
-  // Colunas que JÁ existiam no Postgres (migração de segurança/instituição) mas
-  // estavam ausentes daqui. Sem elas o Drizzle descartava silenciosamente o
-  // `must_change_password` ao redefinir senha pelo painel — a troca obrigatória
-  // no próximo acesso nunca era gravada no caminho Postgres.
-  mustChangePassword: boolean('must_change_password').default(false),
-  matricula: text('matricula'),
-  personalEmail: text('personal_email'),
-  linkVerifiedAt: timestamp('link_verified_at'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });

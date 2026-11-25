@@ -20,7 +20,6 @@ import {
   type ContextoAcoes,
 } from "../lib/voiceActions";
 import { responderLocalmente } from "../lib/assistantKnowledge";
-import { getStoredSessionToken } from "../lib/staticHosting.ts";
 
 interface Message {
   id: string;
@@ -250,20 +249,10 @@ export default function AIChatAssistant({
         .map((m) => ({ role: m.role, content: m.content }));
 
       let res: Response | null = null;
-      let token: string | null = null;
-      try {
-        token = getStoredSessionToken();
-      } catch (_) {
-        token = null;
-      }
-
       try {
         res = await fetch("/api/ai/chat", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ message: textToSend, history }),
         });
       } catch (netErr) {
@@ -273,13 +262,6 @@ export default function AIChatAssistant({
       if (res && res.ok) {
         const data = await res.json();
         responder(data.reply || "Desculpe, não consegui obter uma resposta.", autoFalar);
-        return;
-      }
-
-      // Cota/assinatura bloqueada: avisa em vez de mascarar com resposta local.
-      if (res && (res.status === 402 || res.status === 429)) {
-        const errData = await res.json().catch(() => ({}));
-        setError(errData.error || "O assistente está temporariamente indisponível para a sua instituição.");
         return;
       }
 

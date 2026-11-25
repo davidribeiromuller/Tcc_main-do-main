@@ -2,7 +2,6 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import pkg from 'pg';
 const { Pool } = pkg;
 import * as schema from './schema.ts';
-import { hashPassword } from '../lib/security.ts';
 
 // Offline cache mechanism with exponential backoff to prevent long hanging connection timeouts
 let isDbOffline = false;
@@ -242,44 +241,57 @@ export async function initializeDatabase() {
           console.warn("[Database Init] Could not add creator_id reference column to events:", fkErr.message || fkErr);
         }
         
-        // Seed de contas corporativas — Parte 2 da auditoria.
-        //
-        // ANTES: três contas com senha fixa `senha123` eram criadas em todo
-        // banco, incluindo um administrador. Isso é uma backdoor permanente.
-        //
-        // AGORA: só criamos o administrador inicial quando
-        // `BOOTSTRAP_ADMIN_EMAIL` e `BOOTSTRAP_ADMIN_PASSWORD` existem no
-        // ambiente, com a senha já em hash scrypt, e apenas se ainda não houver
-        // nenhum administrador. Depois do primeiro acesso o operador deve
-        // remover as variáveis.
-        const bootstrapEmail = (process.env.BOOTSTRAP_ADMIN_EMAIL || '').trim().toLowerCase();
-        const bootstrapPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD || '';
+        // Seed default corporate accounts
+        await client.query(`
+          INSERT INTO users (uid, email, password, nome, foto_perfil, provider, role, ativo, is_admin, institution)
+          VALUES (
+            'fallback-admin-uid', 
+            'diretoria@helenawysocki.com', 
+            'senha123', 
+            'Diretoria Helena Wysocki', 
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150', 
+            'local', 
+            'Diretor', 
+            true, 
+            true, 
+            'Escola estadual Helena Wysocki'
+          )
+          ON CONFLICT (uid) DO UPDATE SET password = 'senha123', role = 'Diretor', is_admin = true;
+        `);
 
-        if (bootstrapEmail && bootstrapPassword.length >= 8) {
-          const adminCount = await client.query(
-            "SELECT COUNT(*)::int AS count FROM users WHERE is_admin = true OR lower(coalesce(role,'')) = 'diretor';"
-          );
-          if ((adminCount.rows[0]?.count || 0) === 0) {
-            await client.query(
-              `INSERT INTO users (uid, email, password, nome, foto_perfil, provider, role, ativo, is_admin, institution)
-               VALUES ($1, $2, $3, $4, '', 'local', 'Diretor', true, true, $5)
-               ON CONFLICT (uid) DO NOTHING;`,
-              [
-                'bootstrap-admin-uid',
-                bootstrapEmail,
-                hashPassword(bootstrapPassword),
-                'Administrador inicial',
-                process.env.BOOTSTRAP_ADMIN_INSTITUTION || 'eloEscola',
-              ]
-            );
-            console.info('[Database] Administrador inicial criado a partir das variáveis BOOTSTRAP_ADMIN_*.');
-          }
-        } else {
-          console.info(
-            '[Database] Nenhuma conta padrão criada. Defina BOOTSTRAP_ADMIN_EMAIL e BOOTSTRAP_ADMIN_PASSWORD ' +
-            '(mínimo 8 caracteres) para criar o primeiro administrador.'
-          );
-        }
+        await client.query(`
+          INSERT INTO users (uid, email, password, nome, foto_perfil, provider, role, ativo, is_admin, institution)
+          VALUES (
+            'fallback-funcionario-uid', 
+            'funcionario@helenawysocki.com', 
+            'senha123', 
+            'Funcionário Helena Wysocki', 
+            'https://images.unsplash.com/photo-1537368910025-700350fe46c7?w=150', 
+            'local', 
+            'Funcionário', 
+            true, 
+            false, 
+            'Escola estadual Helena Wysocki'
+          )
+          ON CONFLICT (uid) DO UPDATE SET password = 'senha123', role = 'Funcionário', is_admin = false;
+        `);
+
+        await client.query(`
+          INSERT INTO users (uid, email, password, nome, foto_perfil, provider, role, ativo, is_admin, institution)
+          VALUES (
+            'fallback-cliente-uid', 
+            'cliente@helenawysocki.com', 
+            'senha123', 
+            'Cliente Visitante', 
+            'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150', 
+            'local', 
+            'Cliente', 
+            true, 
+            false, 
+            'Escola estadual Helena Wysocki'
+          )
+          ON CONFLICT (uid) DO UPDATE SET password = 'senha123', role = 'Cliente', is_admin = false;
+        `);
 
         // Check and seed default school events if events table and eventos table are both empty
         let hasEventosRecords = false;

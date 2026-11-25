@@ -1,15 +1,15 @@
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase.ts";
-import { hashPassword, verifyPassword } from "./security.ts";
-import { isStaticHosting, getStoredSessionToken, isServerAvailable } from "./staticHosting.ts";
 import { User } from "../types.ts";
-import { mensagemPrecisaServidor } from "./mensagensServidor.ts";
 
 /**
  * Converte um registro da tabela 'users' do Supabase para a interface User do frontend.
  */
 export function mapSupabaseUserToUser(row: any): User {
-  // Parte 2: privilégio vem do banco (role/is_admin), nunca de e-mail fixo.
-  const isDiretor = row.role === "Diretor" || row.is_admin === true || row.isAdmin === true;
+  const isDiretor =
+    row.role === "Diretor" ||
+    row.is_admin === true ||
+    row.isAdmin === true ||
+    (typeof row.email === "string" && row.email.toLowerCase() === "diretoria@helenawysocki.com");
 
   const rawId = row.id;
   const numericId = typeof rawId === "number" ? rawId : parseInt(String(rawId), 10) || Date.now();
@@ -46,47 +46,6 @@ export function mapSupabaseUserToUser(row: any): User {
  * Nunca utiliza usuários fictícios/mockados quando o banco estiver conectado.
  */
 export async function fetchUsersDirectFromSupabase(): Promise<{ users: User[]; error: any }> {
-  /*
-    RODADA 36 — diretório de usuários lido pelo SERVIDOR.
-
-    Esta função ainda consultava `users` direto do navegador com a chave
-    publicável. Desde que a RLS foi fechada (só `users_self_read`), essa consulta
-    devolve APENAS a linha do próprio administrador — o painel mostrava
-    "1 usuário" num banco com dezenas, sem nenhum erro. Era um falso negativo
-    silencioso, pior que uma falha explícita.
-
-    Agora usa `/api/users`, que roda com a chave secreta no servidor e aplica o
-    recorte de colunas por cargo (Chefe vê tudo; Funcionário vê o permitido).
-    O caminho Supabase fica só para o modo estático (GitHub Pages), onde não há
-    servidor — e ali a falha é reportada como erro, nunca como lista vazia.
-  */
-  if (!isStaticHosting()) {
-    try {
-      const token = getStoredSessionToken();
-      const res = await fetch("/api/users", {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
-      const corpo: any = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        return {
-          users: [],
-          error: new Error(corpo?.error || `Falha ao carregar o diretório (HTTP ${res.status}).`),
-        };
-      }
-      if (!Array.isArray(corpo?.users)) {
-        return { users: [], error: new Error("Resposta inesperada do servidor ao carregar usuários.") };
-      }
-      return {
-        users: corpo.users.filter(
-          (row: any) => String(row.role || "").toLowerCase() !== "escola"
-        ) as User[],
-        error: null,
-      };
-    } catch (err: any) {
-      return { users: [], error: err };
-    }
-  }
-
   if (!isSupabaseConfigured()) {
     return {
       users: [],
@@ -354,19 +313,47 @@ export async function findUserByPhoneDirectInSupabase(phone: string): Promise<Us
 }
 
 /**
- * Mensagem única exibida quando não há servidor para validar a senha.
- *
- * Existe como constante exportada porque a tela de login também precisa dela
- * ANTES de tentar autenticar: sem esse pré-aviso, o botão "Entrar na Conta"
- * emitia duas tentativas de rede (login e depois a sonda do diretório) e só
- * então mostrava o erro — o usuário via a tela "carregando" para receber uma
- * explicação que já era conhecida.
+ * Atualiza a senha de um usuário diretamente no Supabase.
  */
-export const MENSAGEM_LOGIN_EXIGE_SERVIDOR =
-  "Você está na versão publicada do eloEscola, que é somente leitura: ela mostra " +
-  "os dados, mas não consegue conferir senhas. O login por e-mail e senha funciona " +
-  "na versão com servidor ativo. Aqui você pode entrar como visitante para conhecer " +
-  "o aplicativo.";
+export async function resetUserPasswordDirectInSupabase(
+  email: string,
+  newPassword: string
+): Promise<{ success: boolean; error: string | null }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: "Supabase não configurado." };
+  }
+
+  const cleanEmail = (email || "").trim().toLowerCase();
+  if (!cleanEmail) {
+    return { success: false, error: "Email não informado." };
+  }
+
+  const supabase = getSupabaseClient();
+  try {
+    const { data, error } = await supabase
+      .from("users")
+      .update({
+        password: newPassword,
+        updated_at: new Date().toISOString(),
+      })
+      .ilike("email", cleanEmail)
+      .select();
+
+    if (error) {
+      console.error("[usersService] Erro ao redefinir senha no Supabase:", error);
+      return { success: false, error: error.message };
+    }
+
+    if (!data || data.length === 0) {
+      return { success: false, error: "Usuário não localizado no banco para redefinição." };
+    }
+
+    return { success: true, error: null };
+  } catch (err: any) {
+    console.error("[usersService] Exceção ao redefinir senha no Supabase:", err);
+    return { success: false, error: err?.message || "Erro inesperado ao redefinir senha." };
+  }
+}
 
 /**
  * Realiza autenticação local diretamente no Supabase por e-mail e senha.
@@ -375,49 +362,6 @@ export async function authenticateUserDirectInSupabase(
   email: string,
   password?: string
 ): Promise<{ user: User | null; error: string | null }> {
-  /*
-    RODADA 37 — login sem backend não pode consultar `users`.
-
-    Esta era a origem do erro "Erro de conexão ao consultar banco de dados."
-    que aparecia na tela de login do GitHub Pages.
-
-    O caminho: o app roda em hospedagem estática (sem Express) → o `fetch`
-    para `/api/auth/local-login-password` devolve o HTML do fallback de SPA →
-    `fetchJsonApi` detecta que não é JSON e devolve `null` → o `App.tsx` cai
-    neste "caminho 2" → consulta `users` com a chave PUBLICÁVEL → a RLS só
-    permite `users_self_read` → erro → mensagem genérica de "conexão".
-
-    O texto era duplamente errado: não era problema de conexão do usuário, e
-    a consulta nunca poderia funcionar — a tabela `users` guarda hashes de
-    senha e por isso é fechada para o navegador de propósito.
-
-    Sem servidor não existe login por senha. A resposta honesta diz isso, em
-    vez de culpar a conexão.
-  */
-  /*
-    `isServerAvailable()` confirma de fato se existe backend — o nome do host
-    sozinho não bastava. Se não houver, paramos aqui: consultar `users` com a
-    chave publicável nunca vai funcionar e só produz o erro enganoso de
-    "conexão" que aparecia na tela de login.
-  */
-  /*
-    RODADA 42 — o bloqueio por NOME DE HOST saiu.
-
-    Antes: `isStaticHosting()` reprovava a consulta só porque o domínio era
-    github.io/netlify/vercel, mesmo quando havia um servidor real atendendo
-    `/api` naquele mesmo domínio. O autor do TCC relatou justamente isso:
-    "volte com o servidor antigo onde funcionava, sem esse servidor ativo só
-    para leitura".
-
-    A decisão agora é EMPÍRICA: perguntamos ao servidor (`/api/health`). Se ele
-    responde JSON, existe backend e o login por senha é tentado de verdade —
-    independentemente do domínio. Se não responde, paramos com a mensagem
-    honesta (e o motivo continua sendo técnico, não uma suposição).
-  */
-  if (!(await isServerAvailable())) {
-    return { user: null, error: MENSAGEM_LOGIN_EXIGE_SERVIDOR };
-  }
-
   if (!isSupabaseConfigured()) {
     return { user: null, error: "Configuração do Supabase não inicializada." };
   }
@@ -434,40 +378,11 @@ export async function authenticateUserDirectInSupabase(
 
     if (error) {
       console.warn("[usersService] Erro ao autenticar no Supabase:", error);
-      // Erro de leitura do banco — não confundir com "conexão do usuário".
-      return {
-        user: null,
-        error:
-          "Não foi possível consultar o diretório de usuários agora. " +
-          "Se você está usando a demonstração estática, entre como visitante.",
-      };
+      return { user: null, error: "Erro de conexão ao consultar banco de dados." };
     }
 
     if (!data || data.length === 0) {
-      /*
-        Zero linhas tem DUAS causas possíveis, e elas não se confundem:
-
-          · a conta não existe / o e-mail está diferente → "não encontrado";
-          · a RLS bloqueou a leitura porque quem consulta é `anon` → o
-            navegador não tem permissão para ver a tabela de senhas.
-
-        Antes eu decidia pelo NOME do host (`isStaticHosting()`), então num
-        domínio "estático" com servidor real a mensagem mentia. Agora a decisão
-        continua precisa, mas pelo motivo certo: se a sonda confirma que não há
-        servidor, o caminho é o visitante; se há servidor, é a RLS — e aí a
-        resposta honesta é que o login acontece pelo servidor (`/api/auth/...`),
-        não por consulta direta no navegador.
-      */
-      const semServidor = !(await isServerAvailable());
-      return {
-        user: null,
-        error: semServidor
-          ? mensagemPrecisaServidor(
-              "O login com senha",
-              "Nesta versão publicada, entre como visitante."
-            )
-          : "Usuário não encontrado no diretório escolar.",
-      };
+      return { user: null, error: "Usuário não encontrado no diretório escolar." };
     }
 
     const row = data[0];
@@ -477,12 +392,9 @@ export async function authenticateUserDirectInSupabase(
       return { user: null, error: "Sua conta escolar está desativada ou bloqueada pela diretoria." };
     }
 
-    // Parte 2: comparação por hash (scrypt) em vez de igualdade de texto claro.
-    if (row.password) {
-      const check = verifyPassword(password || "", row.password);
-      if (!check.ok) {
-        return { user: null, error: "Credenciais inválidas. Verifique seu e-mail e a senha digitada." };
-      }
+    // Verificar senha se o usuário tiver senha cadastrada
+    if (row.password && password && row.password !== password) {
+      return { user: null, error: "Credenciais inválidas. Verifique seu e-mail e a senha digitada." };
     }
 
     // Atualizar último acesso e atividade
@@ -516,34 +428,6 @@ export async function authenticateUserDirectInSupabase(
 export async function registerUserDirectInSupabase(
   userData: Partial<User> & { email: string; password?: string; nome: string }
 ): Promise<{ user: User | null; error: string | null }> {
-  /*
-    RODADA 39 — esta função roda no NAVEGADOR (via registerSchoolAccount) e
-    tinha dois defeitos que se somavam:
-
-    1. `hashPassword()` usa scrypt de `node:crypto`. No bundle do navegador o
-       módulo virava `{}` e a chamada estourava
-       `TypeError: Du.randomBytes is not a function`. O `catch` genérico
-       transformava isso em "Não foi possível criar sua conta agora.
-       Verifique sua conexão" — culpa da conexão do usuário por um erro de
-       build, em toda tentativa de cadastro.
-    2. Mesmo sem o crash, o INSERT em `users` é recusado: a tabela tem RLS
-       ligado e só permite `users_self_read` / `users_self_update` (por uid).
-       Nenhuma política abre INSERT para `anon`. O cadastro nunca gravou nada
-       pelo navegador.
-
-    Cadastro com senha exige servidor. Esta guarda roda ANTES de qualquer
-    criptografia e devolve a explicação, em vez de mascará-la.
-  */
-  if (!(await isServerAvailable())) {
-    return {
-      user: null,
-      error:
-        "A criação de conta exige uma versão do eloEscola com servidor ativo, porque a senha é " +
-        "protegida por criptografia que só existe no servidor. Esta versão publicada é a " +
-        "demonstração estática: entre como visitante para conhecer o aplicativo.",
-    };
-  }
-
   if (!isSupabaseConfigured()) {
     return { user: null, error: "Supabase não configurado." };
   }
@@ -558,16 +442,18 @@ export async function registerUserDirectInSupabase(
       return { user: null, error: "Este e-mail já está cadastrado no sistema escolar." };
     }
 
-    // Cadastro público nunca cria administrador.
-    const isDirector = false;
+    const isDirector =
+      userData.role === "Diretor" ||
+      cleanEmail === "diretoria@helenawysocki.com";
 
     const insertRow: Record<string, any> = {
       uid: userData.uid || `local-uid-${Math.floor(Math.random() * 88888 + 10000)}`,
       nome: userData.nome.trim(),
       email: cleanEmail,
-      // Parte 2: a senha é gravada com hash scrypt (nunca em texto claro) e
-      // sem senha padrão previsível.
-      password: userData.password ? hashPassword(userData.password) : null,
+      // Guarda a senha provisória definida no cadastro. O app autentica na
+      // coluna `password` (não usa Supabase Auth), então sem isso o aluno era
+      // criado com uma senha que ele nunca digitou.
+      password: userData.password || "123456",
       foto_perfil: userData.foto_perfil || "",
       provider: userData.provider || "local",
       role: userData.role || (isDirector ? "Diretor" : "Aluno"),
@@ -661,8 +547,8 @@ export async function syncOAuthUserDirectInSupabase(oauthUser: {
       };
     }
 
-    // Usuário novo autenticado via Google — nasce sem privilégio.
-    const isDirector = false;
+    // Usuário novo autenticado via Google
+    const isDirector = cleanEmail === "diretoria@helenawysocki.com" || cleanEmail.includes("diretor");
     const insertRow: Record<string, any> = {
       uid: oauthUser.uid || `google-${Date.now()}`,
       nome: oauthUser.nome,

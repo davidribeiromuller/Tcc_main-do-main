@@ -33,7 +33,9 @@ import {
   AlertTriangle,
   Crown,
   Eye,
+  EyeOff,
   KeyRound,
+  Copy,
   Pencil,
   CalendarPlus,
   Table as TableIcon,
@@ -47,8 +49,7 @@ import {
   UserCheck,
   GraduationCap,
   Moon,
-  Sun,
-  History
+  Sun
 } from "lucide-react";
 import { User, Event } from "../types";
 import {
@@ -90,7 +91,7 @@ import {
   getAdminRoleType
 } from "../lib/permissions";
 import { getEventYearOptions, validateEventDate } from "../lib/dateGuards.ts";
-import { fetchJsonApi, fetchJsonApiWithAuth, mensagemDeErroDaApi } from "../lib/staticHosting.ts";
+import { fetchJsonApi } from "../lib/staticHosting.ts";
 
 interface AdminPanelProps {
   usersList: User[];
@@ -197,30 +198,7 @@ export default function AdminPanel({
     }
   };
 
-  const [activeTab, setActiveTab] = useState<"users" | "blocked" | "events" | "schools" | "suggestions" | "personal" | "profileChanges" | "audit">("users");
-
-  /**
-   * Aba Auditoria (§3.10).
-   *
-   * O `platform_audit_logs` já era gravado desde a rodada 34, mas NENHUMA tela
-   * o exibia — o Chefe não tinha como saber quem bloqueou um aluno ou aprovou
-   * uma sugestão. A leitura é feita por `/api/admin/audit`, que mascara o
-   * e-mail do autor para o Funcionário.
-   */
-  const [auditLogs, setAuditLogs] = useState<Array<{
-    id: number;
-    actorEmail: string | null;
-    actorRole: string | null;
-    action: string;
-    targetType: string | null;
-    targetId: string | null;
-    metadata: Record<string, any>;
-    ip: string | null;
-    createdAt: string;
-  }>>([]);
-  const [auditLoading, setAuditLoading] = useState(false);
-  const [auditError, setAuditError] = useState<string | null>(null);
-  const [auditFilter, setAuditFilter] = useState("");
+  const [activeTab, setActiveTab] = useState<"users" | "blocked" | "events" | "schools" | "suggestions" | "personal" | "profileChanges">("users");
   const [viewMode, setViewMode] = useState<"table" | "cards">(() => {
     if (typeof window !== "undefined" && window.innerWidth < 768) {
       return "cards";
@@ -238,6 +216,10 @@ export default function AdminPanel({
   const [eventViewMode, setEventViewMode] = useState<"table" | "cards">("cards");
   const [filterRole, setFilterRole] = useState<"all" | "aluno" | "funcionario" | "chefe" | "ativos" | "bloqueados">("all");
   const [userToViewDetails, setUserToViewDetails] = useState<User | null>(null);
+  /** Senha visível na ficha do usuário (admin decide revelar). */
+  const [showUserPassword, setShowUserPassword] = useState(false);
+  /** Confirmação visual do botão "copiar senha". */
+  const [passwordCopied, setPasswordCopied] = useState(false);
   /** Nova senha digitada pelo Chefe Admin ao editar a ficha. */
   const [novaSenha, setNovaSenha] = useState("");
   /** Mostra o campo de edição de senha. */
@@ -264,109 +246,6 @@ export default function AdminPanel({
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   /** Erro de leitura das contas escolares (ex.: tabela ainda não criada). */
   const [erroContasEscolares, setErroContasEscolares] = useState<string | null>(null);
-  /**
-   * Diagnóstico do painel.
-   *
-   * O sintoma que originou esta rodada foi "o painel abre sem nenhum dado".
-   * Havia três causas possíveis, e a tela não distinguia nenhuma delas:
-   *  (a) não existe nenhum usuário cadastrado — estado vazio legítimo;
-   *  (b) o servidor respondeu 401/403 — sessão vencida ou sem permissão;
-   *  (c) o servidor respondeu 503 — sem `SUPABASE_SECRET_KEY`, ou seja, não
-   *      há como ler o banco a partir daqui.
-   * Mostrar isso na cara evita horas de "parece que perdeu os dados".
-   */
-  const [diagnosticoPainel, setDiagnosticoPainel] = useState<{
-    gravidade: "erro" | "aviso";
-    titulo: string;
-    detalhe: string;
-  } | null>(null);
-
-  React.useEffect(() => {
-    let cancelado = false;
-
-    const checar = async () => {
-      try {
-        const res = await fetchJsonApi("/api/db-status");
-        if (cancelado) return;
-
-        // Sem resposta JSON = servidor Express ausente (GitHub Pages).
-        if (!res) {
-          if (!isChefe && !isFuncionario) return;
-          setDiagnosticoPainel({
-            gravidade: "aviso",
-            titulo: "Modo estático: leitura limitada",
-            detalhe:
-              "Esta versão roda sem servidor. A lista de usuários, contas escolares e histórico ficam indisponíveis aqui porque o banco não aceita mais leitura desses dados por chave pública.",
-          });
-          return;
-        }
-
-        /*
-          A base do projeto tem DOIS caminhos de persistência:
-           - Postgres/Drizzle (opcional): alimenta `/api/db-status`;
-           - Supabase (obrigatório para o painel): exige SUPABASE_SECRET_KEY.
-          O que interessa aqui é o segundo: sem a chave secreta o servidor não
-          lê `users`, `school_accounts` nem o histórico — e cada aba apareceria
-          vazia sem explicar nada.
-        */
-        const corpo = await res.json().catch(() => null);
-
-        // Três situações bem diferentes, que antes viravam a MESMA frase:
-        //   1. falta a chave       → ação: configurar segredo (erro, corrigível em 1 min)
-        //   2. chave ok, banco fora → ação: verificar rede/projeto (erro, não é config)
-        //   3. tudo ok             → sem aviso
-        const semChaveSecreta =
-          corpo && (corpo.saasConfigured === false || corpo.supabaseAdmin === false);
-        if (semChaveSecreta) {
-          setDiagnosticoPainel({
-            gravidade: "erro",
-            titulo: "Servidor sem acesso ao banco de dados",
-            detalhe:
-              "Configure SUPABASE_SECRET_KEY no servidor. Sem ela o painel não consegue listar usuários, contas escolares, sugestões nem o histórico de eventos excluídos.",
-          });
-          return;
-        }
-
-        /*
-          A chave existe, mas o painel pode estar inacessível de qualquer forma.
-          Sondamos uma rota leve que depende do banco: se ela devolver
-          `SAAS_UNREACHABLE`, o problema é rede/projeto fora do ar — e o Chefe
-          precisa saber disso, senão as abas aparecem vazias e parecem vazias
-          DE VERDADE.
-        */
-        try {
-          /*
-            `fetchJsonApi` devolve `null` em hospedagem estática, em vez de
-            bater numa rota `/api` que não existe. Era daqui que vinha o
-            `Failed to load resource: 404 api/db-status` / `api/saas/plans`
-            que aparecia no console do GitHub Pages a cada abertura do painel.
-          */
-          const sonda = await fetchJsonApi("/api/saas/plans", { headers: { Accept: "application/json" } });
-          if (cancelado || !sonda) return;
-          const corpoSonda = await sonda.json().catch(() => ({} as any));
-          if (sonda.status === 503 && corpoSonda?.code === "SAAS_UNREACHABLE") {
-            setDiagnosticoPainel({
-              gravidade: "erro",
-              titulo: "Banco configurado, mas fora de alcance",
-              detalhe:
-                "O servidor tem a chave, porém não consegue alcançar o Supabase agora. " +
-                "As abas aparecerão vazias até a conexão voltar — isto NÃO significa que não há registros. " +
-                "Verifique se o projeto está ativo e se o servidor tem saída de rede até ele.",
-            });
-          }
-        } catch {
-          /* sonda é best effort: nunca deve quebrar o painel */
-        }
-      } catch {
-        /* diagnóstico é best effort */
-      }
-    };
-
-    void checar();
-    return () => {
-      cancelado = true;
-    };
-  }, [isChefe, isFuncionario]);
   const [showAddInstModal, setShowAddInstModal] = useState(false);
   const [accountToResetPassword, setAccountToResetPassword] = useState<any | null>(null);
   const [newPasswordValue, setNewPasswordValue] = useState("");
@@ -613,61 +492,6 @@ export default function AdminPanel({
   const [pessoais, setPessoais] = useState<PersonalEvent[]>([]);
   const [carregandoPessoais, setCarregandoPessoais] = useState(false);
   const [buscaPessoal, setBuscaPessoal] = useState("");
-
-  /**
-   * Carrega o histórico de auditoria ao abrir a aba.
-   *
-   * O erro é MOSTRADO (`auditError`), nunca convertido em lista vazia: "sem
-   * registros" e "não consegui consultar o banco" são estados diferentes e o
-   * Chefe precisa saber qual dos dois está vendo.
-   */
-  useEffect(() => {
-    if (activeTab !== "audit") return;
-    let cancelado = false;
-
-    const carregar = async () => {
-      setAuditLoading(true);
-      setAuditError(null);
-      try {
-        const res = await fetchJsonApiWithAuth("/api/admin/audit?limit=200");
-        if (!res) {
-          /*
-            Sem servidor não existe histórico de auditoria: ele é gravado
-            pelo backend. Antes esta chamada batia numa rota inexistente,
-            recebia HTML 200 e estourava `res.json()` — o console enchia de
-            "Resposta não-JSON interceptada (status 404)".
-          */
-          if (!cancelado) {
-            setAuditLogs([]);
-            setAuditError(
-              "O histórico de auditoria é gravado pelo servidor. Esta versão publicada é a demonstração estática e não tem backend."
-            );
-          }
-          return;
-        }
-        const corpo = await res.json().catch(() => ({} as any));
-        if (!res.ok) {
-          throw new Error(await mensagemDeErroDaApi(res, corpo?.error || "Não foi possível consultar o histórico de auditoria."));
-        }
-        if (!Array.isArray(corpo?.logs)) {
-          throw new Error("Resposta inesperada do servidor ao carregar a auditoria.");
-        }
-        if (!cancelado) setAuditLogs(corpo.logs);
-      } catch (erro: any) {
-        if (!cancelado) {
-          setAuditLogs([]);
-          setAuditError(erro?.message || "Não foi possível consultar o histórico de auditoria.");
-        }
-      } finally {
-        if (!cancelado) setAuditLoading(false);
-      }
-    };
-
-    void carregar();
-    return () => {
-      cancelado = true;
-    };
-  }, [activeTab]);
 
   useEffect(() => {
     if (activeTab !== "personal") return;
@@ -1396,50 +1220,8 @@ export default function AdminPanel({
                   <span>Contas das Escolas</span>
                 </button>
               )}
-
-              {/*
-                Auditoria (§3.10): quem fez o quê, em qual registro e quando.
-                Disponível para Chefe E Funcionário — mas o Funcionário recebe o
-                e-mail do autor mascarado pelo servidor.
-              */}
-              <button
-                type="button"
-                onClick={() => setActiveTab("audit")}
-                className={`px-3 py-2 md:py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all cursor-pointer ${
-                  activeTab === "audit"
-                    ? "bg-emerald-800 text-white shadow-xs font-bold"
-                    : "text-emerald-800 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
-                }`}
-              >
-                <History size={14} />
-                <span>Auditoria</span>
-              </button>
             </div>
           </div>
-
-          {/*
-            Diagnóstico visível.
-
-            Antes, quando o servidor não tinha acesso ao banco, cada aba
-            simplesmente aparecia vazia — indistinguível de "não há usuários".
-            Este bloco transforma o silêncio em uma frase acionável.
-          */}
-          {diagnosticoPainel && (
-            <div
-              role="status"
-              className={`mb-2 flex items-start gap-2.5 rounded-2xl border px-3.5 py-3 text-[11px] leading-snug ${
-                diagnosticoPainel.gravidade === "erro"
-                  ? "border-red-300 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
-                  : "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
-              }`}
-            >
-              <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-              <div className="min-w-0">
-                <p className="font-bold">{diagnosticoPainel.titulo}</p>
-                <p className="opacity-90 mt-0.5">{diagnosticoPainel.detalhe}</p>
-              </div>
-            </div>
-          )}
 
           {/*
             Faixa de KPIs — leitura rápida do estado da rede.
@@ -2037,7 +1819,7 @@ export default function AdminPanel({
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => { setUserToViewDetails(u); }}
+                            onClick={() => { setUserToViewDetails(u); setShowUserPassword(false); setPasswordCopied(false); }}
                             className="flex-1 h-10 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer hover-only-scale border border-slate-200 dark:border-white/10 bg-slate-50 hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200"
                             title="Visualizar ficha completa (dados pessoais)"
                           >
@@ -2845,146 +2627,6 @@ export default function AdminPanel({
         {/* TAB 4: CONTAS ESCOLARES — lista SEPARADA dos usuários (exclusivo Chefe).
             Alunos e servidores ficam na aba "Contas"; a gestão das escolas fica
             aqui, com escola, cargo, senha visível e verificação próprios. */}
-        {/*
-          ABA AUDITORIA (§3.10)
-
-          Três estados explícitos e distintos — carregando, erro de leitura e
-          lista vazia. A regra do projeto (rodada 35) é nunca deixar uma falha
-          de banco parecer "não há registros".
-        */}
-        {activeTab === "audit" && (
-          <div className="mt-4 space-y-4">
-            <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-white/10 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-serif font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                  <History size={16} className="text-emerald-700 dark:text-emerald-400" />
-                  Histórico administrativo
-                </h3>
-                <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5 leading-relaxed">
-                  Quem executou, qual operação, em qual registro e quando.
-                  {!isChefe && " Como Funcionário Administrador, você vê o autor com o e-mail parcialmente oculto."}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <div className="relative">
-                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    value={auditFilter}
-                    onChange={(e) => setAuditFilter(e.target.value)}
-                    placeholder="Filtrar por ação ou autor…"
-                    className="pl-7 pr-2 py-1.5 w-48 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {auditLoading && (
-              <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/40 p-8 text-center">
-                <RefreshCw size={20} className="mx-auto mb-2 animate-spin text-emerald-600" />
-                <p className="text-xs text-slate-500 dark:text-slate-400">Carregando o histórico…</p>
-              </div>
-            )}
-
-            {!auditLoading && auditError && (
-              <div className="rounded-2xl border border-red-300 bg-red-50 dark:border-red-900/60 dark:bg-red-950/30 p-4 flex items-start gap-2.5">
-                <AlertTriangle size={16} className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-xs font-bold text-red-800 dark:text-red-200">Não foi possível consultar o histórico</p>
-                  <p className="text-[11px] text-red-700 dark:text-red-300 mt-0.5 leading-snug">{auditError}</p>
-                  <p className="text-[11px] text-red-600/80 dark:text-red-400/70 mt-1">
-                    Isto é uma falha de leitura, não &quot;nenhum registro&quot;.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {!auditLoading && !auditError && auditLogs.length === 0 && (
-              <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/40 p-8 text-center">
-                <History size={22} className="mx-auto mb-2 text-slate-300 dark:text-slate-600" />
-                <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Nenhuma ação registrada ainda</p>
-                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
-                  O banco respondeu normalmente e a tabela está vazia.
-                </p>
-              </div>
-            )}
-
-            {!auditLoading && !auditError && auditLogs.length > 0 && (() => {
-              const termo = auditFilter.trim().toLowerCase();
-              const filtrados = termo
-                ? auditLogs.filter((l) =>
-                    `${l.action} ${l.actorEmail || ""} ${l.targetType || ""} ${l.targetId || ""}`
-                      .toLowerCase()
-                      .includes(termo)
-                  )
-                : auditLogs;
-
-              return (
-                <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/40 overflow-hidden">
-                  {/*
-                    `admin-table-scroll` em vez de `overflow-x-auto` solto: no
-                    celular o gesto vertical precisa continuar rolando a página
-                    (rodada 19). Um wrapper com overflow-x puro "engole" o gesto.
-                  */}
-                  <div className="admin-table-scroll">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-50 dark:bg-white/5 text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                        <tr>
-                          <th className="px-3 py-2 font-semibold">Quando</th>
-                          <th className="px-3 py-2 font-semibold">Autor</th>
-                          <th className="px-3 py-2 font-semibold">Ação</th>
-                          <th className="px-3 py-2 font-semibold">Registro</th>
-                          <th className="px-3 py-2 font-semibold">Detalhes</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-white/5">
-                        {filtrados.slice(0, 200).map((log) => (
-                          <tr key={log.id} className="hover:bg-slate-50/70 dark:hover:bg-white/5">
-                            <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-400">
-                              {log.createdAt ? new Date(log.createdAt).toLocaleString("pt-BR") : "—"}
-                            </td>
-                            <td className="px-3 py-2 whitespace-nowrap text-slate-800 dark:text-slate-200">
-                              {log.actorEmail || "—"}
-                              {log.actorRole && (
-                                <span className="ml-1.5 text-[9px] uppercase px-1 py-0.5 rounded bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400">
-                                  {log.actorRole}
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-3 py-2 whitespace-nowrap">
-                              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300">
-                                {log.action}
-                              </span>
-                            </td>
-                            <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-400">
-                              {log.targetType ? `${log.targetType}${log.targetId ? ` #${log.targetId}` : ""}` : "—"}
-                            </td>
-                            <td className="px-3 py-2 text-slate-500 dark:text-slate-400 max-w-[18rem] truncate" title={JSON.stringify(log.metadata)}>
-                              {log.metadata && Object.keys(log.metadata).length > 0
-                                ? Object.entries(log.metadata)
-                                    .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : String(v)}`)
-                                    .join(" · ")
-                                : "—"}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  {filtrados.length === 0 && (
-                    <p className="px-3 py-6 text-center text-[11px] text-slate-400 dark:text-slate-500">
-                      Nenhum registro corresponde ao filtro &quot;{auditFilter}&quot;.
-                    </p>
-                  )}
-                  <div className="px-3 py-2 border-t border-slate-100 dark:border-white/5 text-[10px] text-slate-400 dark:text-slate-500">
-                    {filtrados.length} de {auditLogs.length} registro(s) · exibindo no máximo 200
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        )}
-
         {activeTab === "schools" && isChefe && (
           <div className="mt-4 space-y-4">
             <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -3146,7 +2788,7 @@ export default function AdminPanel({
                         <p className="flex items-center gap-1.5">
                           <span className="font-semibold text-slate-800 dark:text-slate-200">Senha:</span>
                           <code className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded font-mono text-slate-700 dark:text-slate-200">
-                            {acc.senhaDefinida || acc.password ? "definida (hash)" : "não definida"}
+                            {acc.password || "não definida"}
                           </code>
                         </p>
                         {acc.lastLogin && (
@@ -4546,7 +4188,7 @@ export default function AdminPanel({
                 </div>
                 <button
                   type="button"
-                  onClick={() => { setUserToViewDetails(null); }}
+                  onClick={() => { setUserToViewDetails(null); setShowUserPassword(false); setPasswordCopied(false); }}
                   className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-white/10 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
                 >
                   <X size={18} />
@@ -4626,26 +4268,25 @@ export default function AdminPanel({
                       </span>
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="font-mono text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
-                          {/*
-                            Parte 2 da auditoria: a senha deixou de ser texto claro.
-                            O banco guarda somente o hash scrypt, então nem o Chefe
-                            consegue "ver" a senha antiga — mas ele continua podendo
-                            DEFINIR uma nova (botão de lápis), que é o fluxo real de
-                            suporte. Mostrar "••••" permanente seria pior: a UI fingiria
-                            um dado que não existe mais.
-                          */}
-                          {userToViewDetails.password ? "protegida por hash (scrypt)" : "não definida"}
+                          {userToViewDetails.password
+                            ? showUserPassword
+                              ? userToViewDetails.password
+                              : "•".repeat(Math.min(userToViewDetails.password.length, 12))
+                            : "não definida"}
                         </span>
 
-                        {/*
-                          Não existe mais "olho" nem "copiar": o banco guarda
-                          apenas o hash scrypt e a senha não pode ser lida nem
-                          pelo Chefe. O botão de lápis (abaixo) é o fluxo real
-                          de suporte — define uma senha nova e marca o usuário
-                          para trocá-la no próximo acesso.
-                        */}
-                        {(
+                        {userToViewDetails.password && (
                           <>
+                            <button
+                              type="button"
+                              onClick={() => setShowUserPassword((v) => !v)}
+                              className="p-1 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-white/60 dark:hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+                              title={showUserPassword ? "Ocultar senha" : "Mostrar senha"}
+                              aria-label={showUserPassword ? "Ocultar senha" : "Mostrar senha"}
+                            >
+                              {showUserPassword ? <EyeOff size={13} /> : <Eye size={13} />}
+                            </button>
+
                             <button
                               type="button"
                               onClick={() => {
@@ -4659,12 +4300,33 @@ export default function AdminPanel({
                               <Pencil size={13} />
                             </button>
 
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(userToViewDetails.password || "");
+                                  setPasswordCopied(true);
+                                  setTimeout(() => setPasswordCopied(false), 2000);
+                                } catch (_) {
+                                  notifyAdmin("Não foi possível copiar a senha.", "warning");
+                                }
+                              }}
+                              className="p-1 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-white/60 dark:hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+                              title="Copiar senha"
+                              aria-label="Copiar senha"
+                            >
+                              {passwordCopied ? (
+                                <Check size={13} className="text-emerald-600 dark:text-emerald-400" />
+                              ) : (
+                                <Copy size={13} />
+                              )}
+                            </button>
                           </>
                         )}
                       </div>
                     </div>
                     <p className="text-[10px] text-amber-700/80 dark:text-amber-400/70 mt-1 leading-snug">
-                      A senha é guardada como hash e não pode ser lida. Use o lápis para definir uma nova: o usuário será obrigado a trocá-la no próximo acesso.
+                      Visível apenas para o Chefe Administrador. Oriente o usuário a trocar no primeiro acesso.
                     </p>
 
                     {/* Alteração da senha — o Chefe Admin pode corrigir a senha do usuário */}
@@ -4795,7 +4457,7 @@ export default function AdminPanel({
 
                 <button
                   type="button"
-                  onClick={() => { setUserToViewDetails(null); }}
+                  onClick={() => { setUserToViewDetails(null); setShowUserPassword(false); setPasswordCopied(false); }}
                   className={`h-11 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center justify-center transition-all cursor-pointer hover-only-scale ${
                     isChefe ? "px-5" : "w-full"
                   }`}
