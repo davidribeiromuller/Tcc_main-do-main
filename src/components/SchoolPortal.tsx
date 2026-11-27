@@ -138,8 +138,9 @@ export default function SchoolPortal({
         mostrava só o que tinha no próprio `localStorage`.
       */
       try {
+        // Só o slug: `initialSchool.id` é o número do catálogo local, não o
+        // uuid do banco. Filtrar por ele traria zero resultados.
         const { comunicados, error: erroComunicados } = await fetchComunicados({
-          schoolId: initialSchool?.id ? String(initialSchool.id) : null,
           schoolSlug: initialSchool.slug,
         });
         if (erroComunicados) {
@@ -235,7 +236,8 @@ export default function SchoolPortal({
         carregar as informações") vinha daí.
       */
       const resultado = await publicarComunicado({
-        schoolId: initialSchool?.id ? String(initialSchool.id) : null,
+        // O serviço resolve o uuid a partir do slug — o id do catálogo é
+        // numérico e o Postgres recusaria na coluna uuid.
         schoolSlug: schoolData.slug || initialSchool.slug,
         title: payload.title,
         body: payload.description,

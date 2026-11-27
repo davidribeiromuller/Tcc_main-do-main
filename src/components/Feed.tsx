@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Search, MapPin, Calendar, PlusCircle, X, GraduationCap, Globe2,
-  CalendarPlus, Trash2, Clock, User, Sparkles, ArrowRight,
+  CalendarPlus, Trash2, Clock, User, Sparkles, ArrowRight, ArrowLeft,
 } from "lucide-react";
 import { Event } from "../types";
 import { resolveEventCity, classifyEventAsSchool } from "../lib/eventClassification";
@@ -283,7 +283,23 @@ export default function Feed({
       <div className="sticky top-0 z-30 bg-brand-bg-light/95 dark:bg-brand-bg-dark/95 backdrop-blur-md border-b border-brand-primary/10">
         {/* Barra principal: título + ações */}
         <div className="w-[88%] max-w-[1600px] mx-auto flex items-start justify-between gap-2 px-0.5 sm:px-1 pt-3.5 pb-2.5 sm:pt-4 sm:pb-3">
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 flex items-start gap-2">
+            {/*
+              Seta de voltar ao dashboard. Só no celular: no desktop o
+              `DesktopNavbar` já está sempre visível com a navegação. No mobile
+              a barra superior não tem link de volta, e sem esta seta o usuário
+              ficava preso na aba de eventos (o único caminho era o botão
+              "voltar" do navegador).
+            */}
+            <button
+              type="button"
+              onClick={() => onNavigate("feed")}
+              aria-label="Voltar ao dashboard"
+              className="sm:hidden mt-0.5 p-2 -ml-1 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 active:scale-95 transition cursor-pointer shrink-0"
+            >
+              <ArrowLeft size={20} />
+            </button>
+            <div className="min-w-0">
             <h1 className="text-[1.35rem] sm:text-[1.7rem] font-display font-semibold tracking-tight text-slate-900 dark:text-white leading-tight">
               Eventos
             </h1>
@@ -294,6 +310,7 @@ export default function Feed({
                     cityFilter !== "todas" ? ` · ${cityFilter}` : ""
                   }`}
             </p>
+            </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">

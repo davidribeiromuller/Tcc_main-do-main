@@ -108,6 +108,13 @@ export interface Event {
    * registrado — quem já se inscreveu precisa saber que não vai acontecer.
    */
   isCanceled?: boolean;
+  /** Nome de quem criou o evento (aparece para o administrador). */
+  creatorName?: string | null;
+  creatorEmail?: string | null;
+  /** Nome de quem autorizou/publicou o evento. */
+  authorizedByName?: string | null;
+  authorizedByEmail?: string | null;
+  authorizedAt?: string | null;
 }
 
 export interface EventParticipationHistory {

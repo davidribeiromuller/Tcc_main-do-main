@@ -95,6 +95,46 @@ export function calcularExpiracao(entrada: {
   return limite.toISOString();
 }
 
+/**
+ * Resolve o uuid real da escola no banco a partir do slug.
+ *
+ * POR QUE ISSO É NECESSÁRIO
+ * -------------------------
+ * `SchoolProfile.id` vem do catálogo local e é um NÚMERO (1, 2, 3…). No banco,
+ * `schools.id` é `uuid`. Mandar o número do catálogo para a Edge Function fazia
+ * o Postgres recusar com "invalid input syntax for type uuid" e a publicação
+ * falhava com 500 — sem mensagem útil.
+ *
+ * O slug é a chave estável: existe no catálogo e no banco.
+ */
+export async function resolverSchoolUuid(
+  slug: string | null | undefined
+): Promise<{ id: string | null; error: string | null }> {
+  const alvo = (slug || "").trim();
+  if (!alvo) return { id: null, error: "Escola não identificada." };
+  if (!isSupabaseConfigured()) {
+    return { id: null, error: "Banco de dados não configurado neste ambiente." };
+  }
+  try {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+      .from("schools")
+      .select("id")
+      .eq("slug", alvo)
+      .maybeSingle();
+    if (error) return { id: null, error: error.message };
+    if (!data?.id) {
+      return {
+        id: null,
+        error: `A escola "${alvo}" ainda não está cadastrada na plataforma. Peça ao administrador para ativá-la.`,
+      };
+    }
+    return { id: String(data.id), error: null };
+  } catch (err: any) {
+    return { id: null, error: err?.message || "Falha ao identificar a escola." };
+  }
+}
+
 /** URL da Edge Function `announcements-api`. */
 function baseUrl(): string | null {
   if (!isSupabaseConfigured()) return null;
@@ -236,10 +276,24 @@ export async function publicarComunicado(entrada: {
   }
 
   const dias = entrada.diasParaExpirar === undefined ? DIAS_PADRAO_COMUNICADO : entrada.diasParaExpirar;
-  const expiresAt = calcularExpiracao({
-    eventEndsAt: entrada.eventEndsAt ?? null,
-    dias,
-  });
+
+  /*
+    O uuid vem do banco, resolvido pelo slug — nunca do `id` do catálogo local,
+    que é numérico. Sem esta etapa, o INSERT chega com "2" numa coluna uuid e o
+    Postgres recusa.
+  */
+  let schoolId: string | null = null;
+  if (entrada.schoolSlug || entrada.schoolId) {
+    if (entrada.schoolId && /^[0-9a-fA-F-]{36}$/.test(entrada.schoolId)) {
+      schoolId = entrada.schoolId;
+    } else {
+      const resolvido = await resolverSchoolUuid(entrada.schoolSlug);
+      if (resolvido.error) {
+        return { comunicado: null, salvoLocalmente: false, error: resolvido.error };
+      }
+      schoolId = resolvido.id;
+    }
+  }
 
   /*
     A escrita passa pela Edge Function `announcements-api`, não direto pelo
@@ -268,8 +322,8 @@ export async function publicarComunicado(entrada: {
         body: JSON.stringify({
           // Global (school_id nulo) quando não há escola — só o proprietário
           // consegue; a função recusa os demais.
-          school_id: entrada.schoolId ?? null,
-          global: !entrada.schoolId,
+          school_id: schoolId,
+          global: !schoolId,
           title: titulo,
           body: corpo,
           category: entrada.category || "Comunicado",
@@ -299,6 +353,19 @@ export async function publicarComunicado(entrada: {
         };
       }
 
+      /*
+        Erro do servidor com mensagem clara (500, 503, validação) — devolve o
+        texto em vez de cair no genérico "verifique sua conexão", que mandava
+        procurar problema no lugar errado.
+      */
+      const detalhe = res.ok
+        ? "O servidor respondeu sem o comunicado."
+        : `O servidor recusou a publicação (${res.status})` +
+          (json?.error ? `: ${json.error}` : ".");
+
+      if (!res.ok && res.status >= 500) {
+        return { comunicado: null, salvoLocalmente: false, error: detalhe };
+      }
       console.warn("[announcementsService] Servidor recusou:", json?.error || res.status);
     } catch (err: any) {
       console.warn("[announcementsService] Falha ao publicar:", err?.message);

@@ -2051,3 +2051,92 @@ A escrita não acontece pelo navegador — a policy dá apenas `SELECT` a
 Rotas: `GET /public`, `POST /publicar`, `PUT /:id`, `DELETE /:id`,
 `POST /lifecycle/expire`. Exclusão é soft delete e toda ação vai para
 `platform_audit_logs`.
+
+---
+
+## 36. Rodada 48 — as sete cobranças do usuário
+
+### 36.1 Seta de voltar no celular
+
+No feed, o cabeçalho só tinha navegação em telas grandes. No celular não
+havia como sair da aba de eventos sem usar o botão do navegador. Foi
+adicionada uma seta (`ArrowLeft`, `sm:hidden`) que chama
+`onNavigate("feed")` — só aparece no mobile, onde faz falta.
+
+### 36.2 Publicar comunicado para toda a rede
+
+O endpoint global já existia desde a rodada 46 (`POST /publicar` com
+`PLATFORM_OWNER_EMAILS`), mas **não havia botão**: só dava para usar a API
+direto. A aba **Comunicados** do painel agora tem o alternador
+**"Só a escola" / "Toda a rede"**, visível apenas para o proprietário
+(`isChefe`). O destino global continua restrito a dois e-mails.
+
+### 36.3 Três abas novas no painel administrativo
+
+- **Comunicados** — publicar, listar e excluir;
+- **Assinantes** — pessoas assinantes do aplicativo (indicadores + tabela),
+  alimentada por `billing-api /owner/overview`;
+- **Financeiro** — *separado de propósito*: receita, pendências e a tabela
+  de valores das cobranças, com aviso quando o provedor não está
+  configurado (`MERCADOPAGO_ACCESS_TOKEN` ausente).
+
+Essas duas últimas só aparecem para `isChefe`.
+
+### 36.4 Nome de quem autoriza o evento
+
+Antes o organizador aparecia sempre como "Diretoria Escolar". Agora:
+
+- migration `20261127b_eventos_autoria.sql` acrescenta `creator_name`,
+  `creator_email`, `authorized_by_name`, `authorized_by_email` e
+  `authorized_at` em `events` **e** `eventos` (as duas tabelas convivem);
+- `createEvent` grava a autoria; `handleAddEvent` injeta o `currentUser`;
+- a tabela do ADM ganhou a coluna **Responsável**, priorizando
+  `authorizedByName || creatorName` e mostrando `creatorRole` embaixo.
+
+### 36.5 Comunicado que não publicava
+
+**Causa raiz:** `SchoolProfile.id` é **numérico** (índice do catálogo
+estático) e estava sendo enviado como `school_id`, que no banco é `uuid`.
+O Postgres recusava, a função devolvia 500 e a UI só mostrava o alerta
+genérico do `apiResilience`.
+
+**Correção:** `resolverSchoolUuid(slug)` busca o uuid real pelo slug;
+`SchoolPortal` passa o slug. A função aceita uuid direto ou slug.
+
+### 36.6 Desistir da presença
+
+O usuário tinha razão em cobrar: o "cancelar" que existia era o
+**organizador desmarcando o evento para todos** — nada a ver com a pessoa
+sair da lista. Confirmar presença era irreversível, e pior: só gravava em
+`localStorage` do próprio aparelho.
+
+Agora:
+
+- tabela `public.event_rsvps` (`event_id`, `user_id`, `status
+  confirmed|canceled`, `canceled_at`, `canceled_reason`), com índice único
+  `(event_id, user_id)` e RLS fechada para anon/authenticated — o acesso
+  passa pela função;
+- `rsvpService.ts` com `confirmarPresenca`, `cancelarPresenca`,
+  `consultarPresenca` e `listarConfirmados`;
+- no evento, quem já confirmou vê **"Desistir da presença"**; quem desistiu
+  pode confirmar de novo ("Confirmar presença novamente");
+- o painel do ADM mostra o **total de confirmados** por evento, então o
+  organizador finalmente enxerga quem vai.
+
+### 36.7 Verificação
+
+`test-round46` foi de 55 para **69 verificações** (bloco 8 cobre o fluxo
+de presença, incluindo "botão só aparece para quem confirmou").
+Bateria completa: **29 suítes, 0 falhas**. `tsc --noEmit` e `build` limpos.
+
+> Armadilha registrada: `React.useMemo`/`React.useEffect` resolvido pelo
+> namespace quebra nos testes em jsdom ("Invalid hook call"); usar sempre
+> o import nomeado. E efeito novo tem que ser declarado **fora** do corpo
+> de outro efeito — hook dentro de callback também é invalid hook call.
+
+### 36.8 Pendências conhecidas
+
+- cron de `billing-lifecycle` e `expirar_comunicados()` não agendados;
+- `preapproval` (assinatura recorrente) não implementado;
+- checkout de cartão no navegador não implementado;
+- `MERCADOPAGO_ACCESS_TOKEN` ainda ausente.

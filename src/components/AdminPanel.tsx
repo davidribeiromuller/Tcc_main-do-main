@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import AddressSearchInput from "./AddressSearchInput";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -49,7 +49,10 @@ import {
   UserCheck,
   GraduationCap,
   Moon,
-  Sun
+  Sun,
+  Megaphone,
+  Receipt,
+  Ban
 } from "lucide-react";
 import { User, Event } from "../types";
 import {
@@ -68,8 +71,12 @@ import {
 import EventSuggestionsTab from "./EventSuggestionsTab";
 import ProfileChangesTab from "./ProfileChangesTab";
 import SchoolProfileModal from "./SchoolProfileModal.tsx";
+import AnnouncementsAdminTab from "./AnnouncementsAdminTab";
+import SubscribersTab from "./SubscribersTab";
+import FinanceTab from "./FinanceTab";
 import EventCardMural from "./EventCardMural.tsx";
 import { carregarEscolas } from "../lib/schoolProfilesService.ts";
+import { listarConfirmados } from "../lib/rsvpService.ts";
 import type { SchoolProfile } from "../lib/schoolsData.ts";
 import {
   listarContasEscolares,
@@ -180,8 +187,20 @@ export default function AdminPanel({
     return ultima || ev.location || "Local não informado";
   };
 
-  /** Quem organiza: escola do evento, papel do criador ou a escola do próprio ADM. */
+  /**
+   * Quem organiza o evento.
+   *
+   * Prioriza o NOME da pessoa (quem criou / quem autorizou) sobre o papel
+   * genérico. Antes o painel mostrava "Diretoria Escolar" para tudo, e o
+   * administrador não conseguia dizer qual funcionário criou ou liberou o
+   * evento — justamente a informação que ele precisa para cobrar alguém.
+   */
   const organizadorDoEvento = (ev: Event): string => {
+    const pessoa = ev.authorizedByName || ev.creatorName;
+    if (pessoa) {
+      const papel = ev.creatorRole ? ` · ${ev.creatorRole}` : "";
+      return `${pessoa}${papel}`;
+    }
     if (ev.schoolName) return ev.schoolName;
     if (ev.creatorRole) return `${ev.creatorRole}`;
     if (ev.schoolId) {
@@ -198,7 +217,19 @@ export default function AdminPanel({
     }
   };
 
-  const [activeTab, setActiveTab] = useState<"users" | "blocked" | "events" | "schools" | "suggestions" | "personal" | "profileChanges">("users");
+  /**
+   * Confirmações de presença por evento.
+   *
+   * Antes "confirmar presença" gravava só em `localStorage` do visitante: o
+   * organizador não tinha ideia de quantas pessoas iriam. Aqui o ADM vê os
+   * números reais, por evento.
+   */
+  const [confirmadosPorEvento, setConfirmadosPorEvento] = useState<Record<number, number>>({});
+
+  const [activeTab, setActiveTab] = useState<
+    "users" | "blocked" | "events" | "schools" | "suggestions" | "personal" |
+    "profileChanges" | "comunicados" | "assinantes" | "financeiro"
+  >("users");
   const [viewMode, setViewMode] = useState<"table" | "cards">(() => {
     if (typeof window !== "undefined" && window.innerWidth < 768) {
       return "cards";
@@ -237,6 +268,13 @@ export default function AdminPanel({
   /** Abre a ficha direto no formulário (botão "Editar"). */
   const [escolaPerfilEdicao, setEscolaPerfilEdicao] = useState(false);
   const [escolasPerfil, setEscolasPerfil] = useState<SchoolProfile[]>(ARAUCARIA_SCHOOLS);
+
+  /** Escola do usuário no catálogo local (para obter o slug). */
+  const escolaDoUsuario = useMemo(() => {
+    const id = currentUser?.escolaId;
+    if (!id) return null;
+    return (escolasPerfil as any[]).find((e) => Number(e.id) === Number(id)) ?? null;
+  }, [currentUser?.escolaId, escolasPerfil]);
   const [searchTerm, setSearchTerm] = useState("");
   const [eventSearchTerm, setEventSearchTerm] = useState("");
   const [viewingAuthEvent, setViewingAuthEvent] = useState<Event | null>(null);
@@ -873,6 +911,27 @@ export default function AdminPanel({
     setEscolasPerfil(escolas);
   };
 
+  // Carrega o total de confirmações quando a aba de eventos abre.
+  React.useEffect(() => {
+    if (activeTab !== "events") return;
+    let cancelado = false;
+    const carregar = async () => {
+      const lista = events ?? [];
+      const pares = await Promise.all(
+        lista.slice(0, 60).map(async (ev) => {
+          const { userIds } = await listarConfirmados(ev.id);
+          return [ev.id, userIds.length] as const;
+        })
+      );
+      if (cancelado) return;
+      setConfirmadosPorEvento(Object.fromEntries(pares));
+    };
+    void carregar();
+    return () => {
+      cancelado = true;
+    };
+  }, [activeTab, events]);
+
   React.useEffect(() => {
     if (activeTab === "schools") void recarregarPerfisEscolas();
   }, [activeTab]);
@@ -1205,6 +1264,54 @@ export default function AdminPanel({
                   </span>
                 )}
               </button>
+
+              {/*
+                Comunicados: a direção publica o da própria escola; o
+                proprietário publica o comunicado GLOBAL da rede, que aparece
+                em todas as escolas.
+              */}
+              <button
+                type="button"
+                onClick={() => setActiveTab("comunicados")}
+                className={`px-3 py-2 md:py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all cursor-pointer ${
+                  activeTab === "comunicados"
+                    ? "bg-slate-800 text-white shadow-xs font-bold"
+                    : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10"
+                }`}
+              >
+                <Megaphone size={14} />
+                <span>Comunicados</span>
+              </button>
+
+              {isChefe && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("assinantes")}
+                  className={`px-3 py-2 md:py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all cursor-pointer ${
+                    activeTab === "assinantes"
+                      ? "bg-indigo-600 text-white shadow-xs font-bold"
+                      : "text-indigo-700 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/20"
+                  }`}
+                >
+                  <Users size={14} />
+                  <span>Assinantes</span>
+                </button>
+              )}
+
+              {isChefe && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("financeiro")}
+                  className={`px-3 py-2 md:py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all cursor-pointer ${
+                    activeTab === "financeiro"
+                      ? "bg-emerald-700 text-white shadow-xs font-bold"
+                      : "text-emerald-800 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
+                  }`}
+                >
+                  <Receipt size={14} />
+                  <span>Financeiro</span>
+                </button>
+              )}
 
               {isChefe && (
                 <button
@@ -2336,6 +2443,15 @@ export default function AdminPanel({
                           <th className="py-3.5 px-4 bg-slate-900">Data</th>
                           <th className="py-3.5 px-4 bg-slate-900">Cidade</th>
                           <th className="py-3.5 px-4 bg-slate-900">Valor</th>
+                          {/*
+                            Autoria e presença: o ADM precisa saber QUEM criou
+                            o evento e quantas pessoas confirmaram. Antes o
+                            organizador era sempre "Diretoria Escolar" e as
+                            confirmações ficavam invisíveis no navegador de
+                            cada visitante.
+                          */}
+                          <th className="py-3.5 px-4 bg-slate-900">Responsável</th>
+                          <th className="py-3.5 px-4 bg-slate-900 text-center">Confirmados</th>
                           <th className="py-3.5 px-4 bg-slate-900 text-right">Ações</th>
                         </tr>
                       </thead>
@@ -2358,6 +2474,27 @@ export default function AdminPanel({
                               </td>
                               <td className="py-3 px-4 text-slate-600 dark:text-slate-300 whitespace-nowrap">
                                 {ev.isPaid ? (ev.price ? `R$ ${ev.price}` : "Pago") : "Gratuito"}
+                              </td>
+                              <td className="py-3 px-4 text-slate-600 dark:text-slate-300">
+                                <span className="font-semibold">
+                                  {ev.authorizedByName || ev.creatorName || "—"}
+                                </span>
+                                {ev.creatorRole && (
+                                  <span className="block text-[10px] text-slate-400">
+                                    {ev.creatorRole}
+                                  </span>
+                                )}
+                                {ev.isCanceled && (
+                                  <span className="inline-flex items-center gap-1 mt-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-400">
+                                    <Ban size={9} />
+                                    cancelado
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-center">
+                                <span className="font-mono font-semibold">
+                                  {confirmadosPorEvento[ev.id] ?? 0}
+                                </span>
                               </td>
                               <td className="py-3 px-4">
                                 <div className="flex items-center justify-end gap-1.5">
@@ -2627,6 +2764,28 @@ export default function AdminPanel({
         {/* TAB 4: CONTAS ESCOLARES — lista SEPARADA dos usuários (exclusivo Chefe).
             Alunos e servidores ficam na aba "Contas"; a gestão das escolas fica
             aqui, com escola, cargo, senha visível e verificação próprios. */}
+        {/*
+          Comunicados. A escola vem do catálogo pelo `escolaId` do usuário: o
+          que a Edge Function precisa é o SLUG, porque o id do catálogo é
+          numérico e o banco usa uuid.
+        */}
+        {activeTab === "comunicados" && (
+          <AnnouncementsAdminTab
+            schoolSlug={escolaDoUsuario?.slug ?? null}
+            schoolName={escolaDoUsuario?.shortName ?? null}
+            podePublicarGlobal={isChefe}
+            onShowToast={onShowToast}
+          />
+        )}
+
+        {activeTab === "assinantes" && isChefe && (
+          <SubscribersTab onShowToast={onShowToast} />
+        )}
+
+        {activeTab === "financeiro" && isChefe && (
+          <FinanceTab onShowToast={onShowToast} />
+        )}
+
         {activeTab === "schools" && isChefe && (
           <div className="mt-4 space-y-4">
             <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
