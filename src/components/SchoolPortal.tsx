@@ -26,6 +26,13 @@ import { User, Event } from "../types.ts";
 import { SchoolProfile, ARAUCARIA_SCHOOLS, SCHOOL_IMAGES } from "../lib/schoolsData.ts";
 import { fetchJsonApi } from "../lib/staticHosting.ts";
 import { mergeNews, saveNews } from "../lib/schoolNewsStore.ts";
+import {
+  fetchComunicados,
+  publicarComunicado,
+  paraSchoolNews,
+  ROTULOS_PUBLICO,
+  type PublicoAlvo,
+} from "../lib/announcementsService.ts";
 import { safeParseJsonResponse } from "../lib/apiResilience.ts";
 
 interface SchoolPortalProps {
@@ -69,6 +76,8 @@ export default function SchoolPortal({
   const [newsTitle, setNewsTitle] = useState("");
   const [newsSummary, setNewsSummary] = useState("");
   const [newsCategory, setNewsCategory] = useState("Comunicado");
+  /** Público-alvo da notificação: todos, alunos, funcionários… */
+  const [audience, setAudience] = useState<PublicoAlvo>("all");
   const [isPublishingNews, setIsPublishingNews] = useState(false);
 
   // New Event Modal state
@@ -120,6 +129,28 @@ export default function SchoolPortal({
         );
         setSchoolEvents(ownEvents);
         setNewsList(initialSchool.news || []);
+      }
+
+      /*
+        Comunicados vêm do banco (fonte única). Antes vinham de
+        `/api/school-portal/:id/data`, rota que não existe no GitHub Pages: o
+        comunicado recém-publicado nunca era lido de volta, e cada aparelho
+        mostrava só o que tinha no próprio `localStorage`.
+      */
+      try {
+        const { comunicados, error: erroComunicados } = await fetchComunicados({
+          schoolId: initialSchool?.id ? String(initialSchool.id) : null,
+          schoolSlug: initialSchool.slug,
+        });
+        if (erroComunicados) {
+          console.warn("[SchoolPortal] Comunicados:", erroComunicados);
+        } else {
+          const doBanco = paraSchoolNews(comunicados);
+          // Junta com o que já estava na tela (rascunhos locais) sem duplicar.
+          setNewsList((prev) => mergeNews(initialSchool.slug, [...doBanco, ...(prev as any)]));
+        }
+      } catch (err) {
+        console.warn("[SchoolPortal] Falha ao carregar comunicados:", err);
       }
 
       // Fetch audit logs
@@ -196,46 +227,47 @@ export default function SchoolPortal({
         author: currentUser?.nome || schoolData.name
       };
 
-      // Nem todo ambiente possui backend (GitHub Pages é estático). A resposta
-      // pode ser um `index.html` com status 200, por isso nunca chamamos
-      // `res.json()` sem antes validar o Content-Type.
-      let publishedRemotely = false;
-      try {
-        const res = await fetch(`/api/school-portal/${schoolId}/news`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify(payload)
-        });
+      /*
+        A gravação vai para o banco, não para `/api/school-portal/.../news`.
+        Aquela rota não existe no GitHub Pages: o POST recebia o `index.html`
+        com status 200 e o comunicado acabava só no `localStorage` do aparelho
+        de quem publicou. O erro que aparecia na tela ("Não foi possível
+        carregar as informações") vinha daí.
+      */
+      const resultado = await publicarComunicado({
+        schoolId: initialSchool?.id ? String(initialSchool.id) : null,
+        schoolSlug: schoolData.slug || initialSchool.slug,
+        title: payload.title,
+        body: payload.description,
+        category: payload.category,
+        audience,
+        authorName: payload.author,
+        authorEmail: currentUser?.email ?? null,
+        // Prazo padrão de 2 dias (regra do produto). O comunicado some sozinho
+        // depois disso, sem ninguém precisar lembrar de apagar.
+        diasParaExpirar: 2,
+      });
 
-        const parsed = await safeParseJsonResponse<{ error?: string }>(res, {});
-        if (res.ok && parsed.ok) {
-          publishedRemotely = true;
-        } else if (res.ok && !parsed.ok) {
-          // 200 com HTML: significa "sem backend disponível", não erro do usuário.
-          console.info("[SchoolPortal] Backend indisponível; publicando localmente.");
-        } else {
-          throw new Error(parsed.data?.error || parsed.error || "Erro ao publicar comunicado.");
-        }
-      } catch (networkErr: any) {
-        // Erro de rede também não deve impedir o registro local do comunicado.
-        if (networkErr?.message && !/fetch|network|Failed/i.test(networkErr.message)) {
-          throw networkErr;
-        }
-        console.info("[SchoolPortal] Rede indisponível; publicando localmente.", networkErr?.message);
+      if (resultado.salvoLocalmente) {
+        // Não perdemos o texto, mas ele NÃO foi publicado. Dizer "publicado"
+        // aqui seria mentira: ninguém além deste aparelho veria o comunicado.
+        if (onShowToast) onShowToast(resultado.error || "Comunicado salvo apenas neste dispositivo.", "warning");
       }
 
-      // Publica no armazenamento local para que o comunicado apareça de fato
-      // no mural, mesmo sem servidor (produção no GitHub Pages).
-      const created = saveNews(schoolData.slug || initialSchool.slug, {
-        title: payload.title,
-        description: payload.description,
-        category: payload.category as any,
-        author: payload.author
-      });
-      setNewsList((prev) => mergeNews(initialSchool.slug, [...(prev as any), created]));
+      const publicado = resultado.comunicado;
+      if (publicado) {
+        const created = paraSchoolNews([publicado])[0];
+        setNewsList((prev) => mergeNews(initialSchool.slug, [created, ...(prev as any)]));
+      } else if (resultado.salvoLocalmente) {
+        const created = saveNews(schoolData.slug || initialSchool.slug, {
+          title: payload.title,
+          description: payload.description,
+          category: payload.category as any,
+          author: payload.author
+        });
+        setNewsList((prev) => mergeNews(initialSchool.slug, [...(prev as any), created]));
+      }
+      const publishedRemotely = !!publicado;
 
       setShowNewsModal(false);
       setNewsTitle("");
@@ -837,6 +869,28 @@ export default function SchoolPortal({
                     <option value="Cultural">Cultural & Eventos</option>
                     <option value="Aviso">Aviso Urgente</option>
                   </select>
+                </div>
+
+                {/* Destinatário da notificação. Define quem é avisado, não
+                    quem consegue ver o comunicado no mural. */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Notificar
+                  </label>
+                  <select
+                    value={audience}
+                    onChange={(e) => setAudience(e.target.value as PublicoAlvo)}
+                    className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-emerald-600 focus:outline-none"
+                  >
+                    {(Object.keys(ROTULOS_PUBLICO) as PublicoAlvo[]).map((chave) => (
+                      <option key={chave} value={chave}>
+                        {ROTULOS_PUBLICO[chave]}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    O comunicado expira automaticamente 2 dias após a publicação.
+                  </p>
                 </div>
 
                 <div>

@@ -1984,3 +1984,70 @@ público, assinatura só da própria escola com JWT, escrita só pelo backend.
 agendado. As três Edge Functions **estão publicadas** e `ACTIVE` (ver §11 de
 `GUIA_PAGAMENTOS.md`). Sem o token, `/school/pay` registra a cobrança como
 `pending` sem link e nada é marcado como pago — por desenho.
+
+---
+
+## 35. Rodada 46 — cancelar evento e comunicados persistidos
+
+### 35.1 Cancelar evento (sem apagar)
+
+Não existia cancelamento: só "excluir", que apaga o registro. Quem já tinha se
+inscrito não descobria que o evento fora cancelado nem o motivo. Agora
+`cancelEventDirectInSupabase` marca `status = 'canceled'` nas duas tabelas
+(`events` e `eventos`) e anexa o motivo a `requirements`, na forma
+`CANCELADO: <motivo>`. Botão na tela do evento, faixa de aviso para quem abre
+um evento cancelado, e reativação em caso de engano. Sem migration: a coluna já
+existia.
+
+### 35.2 O erro ao publicar comunicado
+
+O alerta "Não foi possível carregar as informações" vinha de um POST para
+`/api/school-portal/:id/news` — rota que **não existe** no GitHub Pages. O
+servidor estático devolvia o `index.html` com status 200, o `res.json()`
+estourava, e o comunicado acabava só em `localStorage`. Resultado prático: o
+aviso aparecia **apenas no aparelho de quem publicou**.
+
+Correção: comunicados passaram a ser gravados em `school_announcements`
+(tabela nova), com `school_id` nulo para os globais. A leitura traz os da
+escola + os globais. `localStorage` virou apenas rascunho de emergência, e a
+UI diz "salvo apenas neste dispositivo" em vez de anunciar publicação.
+
+### 35.3 Comunicados gerais na aba das escolas
+
+O catálogo (`/escolas`) ganhou a aba **Comunicados da rede**: comunicados
+globais + de todas as escolas, com origem marcada, filtro "Só os gerais" e a
+data de expiração.
+
+### 35.4 Notificação direcionada e prazo
+
+`audience` define quem é notificado: todos (inclui visitantes), alunos,
+funcionários/professores, famílias, direção. Prazo padrão de **2 dias**; quando
+há evento vinculado, o prazo conta do **encerramento do evento**, não da
+publicação. `expirar_comunicados()` marca vencidos como `deleted` sem apagar
+nada.
+
+### 35.5 Validação
+
+| Item | Resultado |
+|---|---|
+| `test-round46-comunicados-cancelamento.mjs` | **44/44** |
+| Bateria completa | **29 suítes, 0 falhas** |
+| `tsc --noEmit` · `npm run build` | limpo · ok |
+| Banco: insert escola + global + vencido, em rollback | correto |
+| Banco: `expirar_comunicados()` | 1 marcado como `deleted` |
+| Banco: `anon` lê comunicado, não escreve | confirmado |
+| `AdminPanel.tsx` e `server.ts` | intocados |
+
+### 35.6 Escrita autorizada no servidor
+
+A escrita não acontece pelo navegador — a policy dá apenas `SELECT` a
+`anon`/`authenticated`. Criada a Edge Function **`announcements-api`**
+(publicada, `ACTIVE`), que usa a chave de serviço e decide no servidor:
+
+- `school_admin`/`school_staff` da escola → comunicado da escola;
+- proprietário (`PLATFORM_OWNER_EMAILS`) → comunicado global da rede;
+- editar/excluir → direção da escola do comunicado ou o proprietário.
+
+Rotas: `GET /public`, `POST /publicar`, `PUT /:id`, `DELETE /:id`,
+`POST /lifecycle/expire`. Exclusão é soft delete e toda ação vai para
+`platform_audit_logs`.

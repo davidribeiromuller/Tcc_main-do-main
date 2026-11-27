@@ -104,6 +104,7 @@ export function mapSupabaseEventoToEvent(row: any): Event {
     // de estimar por índice.
     lat: typeof row.lat === "number" ? row.lat : null,
     lng: typeof row.lng === "number" ? row.lng : null,
+    isCanceled: row.status === "canceled" || row.status === "cancelado",
   };
 }
 
@@ -152,6 +153,7 @@ export function mapSupabaseEventsTableToEvent(row: any): Event {
     }),
     lat: typeof row.lat === "number" ? row.lat : null,
     lng: typeof row.lng === "number" ? row.lng : null,
+    isCanceled: row.status === "canceled" || row.status === "cancelado",
   };
 }
 
@@ -520,4 +522,109 @@ export async function deleteEventDirectInSupabase(eventId: number): Promise<{ su
     success: false,
     error: r1.error || r2.error || new Error(`Nenhum evento com id ${eventId} foi encontrado para excluir.`),
   };
+}
+
+/**
+ * Cancela um evento — sem apagar.
+ *
+ * DIFERENÇA PARA `deleteEventDirectInSupabase`
+ * --------------------------------------------
+ * Excluir remove o evento da existência: quem já tinha se inscrito perde o
+ * registro e não descobre o motivo. Cancelar é o oposto: o evento continua
+ * visível, marcado como cancelado, com o motivo escrito. Quem se inscreveu
+ * precisa saber que não vai acontecer — e por quê.
+ *
+ * Marcamos `status = 'canceled'` e guardamos o motivo em `requirements`, que é
+ * uma coluna de texto livre já existente nas duas tabelas (`events` e
+ * `eventos`). Assim não é preciso migration, e o evento continua compatível com
+ * tudo que já lê essas tabelas.
+ *
+ * As duas tabelas são tentadas, como no resto do arquivo: o banco tem `events`
+ * e `eventos` em paralelo e um evento pode existir em apenas uma delas.
+ */
+export async function cancelEventDirectInSupabase(
+  eventId: number,
+  motivo?: string | null
+): Promise<{ success: boolean; error: any }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: new Error("Supabase não configurado") };
+  }
+
+  const supabase = getSupabaseClient();
+  const motivoLimpo = (motivo || "").trim().slice(0, 500);
+
+  const cancelarEm = async (tabela: "events" | "eventos") => {
+    try {
+      const payload: Record<string, any> = { status: "canceled" };
+      // Preserva o texto de requisitos e anexa o motivo do cancelamento.
+      const { data: atual } = await supabase
+        .from(tabela)
+        .select("id, requirements")
+        .eq("id", eventId)
+        .maybeSingle();
+
+      if (atual) {
+        const anteriores = (atual as any).requirements || "";
+        const marcador = motivoLimpo
+          ? `CANCELADO: ${motivoLimpo}`
+          : "CANCELADO";
+        payload.requirements = anteriores ? `${anteriores}\n\n${marcador}` : marcador;
+      }
+
+      const { data, error } = await supabase
+        .from(tabela)
+        .update(payload)
+        .eq("id", eventId)
+        .select("id");
+
+      if (error) return { alteradas: 0, error };
+      return { alteradas: data?.length ?? 0, error: null };
+    } catch (err) {
+      return { alteradas: 0, error: err };
+    }
+  };
+
+  const [r1, r2] = await Promise.all([cancelarEm("events"), cancelarEm("eventos")]);
+  const total = r1.alteradas + r2.alteradas;
+
+  if (total > 0) {
+    return { success: true, error: null };
+  }
+
+  return {
+    success: false,
+    error:
+      r1.error ||
+      r2.error ||
+      new Error(`Nenhum evento com id ${eventId} foi encontrado para cancelar.`),
+  };
+}
+
+/** Reverte um cancelamento (o evento volta a acontecer). */
+export async function reactivateEventDirectInSupabase(
+  eventId: number
+): Promise<{ success: boolean; error: any }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: new Error("Supabase não configurado") };
+  }
+
+  const supabase = getSupabaseClient();
+
+  const reativarEm = async (tabela: "events" | "eventos") => {
+    try {
+      const { data, error } = await supabase
+        .from(tabela)
+        .update({ status: "ativo" })
+        .eq("id", eventId)
+        .select("id");
+      if (error) return { alteradas: 0, error };
+      return { alteradas: data?.length ?? 0, error: null };
+    } catch (err) {
+      return { alteradas: 0, error: err };
+    }
+  };
+
+  const [r1, r2] = await Promise.all([reativarEm("events"), reativarEm("eventos")]);
+  if (r1.alteradas + r2.alteradas > 0) return { success: true, error: null };
+  return { success: false, error: r1.error || r2.error || new Error("Evento não encontrado.") };
 }
