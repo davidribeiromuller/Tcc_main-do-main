@@ -1920,3 +1920,67 @@ Os cards de ~330 px ficaram grandes demais para o conjunto. Ajuste aplicado
 Diferença de ~24 px por card, mantendo as 5 colunas a partir de 1440 px e a
 mesma altura/proporção (capa 160 px). `test-round31` foi atualizado com a nova
 matemática (48 verificações).
+
+---
+
+## 34. Rodada 45 — Monetização (módulo comercial)
+
+Implementação do sistema comercial: planos, assinaturas, cobranças, área da
+instituição e painel financeiro do proprietário. Documentação completa em
+`RELATORIO_IMPLEMENTACAO_MONETIZACAO.md`, `GUIA_MONETIZACAO.md`,
+`GUIA_ASSINATURAS.md` e `GUIA_PAGAMENTOS.md`.
+
+### 34.1 O que foi preservado
+
+`AdminPanel.tsx` **não foi tocado** (byte a byte igual ao `main`). Nenhuma
+dependência nova. Nenhuma tabela nova — o schema da rodada 36 sobreviveu ao
+revert da #45 e cobre toda a especificação.
+
+### 34.2 Por que não foi só restaurar o código antigo
+
+O código da rodada 36 era server-first: dependia do Express (`server.ts`), que
+não roda no GitHub Pages. Restaurá-lo produziria "Carregando planos…" para
+sempre — foi exatamente o que a #45 reverteu.
+
+A camada comercial agora roda em **Supabase Edge Functions**, no mesmo projeto
+do banco. Identidade = JWT do Supabase Auth (`auth.getUser`); o papel vem de
+`memberships`. O proprietário é identificado por `PLATFORM_OWNER_EMAILS` — não
+existe coluna `is_owner`, então não há o que o frontend forjar.
+
+### 34.3 Vazamento fechado (herança da rodada 44)
+
+`subscriptions`, `payment_transactions` e `webhook_events` estavam com policies
+`to anon using(true)` para escrita. Com a chave publicável — que está no bundle
+— qualquer visitante lia a cobrança de todas as escolas e dava `UPDATE` em
+`subscriptions.status`, promovendo a própria escola para `active` sem pagar.
+
+`supabase/migrations/20261126_monetizacao_rls.sql` fecha isso: catálogo
+público, assinatura só da própria escola com JWT, escrita só pelo backend.
+
+### 34.4 Bugs encontrados na revisão pré-commit
+
+| # | Bug | Impacto |
+|---|---|---|
+| 1 | `consultarCobranca()` não devolvia `external_reference` | o webhook não achava a transação e **ignoraria pagamento real** |
+| 2 | webhook não conferia o valor pago | R$ 1,00 quitaria mensalidade de R$ 699 |
+| 3 | webhook tratava qualquer erro de INSERT como "duplicado" | pagamento descartado em silêncio |
+| 4 | formulário de demonstração exigia login | o visitante da vitrine ainda não tem conta |
+
+### 34.5 Validação
+
+| Suíte | Resultado |
+|---|---|
+| `test-round45-monetizacao.mjs` (novo) | **91/91** |
+| Bateria completa | **30 suítes, 0 falhas** |
+| `tsc --noEmit` · `npm run build` | 0 erros · ok |
+| Bundle expõe segredo? | 0 ocorrências |
+| Banco: ciclo escola→assinatura→cobrança em rollback | ok |
+| Banco: `anon` não escreve em tabela financeira | ok |
+| Regressão: escrita do app escolar intacta | ok |
+
+### 34.6 Pendências declaradas
+
+`MERCADOPAGO_ACCESS_TOKEN` não configurado; cron do `billing-lifecycle` não
+agendado. As três Edge Functions **estão publicadas** e `ACTIVE` (ver §11 de
+`GUIA_PAGAMENTOS.md`). Sem o token, `/school/pay` registra a cobrança como
+`pending` sem link e nada é marcado como pago — por desenho.

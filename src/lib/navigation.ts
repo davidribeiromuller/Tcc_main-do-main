@@ -22,6 +22,11 @@ export const TELAS_CONHECIDAS = [
   "splash", "welcome", "login", "register", "recovery", "codeSent",
   "feed", "schools", "schoolDetail", "eventDetail", "calendar", "map",
   "settings", "admin", "contact", "schoolPortal",
+  /*
+    Rodada 45 — telas comerciais. Entram na mesma lista e no mesmo mapa de
+    rotas das telas escolares: nenhum roteador novo, nenhuma dependência nova.
+  */
+  "plans", "subscription", "masterFinance",
 ] as const;
 
 export type Tela = (typeof TELAS_CONHECIDAS)[number];
@@ -45,6 +50,13 @@ const ROTAS: Record<string, string> = {
   "/contato": "contact",
   "/contact": "contact",
   "/portal": "schoolPortal",
+  // Monetização (rodada 45)
+  "/planos": "plans",
+  "/plans": "plans",
+  "/precos": "plans",
+  "/assinatura": "subscription",
+  "/subscription": "subscription",
+  "/master/monetizacao": "masterFinance",
 };
 
 /** Rota canônica de cada tela (o inverso do mapa acima). */
@@ -61,6 +73,9 @@ export const ROTAS_POR_TELA: Record<string, string> = {
   admin: "/admin",
   contact: "/contato",
   schoolPortal: "/portal",
+  plans: "/planos",
+  subscription: "/assinatura",
+  masterFinance: "/master/monetizacao",
 };
 
 /**
@@ -113,6 +128,17 @@ export function resolverTelaInicial(params: {
   // vazio, sem entender que precisa entrar).
   if (daRota && caminho !== "/") {
     if ((daRota === "admin" || daRota === "settings") && !params.logado) return "welcome";
+    /*
+      Rodada 45: `/assinatura` e `/master/monetizacao` mostram dados financeiros.
+      Sem sessão não há o que exibir, e abrir a tela vazia só confunde. A
+      autorização de verdade NÃO é feita aqui — a rota é só a borda. Quem decide
+      se a pessoa pode ver o financeiro é a Edge Function (JWT + `memberships` +
+      lista de proprietários); esta linha evita a tela morta.
+
+      `/planos` fica de fora de propósito: é vitrine pública, tem que abrir
+      para quem ainda não tem conta.
+    */
+    if ((daRota === "subscription" || daRota === "masterFinance") && !params.logado) return "welcome";
     return daRota;
   }
 

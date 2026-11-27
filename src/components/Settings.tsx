@@ -23,7 +23,8 @@ import {
   CheckCircle2,
   Sparkles,
   ShieldCheck,
-  BellRing
+  BellRing,
+  Receipt
 } from "lucide-react";
 import { SCHOOLS_LIST } from "../lib/schools.ts";
 import { Event } from "../types.ts";
@@ -583,6 +584,32 @@ export default function Settings({
                   {notificationStatus === "granted" ? "Ativado ✓" : "Ativar Permissão"}
                 </button>
               </div>
+
+              {/*
+                Rodada 45 — atalho para a área de assinatura. Só aparece para o
+                Chefe Administrador, que é quem responde pela instituição. Não é
+                barreira de segurança: a Edge Function revalida o papel no
+                servidor e devolve 403 se a pessoa não for school_admin.
+              */}
+              {isChefeAdmin(user) && (
+                <button
+                  onClick={() => onNavigate("subscription")}
+                  className="w-full h-14 px-4 rounded-2xl bg-white dark:bg-brand-card-dark border border-brand-primary/10 flex items-center justify-between hover:bg-brand-primary/10 active:scale-99 transition-all cursor-pointer"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400">
+                      <Receipt size={18} />
+                    </div>
+                    <div className="text-left">
+                      <span className="text-sm font-semibold block">Plano e assinatura</span>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Plano contratado, cobranças e cancelamento
+                      </span>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} className="text-slate-400" />
+                </button>
+              )}
 
               <button
                 onClick={() => onNavigate("contact")}
