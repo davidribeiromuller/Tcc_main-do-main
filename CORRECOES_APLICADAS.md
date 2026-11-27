@@ -2038,10 +2038,16 @@ nada.
 | Banco: `anon` lê comunicado, não escreve | confirmado |
 | `AdminPanel.tsx` e `server.ts` | intocados |
 
-### 35.6 Pendência declarada
+### 35.6 Escrita autorizada no servidor
 
-**Escrita de comunicado pelo navegador ainda esbarra na RLS** — a policy dá
-apenas `SELECT` a `anon`/`authenticated` e a escrita é exclusiva da chave de
-serviço. Publicar pelo app cai no rascunho local, com aviso na tela. Falta a
-Edge Function `announcements-api` (mesmo padrão de `billing-api`) para liberar
-a escrita com autorização de servidor. Ver `GUIA_COMUNICADOS.md` §2.
+A escrita não acontece pelo navegador — a policy dá apenas `SELECT` a
+`anon`/`authenticated`. Criada a Edge Function **`announcements-api`**
+(publicada, `ACTIVE`), que usa a chave de serviço e decide no servidor:
+
+- `school_admin`/`school_staff` da escola → comunicado da escola;
+- proprietário (`PLATFORM_OWNER_EMAILS`) → comunicado global da rede;
+- editar/excluir → direção da escola do comunicado ou o proprietário.
+
+Rotas: `GET /public`, `POST /publicar`, `PUT /:id`, `DELETE /:id`,
+`POST /lifecycle/expire`. Exclusão é soft delete e toda ação vai para
+`platform_audit_logs`.

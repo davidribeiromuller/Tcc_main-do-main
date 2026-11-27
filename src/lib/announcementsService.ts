@@ -95,6 +95,29 @@ export function calcularExpiracao(entrada: {
   return limite.toISOString();
 }
 
+/** URL da Edge Function `announcements-api`. */
+function baseUrl(): string | null {
+  if (!isSupabaseConfigured()) return null;
+  try {
+    const url = (getSupabaseClient() as any)?.supabaseUrl as string | undefined;
+    if (!url) return null;
+    return `${url.replace(/\/$/, "")}/functions/v1/announcements-api`;
+  } catch {
+    return null;
+  }
+}
+
+/** `Authorization: Bearer <jwt>` do Supabase Auth, ou null. */
+async function authHeader(): Promise<string | null> {
+  try {
+    const { data } = await getSupabaseClient().auth.getSession();
+    const token = data?.session?.access_token;
+    return token ? `Bearer ${token}` : null;
+  } catch {
+    return null;
+  }
+}
+
 function mapear(linha: any): Comunicado {
   return {
     id: String(linha.id),
@@ -218,39 +241,67 @@ export async function publicarComunicado(entrada: {
     dias,
   });
 
-  if (isSupabaseConfigured()) {
+  /*
+    A escrita passa pela Edge Function `announcements-api`, não direto pelo
+    cliente. A tabela tem policy de leitura pública e NENHUMA permissão de
+    escrita para `anon`/`authenticated` — e isso é proposital, porque a chave
+    publicável está no bundle. Quem decide se a pessoa pode publicar é o
+    servidor, com a chave de serviço e o `memberships` em mãos.
+  */
+  const url = baseUrl();
+  if (url) {
     try {
-      const supabase = getSupabaseClient();
-      const { data, error } = await supabase
-        .from("school_announcements")
-        .insert([
-          {
-            school_id: entrada.schoolId ?? null,
-            school_slug: entrada.schoolSlug ?? null,
-            title: titulo,
-            body: corpo,
-            category: entrada.category || "Comunicado",
-            audience: entrada.audience || "all",
-            author_name: entrada.authorName ?? null,
-            author_email: entrada.authorEmail ?? null,
-            expires_at: expiresAt,
-            event_id: entrada.eventId ?? null,
-            event_ends_at: entrada.eventEndsAt ?? null,
-            status: "published",
-          },
-        ])
-        .select("*")
-        .single();
-
-      if (!error && data) {
-        return { comunicado: mapear(data), salvoLocalmente: false, error: null };
+      const token = await authHeader();
+      if (!token) {
+        return {
+          comunicado: null,
+          salvoLocalmente: false,
+          error: "Entre com a conta Google para publicar comunicados.",
+        };
       }
 
-      // Erro do banco (RLS, rede, coluna) — tenta o rascunho local antes de
-      // devolver falha, para não perder o que a pessoa escreveu.
-      console.warn("[announcementsService] Falha ao gravar no banco:", error?.message);
+      const controlador = new AbortController();
+      const timer = setTimeout(() => controlador.abort(), 15000);
+      const res = await fetch(`${url}/publicar`, {
+        method: "POST",
+        headers: { Authorization: token, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          // Global (school_id nulo) quando não há escola — só o proprietário
+          // consegue; a função recusa os demais.
+          school_id: entrada.schoolId ?? null,
+          global: !entrada.schoolId,
+          title: titulo,
+          body: corpo,
+          category: entrada.category || "Comunicado",
+          audience: entrada.audience || "all",
+          author_name: entrada.authorName ?? null,
+          event_id: entrada.eventId ?? null,
+          event_ends_at: entrada.eventEndsAt ?? null,
+          dias_para_expirar: dias,
+        }),
+        signal: controlador.signal,
+      });
+      clearTimeout(timer);
+
+      const json = await res.json().catch(() => null);
+
+      if (res.ok && json?.comunicado) {
+        return { comunicado: mapear(json.comunicado), salvoLocalmente: false, error: null };
+      }
+
+      // Erro de autorização é definitivo: não faz sentido cair em rascunho
+      // local, porque a pessoa também não poderá publicar depois.
+      if (res.status === 401 || res.status === 403) {
+        return {
+          comunicado: null,
+          salvoLocalmente: false,
+          error: json?.error || "Sua conta não tem permissão para publicar este comunicado.",
+        };
+      }
+
+      console.warn("[announcementsService] Servidor recusou:", json?.error || res.status);
     } catch (err: any) {
-      console.warn("[announcementsService] Exceção ao gravar no banco:", err?.message);
+      console.warn("[announcementsService] Falha ao publicar:", err?.message);
     }
   }
 

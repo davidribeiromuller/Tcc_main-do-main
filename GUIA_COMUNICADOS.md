@@ -106,13 +106,53 @@ select cron.schedule(
 escrever** — e a chave publicável está no bundle, então escrita liberada ali
 significaria qualquer visitante publicando aviso em nome de uma escola.
 
-A escrita hoje acontece direto pelo cliente autenticado apenas enquanto a
-policy de escrita permanecer fechada; para produção com escrita liberada, o
-caminho correto é uma Edge Function com a chave de serviço (mesmo padrão de
-`billing-api`), ainda não implementada. **Neste estado, publicar comunicado pelo
-navegador falha na RLS e cai no rascunho local**, com aviso honesto na tela.
+A escrita passa pela Edge Function **`announcements-api`** (publicada, ACTIVE),
+que usa a chave de serviço e decide a autorização no servidor:
 
-> Pendência declarada: falta a function `announcements-api` para escrita.
+| Ação | Quem pode |
+|---|---|
+| Publicar comunicado da escola | `school_admin` ou `school_staff` daquela escola |
+| Publicar comunicado para toda a rede | proprietário (`PLATFORM_OWNER_EMAILS`) |
+| Alterar / excluir | direção da escola do comunicado, ou o proprietário |
+| Ler | qualquer pessoa (comunicado publicado e não vencido) |
+
+Deploy:
+
+```bash
+supabase functions deploy announcements-api --no-verify-jwt
+```
+
+`verify_jwt=false` é necessário porque `/public` e `/publicar` autenticam
+por conta própria (`auth.getUser`), e `/public` precisa funcionar sem login.
+
+### Rotina de expiração
+
+```bash
+curl -X POST "https://jaoheenjltzzglfncgfq.supabase.co/functions/v1/announcements-api/lifecycle/expire" \
+  -H "Authorization: Bearer <service_role>"
+```
+
+Para agendar diariamente:
+
+```sql
+select cron.schedule(
+  'expirar-comunicados',
+  '0 4 * * *',
+  $$
+    select net.http_post(
+      url := 'https://jaoheenjltzzglfncgfq.supabase.co/functions/v1/announcements-api/lifecycle/expire',
+      headers := jsonb_build_object(
+        'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key'),
+        'Content-Type', 'application/json'
+      ),
+      body := '{}'::jsonb
+    );
+  $$
+);
+```
+
+> A leitura já filtra vencidos, então sem o cron nada vaza — o cron apenas
+> mantém o `status` do banco coerente.
 
 ## 3. Testes
 

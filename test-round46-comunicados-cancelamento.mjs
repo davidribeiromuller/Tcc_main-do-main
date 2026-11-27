@@ -67,7 +67,16 @@ checar(
 console.log("\n2. Serviço de comunicados");
 // ---------------------------------------------------------------------------
 checar("busca comunicados da escola + globais", /incluirGlobais/.test(anuncios));
-checar("publica no banco", /from\("school_announcements"\)\s*\n?\s*\.insert/.test(anuncios));
+checar(
+  "publica via Edge Function (não direto pelo cliente)",
+  /announcements-api/.test(anuncios) && /\/publicar/.test(anuncios),
+  "a tabela não dá escrita a anon: a chave publicável está no bundle"
+);
+checar(
+  "não tenta INSERT direto na tabela",
+  !/from\("school_announcements"\)[\s\S]{0,80}\.insert/.test(anuncios)
+);
+checar("401/403 não caem em rascunho local (são definitivos)", /res\.status === 401 \|\| res\.status === 403/.test(anuncios));
 checar("prazo padrão de 2 dias", /DIAS_PADRAO_COMUNICADO = 2/.test(anuncios));
 checar(
   "prazo conta a partir do FIM do evento, não da publicação",
@@ -136,6 +145,20 @@ checar("filtro 'Só os gerais'", /Só os gerais/.test(catalogo));
 checar("marca a origem (rede ou escola)", /Toda a rede/.test(catalogo));
 checar("mostra data de expiração", /Expira em/.test(catalogo));
 checar("estado vazio explicado", /Nenhum comunicado no ar/.test(catalogo));
+
+// ---------------------------------------------------------------------------
+console.log("\n6b. Edge Function de comunicados");
+// ---------------------------------------------------------------------------
+const fn = ler("supabase/functions/announcements-api/index.ts");
+checar("function existe", fn.length > 1000);
+checar("exige JWT para publicar", /resolverUsuario/.test(fn));
+checar("confere papel na instituição", /instituicaoDoUsuario/.test(fn));
+checar("global só para o proprietário", /exclusivo do proprietário da plataforma/.test(fn));
+checar("valida público-alvo", /PUBLICOS_VALIDOS/.test(fn));
+checar("expiração conta do fim do evento", /eventEndsAt \? new Date\(eventEndsAt\) : new Date\(\)/.test(fn));
+checar("excluir é soft delete", /status: "deleted"/.test(fn) && !/\.delete\(\)/.test(fn));
+checar("auditoria registrada", /auditar\(admin/.test(fn));
+checar("rotina de expiração exige chave de serviço", /lifecycle\/expire/.test(fn));
 
 // ---------------------------------------------------------------------------
 console.log("\n7. Regressão: nada escolar foi reescrito");
