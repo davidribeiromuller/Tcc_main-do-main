@@ -43,6 +43,8 @@ import {
   createEventDirectInSupabase,
   updateEventDirectInSupabase,
   deleteEventDirectInSupabase,
+  cancelEventDirectInSupabase,
+  reactivateEventDirectInSupabase,
 } from "./lib/eventsService.ts";
 import {
   fetchUsersDirectFromSupabase,
@@ -1661,6 +1663,37 @@ export default function App() {
   };
 
   // Delete event
+  /**
+   * Cancela um evento sem apagar.
+   *
+   * Chamado pela tela de detalhe do evento. O evento continua na lista, com
+   * `isCanceled`, e o motivo fica em `requirements` — quem já se inscreveu
+   * abre o evento e vê por que não vai acontecer.
+   */
+  const handleCancelEvent = async (eventId: number, motivo: string) => {
+    if (!isSupabaseConfigured()) {
+      throw new Error("O banco de dados não está configurado neste ambiente.");
+    }
+    const { success, error } = await cancelEventDirectInSupabase(eventId, motivo);
+    if (!success) {
+      throw new Error(error?.message || "Não foi possível cancelar o evento.");
+    }
+    await loadEvents();
+    showToast("Evento cancelado.", "success");
+  };
+
+  const handleReactivateEvent = async (eventId: number) => {
+    if (!isSupabaseConfigured()) {
+      throw new Error("O banco de dados não está configurado neste ambiente.");
+    }
+    const { success, error } = await reactivateEventDirectInSupabase(eventId);
+    if (!success) {
+      throw new Error(error?.message || "Não foi possível reativar o evento.");
+    }
+    await loadEvents();
+    showToast("Evento reativado.", "success");
+  };
+
   const handleDeleteEvent = async (eventId: number) => {
     const previousEvents = [...events];
     try {
@@ -2512,6 +2545,8 @@ export default function App() {
                       currentUser={currentUser}
                       onNavigateBack={() => navigateTo("feed")}
                       onDeleteEvent={handleDeleteEvent}
+                      onCancelEvent={handleCancelEvent}
+                      onReactivateEvent={handleReactivateEvent}
                       onUpdateEvent={handleUpdateEvent}
                       isDeleting={isDeletingEvent}
                       onOpenMap={(eventId: number) => {

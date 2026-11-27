@@ -1,6 +1,14 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ARAUCARIA_SCHOOLS, SchoolProfile } from "../lib/schoolsData";
-import { Search, MapPin, Phone, Mail, GraduationCap, Building2, ArrowRight } from "lucide-react";
+import {
+  Search, MapPin, Phone, Mail, GraduationCap, Building2, ArrowRight,
+  Megaphone, Loader2, Globe, School,
+} from "lucide-react";
+import {
+  fetchComunicados,
+  ROTULOS_PUBLICO,
+  type Comunicado,
+} from "../lib/announcementsService.ts";
 
 interface SchoolsCatalogProps {
   onSelectSchool: (slug: string) => void;
@@ -17,6 +25,42 @@ export const SchoolsCatalog: React.FC<SchoolsCatalogProps> = ({
 }) => {
   const [search, setSearch] = useState("");
   const [selectedNeighborhood, setSelectedNeighborhood] = useState<string>("all");
+
+  /*
+    Aba de comunicados gerais.
+
+    Antes, comunicado só existia dentro da página de uma escola específica —
+    quem quisesse saber o que a rede toda anunciou tinha de entrar escola por
+    escola. Aqui a leitura é da REDE: os comunicados globais (publicados pela
+    plataforma) mais os de cada escola, com a origem marcada.
+  */
+  const [aba, setAba] = useState<"escolas" | "comunicados">("escolas");
+  const [comunicados, setComunicados] = useState<Comunicado[]>([]);
+  const [carregandoComunicados, setCarregandoComunicados] = useState(false);
+  const [erroComunicados, setErroComunicados] = useState<string | null>(null);
+  const [filtroOrigem, setFiltroOrigem] = useState<"todos" | "gerais">("todos");
+
+  useEffect(() => {
+    if (aba !== "comunicados") return;
+    let cancelado = false;
+
+    const carregar = async () => {
+      setCarregandoComunicados(true);
+      setErroComunicados(null);
+      // Sem `schoolId`: traz os globais + os de todas as escolas que a RLS
+      // permite (comunicado publicado e não vencido).
+      const { comunicados: lista, error } = await fetchComunicados({ incluirGlobais: true });
+      if (cancelado) return;
+      setComunicados(lista);
+      setErroComunicados(error);
+      setCarregandoComunicados(false);
+    };
+
+    void carregar();
+    return () => {
+      cancelado = true;
+    };
+  }, [aba]);
 
   const neighborhoods = ["all", "Centro", "Costeira", "Fazenda Velha", "Guajuvira (Zona Rural)", "Cachoeira"];
 
@@ -47,6 +91,143 @@ export const SchoolsCatalog: React.FC<SchoolsCatalogProps> = ({
         </p>
       </div>
 
+      {/* Abas: Escolas | Comunicados da rede */}
+      <div className="flex items-center gap-1.5 mb-5 border-b border-emerald-200/70">
+        <button
+          onClick={() => setAba("escolas")}
+          className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold border-b-2 -mb-px transition cursor-pointer ${
+            aba === "escolas"
+              ? "border-emerald-800 text-emerald-900"
+              : "border-transparent text-gray-500 hover:text-emerald-800"
+          }`}
+        >
+          <School className="w-4 h-4" />
+          Escolas
+        </button>
+        <button
+          onClick={() => setAba("comunicados")}
+          className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold border-b-2 -mb-px transition cursor-pointer ${
+            aba === "comunicados"
+              ? "border-emerald-800 text-emerald-900"
+              : "border-transparent text-gray-500 hover:text-emerald-800"
+          }`}
+        >
+          <Megaphone className="w-4 h-4" />
+          Comunicados da rede
+        </button>
+      </div>
+
+      {aba === "comunicados" ? (
+        <div className="mb-10">
+          <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+            <p className="text-xs text-gray-600">
+              Comunicados publicados pela plataforma e pelas escolas. Somem
+              automaticamente 2 dias depois de vencerem.
+            </p>
+            <div className="flex items-center gap-1.5">
+              {(["todos", "gerais"] as const).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setFiltroOrigem(f)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition cursor-pointer ${
+                    filtroOrigem === f
+                      ? "bg-emerald-800 text-white font-semibold"
+                      : "bg-white text-gray-700 hover:bg-emerald-50 border border-emerald-200/80"
+                  }`}
+                >
+                  {f === "todos" ? "Todos" : "Só os gerais"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {carregandoComunicados && (
+            <div className="flex items-center justify-center gap-2 py-12 text-sm text-gray-500">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Carregando comunicados…
+            </div>
+          )}
+
+          {!carregandoComunicados && erroComunicados && (
+            <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-800">
+              {erroComunicados}
+            </div>
+          )}
+
+          {!carregandoComunicados && !erroComunicados && (
+            (() => {
+              const lista = filtroOrigem === "gerais"
+                ? comunicados.filter((c) => !c.schoolId)
+                : comunicados;
+
+              if (lista.length === 0) {
+                return (
+                  <div className="rounded-2xl border border-emerald-200 bg-white p-8 text-center">
+                    <Megaphone className="w-8 h-8 text-emerald-700 mx-auto mb-2" />
+                    <p className="text-sm font-semibold text-gray-800">
+                      Nenhum comunicado no ar
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {filtroOrigem === "gerais"
+                        ? "A plataforma não publicou comunicados gerais."
+                        : "Quando uma escola publicar um aviso, ele aparece aqui."}
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {lista.map((c) => (
+                    <article
+                      key={c.id}
+                      className="rounded-2xl border border-emerald-200/80 bg-white p-4 shadow-2xs"
+                    >
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-emerald-50 text-emerald-800">
+                          {c.schoolId ? <School className="w-3 h-3" /> : <Globe className="w-3 h-3" />}
+                          {c.schoolId
+                            ? (schools.find((e) => String(e.id) === String(c.schoolId))?.shortName
+                                ?? c.schoolSlug
+                                ?? "Escola")
+                            : "Toda a rede"}
+                        </span>
+                        <span className="text-[10px] font-semibold text-slate-500 uppercase">
+                          {c.category}
+                        </span>
+                      </div>
+
+                      <h3 className="text-sm font-bold text-gray-900 leading-snug">
+                        {c.title}
+                      </h3>
+                      <p className="text-xs text-gray-600 mt-1 whitespace-pre-line">
+                        {c.body}
+                      </p>
+
+                      <div className="mt-3 flex items-center justify-between gap-2 text-[10px] text-gray-400">
+                        <span>
+                          {c.authorName ? `Por ${c.authorName}` : "eloEscola"}
+                          {" · "}
+                          {new Date(c.createdAt).toLocaleDateString("pt-BR")}
+                        </span>
+                        <span className="font-semibold">
+                          {ROTULOS_PUBLICO[c.audience]}
+                        </span>
+                      </div>
+                      {c.expiresAt && (
+                        <p className="mt-1 text-[10px] text-amber-700">
+                          Expira em {new Date(c.expiresAt).toLocaleDateString("pt-BR")}
+                        </p>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              );
+            })()
+          )}
+        </div>
+      ) : (
+        <>
       {/* Search and Neighborhood Filters */}
       <div className="flex flex-col sm:flex-row items-center gap-3 mb-6">
         <div className="relative flex-1 w-full">
@@ -156,6 +337,8 @@ export const SchoolsCatalog: React.FC<SchoolsCatalogProps> = ({
           </div>
         ))}
       </div>
+        </>
+      )}
     </div>
       </div>
   );

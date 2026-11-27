@@ -25,6 +25,7 @@ import {
   ShieldCheck,
   Trash2,
   X,
+  Ban,
 } from "lucide-react";
 import { Event, User, EventAttendanceAuthorization } from "../types";
 import { fetchStreetRoute } from "../lib/routing.ts";
@@ -46,6 +47,14 @@ interface EventDetailProps {
   currentUser: User | null;
   onNavigateBack: () => void;
   onDeleteEvent: (id: number) => Promise<void>;
+  /**
+   * Cancela o evento sem apagar. Recebe o motivo, que fica visível para quem já
+   * tinha se inscrito — excluir não serve para isso: apaga o registro e a
+   * pessoa nunca descobre o que aconteceu.
+   */
+  onCancelEvent?: (id: number, motivo: string) => Promise<void>;
+  /** Reverte um cancelamento feito por engano. */
+  onReactivateEvent?: (id: number) => Promise<void>;
   onUpdateEvent?: (id: number, data: any) => Promise<void>;
   isDeleting: boolean;
   onOpenMap?: (eventId: number) => void;
@@ -155,6 +164,8 @@ export default function EventDetail({
   currentUser,
   onNavigateBack,
   onDeleteEvent,
+  onCancelEvent,
+  onReactivateEvent,
   onUpdateEvent,
   isDeleting,
   onUserCoordsChange,
@@ -440,6 +451,11 @@ export default function EventDetail({
     return reqStr.split(",").map((s) => s.trim()).filter(Boolean);
   };
 
+  const [mostrarCancelamento, setMostrarCancelamento] = useState(false);
+  const [motivoCancelamento, setMotivoCancelamento] = useState("");
+  const [cancelando, setCancelando] = useState(false);
+  const [cancelamentoErro, setCancelamentoErro] = useState<string | null>(null);
+
   const canEdit = currentUser?.isAdmin || currentUser?.role === "Diretor" || (currentUser && event.creatorId === currentUser.id);
   const canDelete = currentUser?.isAdmin || currentUser?.role === "Diretor" || (currentUser && event.creatorId === currentUser.id);
 
@@ -494,12 +510,63 @@ export default function EventDetail({
     ? calculateDistanceKm(userCoords.lat, userCoords.lng, eventLat, eventLng)
     : null;
 
+  const confirmarCancelamento = async () => {
+    if (!onCancelEvent) return;
+    setCancelando(true);
+    setCancelamentoErro(null);
+    try {
+      await onCancelEvent(event.id, motivoCancelamento.trim());
+      setMostrarCancelamento(false);
+      onShowToast?.("Evento cancelado. Ele continua visível para quem já sabia dele.", "success");
+    } catch (err: any) {
+      setCancelamentoErro(err?.message || "Não foi possível cancelar o evento.");
+    } finally {
+      setCancelando(false);
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       className="flex flex-col w-full pb-bottom-nav touch-scroll text-brand-text-light dark:text-brand-text-dark bg-brand-bg-light dark:bg-brand-bg-dark"
     >
+      {/*
+        Aviso de cancelamento. Fica no topo, antes de qualquer conteúdo, porque
+        é a informação mais importante da tela: quem já tinha se inscrito abriu
+        o evento para saber se vai acontecer, e a resposta agora é "não".
+      */}
+      {event.isCanceled && (
+        <div className="mx-4 mt-3 rounded-2xl border-2 border-amber-400/60 bg-amber-50 dark:bg-amber-950/40 p-4 flex items-start gap-3">
+          <Ban size={20} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-bold text-amber-800 dark:text-amber-200">
+              Este evento foi cancelado
+            </p>
+            <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
+              {event.requirements?.includes("CANCELADO:")
+                ? event.requirements.split("CANCELADO:")[1].trim().split("\n")[0]
+                : "A organização cancelou este evento."}
+            </p>
+            {canEdit && onReactivateEvent && (
+              <button
+                onClick={async () => {
+                  try {
+                    await onReactivateEvent(event.id);
+                    onShowToast?.("Evento reativado.", "success");
+                  } catch (err: any) {
+                    onShowToast?.(err?.message || "Não foi possível reativar.", "error");
+                  }
+                }}
+                className="mt-2 text-xs font-semibold text-amber-800 dark:text-amber-200 underline underline-offset-2 cursor-pointer"
+              >
+                Reativar evento
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Sticky Top Header with Prominent Back Button */}
       <div className="sticky top-0 z-40 bg-brand-bg-light/95 dark:bg-brand-bg-dark/95 backdrop-blur-md px-4 py-3 border-b border-brand-primary/15 flex items-center justify-between shadow-xs">
         <button
@@ -564,6 +631,21 @@ export default function EventDetail({
               >
                 <Pencil size={14} />
                 <span className="hidden sm:inline">Editar</span>
+              </button>
+            )}
+
+            {canEdit && onCancelEvent && !event.isCanceled && (
+              <button
+                onClick={() => {
+                  setMotivoCancelamento("");
+                  setCancelamentoErro(null);
+                  setMostrarCancelamento(true);
+                }}
+                className="p-2 px-3 rounded-full bg-amber-500/90 hover:bg-amber-600 text-white flex items-center gap-1.5 shadow-lg backdrop-blur-md active:scale-95 transition-all cursor-pointer text-xs font-semibold"
+                title="Cancelar evento sem apagar"
+              >
+                <Ban size={14} />
+                <span className="hidden sm:inline">Cancelar</span>
               </button>
             )}
 
@@ -1126,6 +1208,60 @@ export default function EventDetail({
           onClose={() => setShowReceiptModal(false)}
           authorization={currentAuthorization}
         />
+
+        {/*
+          Modal de cancelamento. O motivo é opcional, mas é a única forma de
+          quem se inscreveu entender o que aconteceu — por isso ele aparece em
+          destaque no formulário.
+        */}
+        {mostrarCancelamento && (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm overflow-y-auto">
+            <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-brand-card-dark p-5 shadow-2xl">
+              <div className="flex items-center gap-2 mb-1">
+                <Ban size={18} className="text-amber-600" />
+                <h3 className="font-bold text-base">Cancelar evento</h3>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                O evento <strong>não será apagado</strong>: fica visível e marcado
+                como cancelado. Dá para reativar depois.
+              </p>
+
+              <label className="block text-xs font-semibold mb-1" htmlFor="motivo-cancelamento">
+                Motivo (opcional, mas recomendado)
+              </label>
+              <textarea
+                id="motivo-cancelamento"
+                value={motivoCancelamento}
+                onChange={(e) => setMotivoCancelamento(e.target.value)}
+                rows={3}
+                maxLength={500}
+                placeholder="Ex.: Chuva forte — a feira foi transferida para a semana que vem."
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-400"
+              />
+
+              {cancelamentoErro && (
+                <p className="mt-2 text-xs text-red-600 dark:text-red-400">{cancelamentoErro}</p>
+              )}
+
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  onClick={() => setMostrarCancelamento(false)}
+                  disabled={cancelando}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                >
+                  Voltar
+                </button>
+                <button
+                  onClick={confirmarCancelamento}
+                  disabled={cancelando}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {cancelando ? "Cancelando…" : "Confirmar cancelamento"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </AnimatePresence>
     </motion.div>
   );

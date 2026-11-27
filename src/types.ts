@@ -103,6 +103,11 @@ export interface Event {
   isSchool?: boolean | null;
   isArchived?: boolean;
   archivedAt?: string;
+  /**
+   * Evento cancelado. Diferente de excluído: continua visível, com o motivo
+   * registrado — quem já se inscreveu precisa saber que não vai acontecer.
+   */
+  isCanceled?: boolean;
 }
 
 export interface EventParticipationHistory {
