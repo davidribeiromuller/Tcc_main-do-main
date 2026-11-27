@@ -22,6 +22,9 @@ import { SchoolDetail } from "./components/SchoolDetail.tsx";
 import { SchoolsCatalog } from "./components/SchoolsCatalog.tsx";
 import SchoolPortal from "./components/SchoolPortal.tsx";
 import AIChatAssistant from "./components/AIChatAssistant.tsx";
+import PlansAndPricing from "./components/PlansAndPricing.tsx";
+import SchoolSubscription from "./components/SchoolSubscription.tsx";
+import MasterPanel from "./components/MasterPanel.tsx";
 import BackToDashboardButton from "./components/BackToDashboardButton.tsx";
 import { resolverTelaInicial, resolverTelaDoPopState, destinoDoBotaoVoltar } from "./lib/navigation.ts";
 import type { ContextoAcoes, CamposEvento } from "./lib/voiceActions.ts";
@@ -2388,6 +2391,59 @@ export default function App() {
                       onConsumirPreRascunho={() => setEventoPreRascunho(null)}
                       recarregarPessoais={recarregarPessoais}
                     />
+                  </motion.div>
+                )}
+
+                {/*
+                  Rodada 45 — telas comerciais. Seguem exatamente o mesmo padrão
+                  de `motion.div` das telas escolares acima, e ficam no mesmo
+                  ponto da árvore: é só mais um ramo do `activeScreen`.
+                  Nenhum roteador novo foi introduzido: `navigateTo()` e o mapa
+                  de `lib/navigation.ts` continuam sendo a única navegação.
+                */}
+                {activeScreen === "plans" && (
+                  <motion.div
+                    key="plans-tab"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="app-screen"
+                  >
+                    <PlansAndPricing onNavigate={navigateTo} />
+                  </motion.div>
+                )}
+
+                {activeScreen === "subscription" && (
+                  <motion.div
+                    key="subscription-tab"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="app-screen"
+                  >
+                    {/*
+                      A restrição de quem vê o quê é do servidor (Edge Function
+                      confere JWT + memberships). `canManage` aqui só decide se
+                      a tela mostra os controles ou o aviso de área restrita —
+                      nunca é a única barreira.
+                    */}
+                    <SchoolSubscription
+                      onNavigate={navigateTo}
+                      schoolSlug={selectedSchoolSlug}
+                      canManage={isChefeAdmin(currentUser)}
+                    />
+                  </motion.div>
+                )}
+
+                {activeScreen === "masterFinance" && (
+                  <motion.div
+                    key="master-finance-tab"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="app-screen"
+                  >
+                    <MasterPanel onNavigate={navigateTo} />
                   </motion.div>
                 )}
 
