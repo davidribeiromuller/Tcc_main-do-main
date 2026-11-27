@@ -80,6 +80,11 @@ export function mapSupabaseEventoToEvent(row: any): Event {
     requirements: requirements || null,
     description: row.descricao || row.description || null,
     creatorRole: organizador || "Diretoria Escolar",
+    creatorName: row.creator_name || null,
+    creatorEmail: row.creator_email || null,
+    authorizedByName: row.authorized_by_name || null,
+    authorizedByEmail: row.authorized_by_email || null,
+    authorizedAt: row.authorized_at || null,
     website: row.linkInscricao || row.link_inscricao || row.website || null,
     image: row.imagem || row.image || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600",
     createdAt: row.criadoEm || row.criado_em || row.createdAt || row.created_at || new Date().toISOString(),
@@ -134,6 +139,11 @@ export function mapSupabaseEventsTableToEvent(row: any): Event {
     requirements: row.requirements || null,
     description: row.description || null,
     creatorRole: row.creator_role || row.creatorRole || "Diretoria Escolar",
+    creatorName: row.creator_name || null,
+    creatorEmail: row.creator_email || null,
+    authorizedByName: row.authorized_by_name || null,
+    authorizedByEmail: row.authorized_by_email || null,
+    authorizedAt: row.authorized_at || null,
     website: row.website || null,
     image: row.image || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600",
     createdAt: row.created_at || row.createdAt || new Date().toISOString(),
@@ -255,6 +265,12 @@ export async function createEventDirectInSupabase(eventData: {
   website?: string | null;
   image?: string;
   creatorId?: number;
+  /** Nome de quem está criando — mostrado para o administrador. */
+  creatorName?: string | null;
+  creatorEmail?: string | null;
+  /** Quem autorizou a publicação (quando houver aprovação). */
+  authorizedByName?: string | null;
+  authorizedByEmail?: string | null;
   /** Campos extras usados ao aplicar uma sugestão da IA. */
   description?: string | null;
   category?: string | null;
@@ -326,6 +342,11 @@ export async function createEventDirectInSupabase(eventData: {
       website: eventData.website || null,
       image: eventData.image || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600",
       creator_id: eventData.creatorId || 2,
+      creator_name: eventData.creatorName ?? null,
+      creator_email: eventData.creatorEmail ?? null,
+      authorized_by_name: eventData.authorizedByName ?? null,
+      authorized_by_email: eventData.authorizedByEmail ?? null,
+      authorized_at: eventData.authorizedByName ? new Date().toISOString() : null,
       created_at: new Date().toISOString(),
       // Coordenadas resolvidas pela busca de endereço. Antes não existiam na
       // tabela e o mapa precisava estimar a posição de cada evento.

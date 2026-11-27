@@ -1621,6 +1621,23 @@ export default function App() {
 
   // Add event
   const handleAddEvent = async (eventData: any) => {
+    /*
+      Registra QUEM criou o evento. Antes o banco guardava só `creator_id` e o
+      administrador via "Diretoria Escolar", genérico — sem nome, uma auditoria
+      não responde a pergunta que importa.
+    */
+    const comAutor = {
+      ...eventData,
+      creatorId: currentUser?.id ?? eventData?.creatorId,
+      creatorName: currentUser?.nome ?? eventData?.creatorName ?? null,
+      creatorEmail: currentUser?.email ?? eventData?.creatorEmail ?? null,
+      // Quem cria já está publicando; se no futuro houver aprovação de
+      // terceiros, `authorizedBy*` continua livre para ser preenchido.
+      authorizedByName: eventData?.authorizedByName ?? null,
+      authorizedByEmail: eventData?.authorizedByEmail ?? null,
+    };
+    eventData = comAutor;
+
     try {
       // 1. Tentar salvar diretamente no Supabase (GitHub Pages / Produção)
       if (isSupabaseConfigured()) {

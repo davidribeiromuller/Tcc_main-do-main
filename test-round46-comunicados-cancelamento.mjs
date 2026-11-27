@@ -171,6 +171,27 @@ checar(
 );
 
 // ---------------------------------------------------------------------------
+console.log("\n8. Confirmar e DESISTIR da presença (ponta a ponta na UI)");
+// ---------------------------------------------------------------------------
+const rsvp = ler("src/lib/rsvpService.ts");
+const painel = ler("src/components/AdminPanel.tsx");
+
+checar("migration de confirmações existe", /event_rsvps/.test(ler("supabase/migrations/20261127c_confirmacoes.sql")));
+checar("tabela com chave única por evento e pessoa", /unique[\s\S]{0,80}\(event_id, *user_id\)/i.test(ler("supabase/migrations/20261127c_confirmacoes.sql")));
+checar("status limitado a confirmed/canceled", /'confirmed'[\s\S]{0,40}'canceled'/.test(ler("supabase/migrations/20261127c_confirmacoes.sql")));
+checar("serviço expõe confirmar", /export async function confirmarPresenca/.test(rsvp));
+checar("serviço expõe cancelar", /export async function cancelarPresenca/.test(rsvp));
+checar("cancelar grava o motivo/data", /canceled_reason/.test(rsvp) && /canceled_at/.test(rsvp));
+checar("app consulta a situação ao abrir o evento", /consultarPresenca/.test(detalhe));
+checar("botão de desistir existe na tela", /Desistir da presença/.test(detalhe));
+checar("desistir chama o serviço", /desistirDaPresenca[\s\S]{0,400}cancelarPresenca/.test(detalhe));
+checar("botão só aparece para quem confirmou", /situacaoRsvp === "confirmed"/.test(detalhe));
+checar("dá para confirmar de novo depois de desistir", /Confirmar presença novamente/.test(detalhe));
+checar("inscrição também grava no banco", /handleEnroll[\s\S]{0,900}confirmarPresenca/.test(detalhe));
+checar("painel mostra o total de confirmados", /confirmadosPorEvento/.test(painel) && /listarConfirmados/.test(painel));
+checar("painel mostra quem autorizou o evento", /authorizedByName \|\| .*creatorName|creatorName \|\|/.test(painel));
+
+// ---------------------------------------------------------------------------
 console.log("\n" + "─".repeat(66));
 if (falhas.length === 0) {
   console.log(`✅ ${ok} verificações OK, 0 falha(s)`);

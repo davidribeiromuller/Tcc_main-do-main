@@ -31,6 +31,12 @@ import { Event, User, EventAttendanceAuthorization } from "../types";
 import { fetchStreetRoute } from "../lib/routing.ts";
 import { fetchJsonApi } from "../lib/staticHosting.ts";
 import { recordEventParticipation, recordRouteCalculation } from "../lib/userStats.ts";
+import {
+  confirmarPresenca,
+  cancelarPresenca,
+  consultarPresenca,
+  type SituacaoRsvp,
+} from "../lib/rsvpService.ts";
 import ParentalAuthorizationModal from "./ParentalAuthorizationModal.tsx";
 import {
   saveCoords,
@@ -249,7 +255,38 @@ export default function EventDetail({
     }
   }, [currentUser, event?.id]);
 
-  const handleEnroll = () => {
+  // Situação da minha confirmação, lida do banco.
+  useEffect(() => {
+    let cancelado = false;
+    const carregar = async () => {
+      if (!currentUser?.id || !event?.id) return;
+      const { situacao } = await consultarPresenca(event.id, Number(currentUser.id));
+      if (!cancelado) setSituacaoRsvp(situacao);
+    };
+    void carregar();
+    return () => {
+      cancelado = true;
+    };
+  }, [currentUser?.id, event?.id]);
+
+  /** Desistir da presença: o evento continua acontecendo, eu é que não vou. */
+  const desistirDaPresenca = async () => {
+    if (!currentUser?.id || salvandoRsvp) return;
+    setSalvandoRsvp(true);
+    try {
+      const { error } = await cancelarPresenca(event.id, Number(currentUser.id));
+      if (error) {
+        onShowToast?.(error, "error");
+        return;
+      }
+      setSituacaoRsvp("canceled");
+      onShowToast?.("Sua presença foi cancelada. O evento continua na agenda.", "info");
+    } finally {
+      setSalvandoRsvp(false);
+    }
+  };
+
+  const handleEnroll = async () => {
     if (isStudent) {
       if (currentAuthorization) {
         setShowReceiptModal(true);
@@ -263,7 +300,21 @@ export default function EventDetail({
     }
 
     if (currentUser) {
+      // Mantém o contador local (já existia) E grava no banco, que é o que o
+      // organizador enxerga. Sem o segundo passo, confirmar presença não saía
+      // do aparelho.
       recordEventParticipation(currentUser.id, event.id);
+      setSalvandoRsvp(true);
+      try {
+        const { error } = await confirmarPresenca(event.id, Number(currentUser.id));
+        if (error) {
+          onShowToast?.(`Não foi possível registrar sua presença: ${error}`, "error");
+        } else {
+          setSituacaoRsvp("confirmed");
+        }
+      } finally {
+        setSalvandoRsvp(false);
+      }
     }
     if (event.website) {
       const isInIframe = typeof window !== "undefined" && window.self !== window.top;
@@ -450,6 +501,16 @@ export default function EventDetail({
     if (!reqStr) return ["Nenhum requisito ou comprovante obrigatório declarado."];
     return reqStr.split(",").map((s) => s.trim()).filter(Boolean);
   };
+
+  /**
+   * Situação da MINHA confirmação de presença.
+   *
+   * Antes isto só existia em `localStorage` e não havia como desistir: o
+   * "cancelar evento" é o organizador desmarcando tudo. Aqui é a pessoa
+   * dizendo "eu não vou".
+   */
+  const [situacaoRsvp, setSituacaoRsvp] = useState<SituacaoRsvp>("none");
+  const [salvandoRsvp, setSalvandoRsvp] = useState(false);
 
   const [mostrarCancelamento, setMostrarCancelamento] = useState(false);
   const [motivoCancelamento, setMotivoCancelamento] = useState("");
@@ -903,19 +964,51 @@ export default function EventDetail({
             </button>
           </div>
         ) : (
-          <button
-            onClick={handleEnroll}
-            className="w-full h-13 mt-2 bg-brand-primary text-white font-semibold rounded-2xl flex items-center justify-center gap-2 hover:opacity-95 active:scale-98 transition-all shadow-md cursor-pointer"
-          >
-            {isStudent ? (
-              <>
-                <ShieldCheck size={18} />
-                <span>Confirmar Presença (Requer Assinatura do Responsável)</span>
-              </>
+          <>
+            {/*
+              Quando a pessoa JÁ confirmou, o botão principal vira "desistir".
+              Antes não havia saída: confirmar presença era irreversível pelo
+              app, e o "cancelar" existente era o organizador desmarcando o
+              evento para todos — coisas diferentes.
+            */}
+            {situacaoRsvp === "confirmed" ? (
+              <div className="mt-2 space-y-2">
+                <div className="rounded-2xl border border-emerald-300 bg-emerald-50 dark:bg-emerald-950/30 p-3 flex items-center gap-2">
+                  <CheckCircle size={16} className="text-emerald-700 dark:text-emerald-400 shrink-0" />
+                  <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                    Sua presença está confirmada
+                  </p>
+                </div>
+                <button
+                  onClick={desistirDaPresenca}
+                  disabled={salvandoRsvp}
+                  className="w-full h-12 border-2 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 font-semibold rounded-2xl flex items-center justify-center gap-2 hover:bg-slate-50 dark:hover:bg-white/5 active:scale-98 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <X size={16} />
+                  <span>{salvandoRsvp ? "Cancelando…" : "Desistir da presença"}</span>
+                </button>
+              </div>
             ) : (
-              <span>Inscrever-se / Garantir Vaga</span>
+              <button
+                onClick={handleEnroll}
+                disabled={salvandoRsvp}
+                className="w-full h-13 mt-2 bg-brand-primary text-white font-semibold rounded-2xl flex items-center justify-center gap-2 hover:opacity-95 active:scale-98 transition-all shadow-md cursor-pointer disabled:opacity-50"
+              >
+                {isStudent ? (
+                  <>
+                    <ShieldCheck size={18} />
+                    <span>Confirmar Presença (Requer Assinatura do Responsável)</span>
+                  </>
+                ) : (
+                  <span>
+                    {situacaoRsvp === "canceled"
+                      ? "Confirmar presença novamente"
+                      : "Inscrever-se / Garantir Vaga"}
+                  </span>
+                )}
+              </button>
             )}
-          </button>
+          </>
         )}
       </div>
 
